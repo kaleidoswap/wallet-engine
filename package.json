@@ -1,0 +1,31 @@
+{
+  "name": "@kaleidorg/wallet-protocols",
+  "version": "1.0.0-beta.1",
+  "description": "Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "prepublishOnly": "npm run build"
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "kaleido-sdk": "file:../kaleido-sdk/typescript-sdk",
+    "@scure/bip39": "^1.4.0",
+    "@scure/bip32": "^1.5.0"
+  },
+  "optionalDependencies": {
+    "@buildonspark/spark-sdk": "*",
+    "@arkade-os/sdk": "*",
+    "@flashnet/sdk": "*"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "license": "MIT"
+}

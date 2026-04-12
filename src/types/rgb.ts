@@ -1,0 +1,99 @@
+/**
+ * RGB Protocol Types
+ * Ported from rate-extension/src/protocols/types/rgb.ts
+ */
+
+import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
+
+export interface RgbConfig extends BaseProtocolConfig {
+  protocol: 'RGB'
+  makerUrl?: string
+  nodeUrl: string
+  jwt?: string
+  apiKey?: string
+}
+
+export interface RgbAssetMetadata {
+  assetId: string
+  contractId?: string
+  schema: 'Nia' | 'Cfa' | string
+  issuedSupply: number
+  timestamp: number
+  addedAt: number
+  details?: string
+}
+
+export interface RgbChannel {
+  channelId: string
+  peerPubkey: string
+  capacitySat: number
+  localBalanceSat: number
+  remoteBalanceSat: number
+  isActive: boolean
+  isUsable: boolean
+  assetId?: string
+  assetLocalAmount?: number
+  assetRemoteAmount?: number
+}
+
+export interface RgbInvoice {
+  invoice: string
+  recipientId: string
+  assetId: string
+  expiresAt: number
+}
+
+export interface RgbTransfer {
+  txid?: string
+  recipientId: string
+  assetId: string
+  amount: number
+  status: 'pending' | 'confirmed' | 'failed'
+  timestamp: number
+}
+
+export interface KaleidoswapQuote {
+  rfqId: string
+  fromAsset: string
+  fromAmount: number
+  toAsset: string
+  toAmount: number
+  price: number
+  fee: {
+    baseFee: number
+    variableFee: number
+    feeRate: number
+    finalFee: number
+    feeAsset: string
+    feeAssetPrecision: number
+  }
+  timestamp: number
+  expiresAt: number
+}
+
+export interface RgbNodeInfo {
+  pubkey: string
+  alias?: string
+  network: string
+  blockHeight: number
+  syncStatus?: {
+    synced: boolean
+    progress: number
+  }
+  version?: string
+}
+
+export interface TradingPair {
+  id?: string
+  baseAsset: string
+  baseAssetId: string
+  basePrecision: number
+  quoteAsset: string
+  quoteAssetId: string
+  quotePrecision: number
+  isActive: boolean
+  minBaseOrderSize: number
+  maxBaseOrderSize: number
+  minQuoteOrderSize: number
+  maxQuoteOrderSize: number
+}
