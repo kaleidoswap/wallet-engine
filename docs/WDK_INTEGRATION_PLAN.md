@@ -183,7 +183,15 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
       `LIQUID_USDT_ASSET_ID` exported for the lite-mode "USD" mapping. Send via
       `transfer`/`sendAsset`/`sendBtcOnchain`. Remaining: per-tx asset+amount enrichment in
       `listTransactions` (lwk summary is sparse).
-- [ ] `ArkadeAdapter` → `@arkade-os/arkade-wdk`.
+- [x] **`ArkadeAdapter` → `@arkade-os/wdk` — done (2026-06-03):** VTXO L2 (off-chain Ark
+      transfers + on-chain boarding + Lightning receive via Boltz). **Package name is
+      `@arkade-os/wdk`** (NOT `arkade-wdk`), v0.1.3, **GitHub-only (not on npm)** — must be
+      vendored/installed before runtime. Typechecks clean against the JSDoc interface from the
+      cloned source. Maps getAddress/getBoardingAddress/getBalance/transfer/sendTransaction +
+      `createLightningInvoice(amountSats, description)` (positional). **Gaps in v0.1.3:**
+      Lightning *send* (pay BOLT11) not exposed (Boltz submarine, throws NOT_SUPPORTED);
+      no token enumeration (BTC-only `listAssets`, like Spark). Live-load proof deferred
+      (needs the module vendored + deps installed).
 - [ ] Native SDK stays as per-protocol fallback where the WDK module is too beta.
 - **Exit:** all protocols register + pass send/receive/balance in `rate`. Blast-radius test passes.
 
