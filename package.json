@@ -28,6 +28,12 @@
     "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.2",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2"
   },
+  "devDependencies": {
+    "@buildonspark/spark-sdk": "^0.7.10",
+    "@arkade-os/sdk": "^0.4.14",
+    "@flashnet/sdk": "^0.5.7",
+    "typescript": "~5.9.3"
+  },
   "publishConfig": {
     "access": "public"
   },
