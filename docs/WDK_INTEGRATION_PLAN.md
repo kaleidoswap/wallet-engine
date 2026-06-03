@@ -165,8 +165,17 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
 - [ ] `listAssets`: enumerate Spark tokens (WDK `getBalance` is BTC-sats only; needs the
       underlying token balance map — small WDK-wrapper extension).
 - [ ] Confirm `LightningReceiveRequest` field names (encodedInvoice/paymentHash) on a live invoice.
-- [ ] Swap `rate`'s Spark path native → WDK behind the Redux view-model.
-- **Exit:** a real Spark send+receive in `rate` runs entirely through the WDK adapter. Pattern proven.
+- [x] **Wire WDK engine into `rate` (2026-06-03, branch `feat/wdk-engine`):** RN-friendly
+      module loader added to the engine (`registerWdkModule`/`loadWdkModule`) so adapters use a
+      static `require()` under Metro instead of dynamic `import()` (fallback kept for Node/Vite).
+      `rate/services/protocols/wdk.ts` registers loaders + a WDK `ProtocolManager` (all 4
+      adapters) + `initializeWdkProtocols()` (mirrors native init, adds LIQUID branch).
+      `index.ts` gates via `WALLET_ENGINE` (`EXPO_PUBLIC_WALLET_ENGINE=wdk`), default native.
+      **rate typechecks 0 errors.** WDK module deps declared (file: siblings; `@arkade-os/wdk`
+      pending vendoring).
+- **Exit (pending live run):** a real Spark send+receive in `rate` through the WDK adapter.
+  Remaining to RUN on-device: `pnpm install` the WDK modules + Metro config (WASM for lwk,
+  `sodium-javascript` alias for spark, Bare-on-mobile) + funded nodes.
 
 ### Phase 3 — Fan out (parallel tracks) — ~3–5 wk
 - [x] **`RlnAdapter` → `@kaleidorg/wdk-wallet-rln` — done (2026-06-03):** the RGB path
