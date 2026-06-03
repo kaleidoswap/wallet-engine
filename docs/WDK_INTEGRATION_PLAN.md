@@ -169,7 +169,13 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
 - **Exit:** a real Spark send+receive in `rate` runs entirely through the WDK adapter. Pattern proven.
 
 ### Phase 3 — Fan out (parallel tracks) — ~3–5 wk
-- [ ] `RlnAdapter` → `@kaleidorg/wdk-wallet-rln` (move RGB wrapping down a layer).
+- [x] **`RlnAdapter` → `@kaleidorg/wdk-wallet-rln` — done (2026-06-03):** the RGB path
+      (BTC L1/LN + RGB assets L1/LN + channels + atomic swaps). Typechecks clean against the
+      rich RLN `.d.ts`; loads + constructs in Node with runtime methods matching the types.
+      Maps core contract + optional hooks (createRgbInvoice/decodeRgbInvoice/getInvoiceStatus/
+      sendAsset(sendRgb)/sendBtcOnchain) + `executeProtocolOperation` escape hatch for
+      channel/peer/swap ops. **Live node calls deferred** (needs a running RLN node — same as
+      Spark live send/receive).
 - [x] **`LiquidAdapter` → `@kaleidorg/wdk-wallet-liquid` — done early (2026-06-03):** the "USD"
       path. Typechecks clean; derived a real testnet address `tlq1qq…` offline. Native
       `listAssets()`/`getTokenBalance()` → USDt enumeration works (no upstream gap, unlike
