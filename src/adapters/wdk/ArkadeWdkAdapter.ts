@@ -38,6 +38,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { loadWdkModule } from './moduleLoader'
 
 export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   protocol: 'ARKADE'
@@ -65,7 +66,7 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     if (!cfg.mnemonic) throw new ProtocolError('ArkadeWdkAdapter requires a mnemonic', 'ARKADE', 'CONFIG')
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — external module, resolved at runtime in the consuming app.
-    const mod = await import('@arkade-os/wdk')
+    const mod = await loadWdkModule('@arkade-os/wdk', () => import('@arkade-os/wdk'))
     const WalletManagerArkade = mod.default ?? mod.WalletManagerArkade ?? mod
     this.manager = new WalletManagerArkade(cfg.mnemonic, cfg.arkadeConfig ?? {})
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)

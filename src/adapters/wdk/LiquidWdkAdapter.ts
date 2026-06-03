@@ -39,6 +39,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { loadWdkModule } from './moduleLoader'
 
 /** Well-known Liquid mainnet Tether USD (USDt) asset id — the lite-mode "USD". */
 export const LIQUID_USDT_ASSET_ID =
@@ -88,7 +89,7 @@ export class LiquidWdkAdapter implements IProtocolAdapter {
     }
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
-    const mod = await import('@kaleidorg/wdk-wallet-liquid')
+    const mod = await loadWdkModule('@kaleidorg/wdk-wallet-liquid', () => import('@kaleidorg/wdk-wallet-liquid'))
     const LiquidWalletManager = mod.default ?? mod
     this.manager = new LiquidWalletManager(cfg.mnemonic, {
       network: LIQUID_NETWORK_MAP[this.network] ?? 'mainnet',

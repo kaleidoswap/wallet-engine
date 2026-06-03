@@ -36,6 +36,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { loadWdkModule } from './moduleLoader'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB'
@@ -72,7 +73,7 @@ export class RlnWdkAdapter implements IProtocolAdapter {
     if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB', 'CONFIG')
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
-    const mod = await import('@kaleidorg/wdk-wallet-rln')
+    const mod = await loadWdkModule('@kaleidorg/wdk-wallet-rln', () => import('@kaleidorg/wdk-wallet-rln'))
     const RlnWalletManager = mod.default ?? mod
     this.manager = new RlnWalletManager(cfg.mnemonic, { nodeUrl: cfg.nodeUrl })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)

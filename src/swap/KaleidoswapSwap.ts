@@ -10,6 +10,7 @@
  */
 
 import { Quote, QuoteRequest, SwapResult, ProtocolError } from '../types/base'
+import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 
 export interface KaleidoswapSwapConfig {
   /** KaleidoSwap maker API base URL. */
@@ -41,7 +42,7 @@ export class KaleidoswapSwap {
   private async ensure(): Promise<any> {
     if (this.proto) return this.proto
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
-    const mod = await import('@kaleidorg/wdk-protocol-swap-kaleidoswap')
+    const mod = await loadWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () => import('@kaleidorg/wdk-protocol-swap-kaleidoswap'))
     const KaleidoswapProtocol = mod.default ?? mod
     this.proto = new KaleidoswapProtocol(this.account, { baseUrl: this.config.baseUrl })
     return this.proto
