@@ -38,10 +38,20 @@ import {
   Address,
   ConnectionInfo,
   TransactionFilter,
+  TransactionStatus,
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
 import { loadWdkModule } from './moduleLoader'
+import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
+
+/** Map a spark-sdk Transfer proto status → domain TransactionStatus. */
+function mapSparkStatus(s?: string): TransactionStatus {
+  const v = String(s ?? '').toUpperCase()
+  if (v.includes('COMPLET')) return 'confirmed'
+  if (v.includes('FAIL') || v.includes('EXPIRED') || v.includes('RETURN')) return 'failed'
+  return 'pending'
+}
 
 export interface SparkAdapterConfig extends BaseProtocolConfig {
   protocol: 'SPARK'
@@ -266,19 +276,36 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     return Math.max(5, Math.ceil(amount * 0.005))
   }
 
-  // --- Contract methods stubbed until Phase 2 -----------------------------
-  async decodeInvoice(_invoice: string): Promise<DecodedInvoice> {
-    throw this.notImplemented('decodeInvoice')
+  // --- Transactions -------------------------------------------------------
+  async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
+    const dest = invoice.trim()
+    if (isBolt11(dest)) {
+      const { amountSat } = decodeBolt11(dest)
+      return { paymentHash: '', amount: amountSat, expiresAt: 0, destination: dest }
+    }
+    // Spark invoice/address — no on-device decode; surface the raw value.
+    return { paymentHash: '', expiresAt: 0, destination: dest }
   }
-  async getPaymentStatus(_paymentHash: string): Promise<PaymentStatus> {
-    throw this.notImplemented('getPaymentStatus')
+
+  async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
+    this.assertConnected()
+    const t: any = await this.account.getTransactionReceipt(paymentHash).catch(() => null)
+    return { paymentHash, status: mapSparkStatus(t?.status), amount: t ? Number(t.totalValue ?? 0) : undefined }
   }
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
-    throw this.notImplemented('listTransactions')
+
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+    this.assertConnected()
+    const transfers: any[] = await this.account.getTransfers({ limit: filter?.limit ?? 50, skip: filter?.offset ?? 0 })
+    return (transfers ?? []).map((t) => this.toUnifiedTx(t))
   }
-  async getTransaction(_txId: string): Promise<UnifiedTransaction> {
-    throw this.notImplemented('getTransaction')
+
+  async getTransaction(txId: string): Promise<UnifiedTransaction> {
+    this.assertConnected()
+    const t: any = await this.account.getTransactionReceipt(txId)
+    if (!t) throw new ProtocolError(`Unknown tx ${txId}`, 'SPARK', 'NO_TX')
+    return this.toUnifiedTx(t)
   }
+
   async getNodeInfo(): Promise<any> {
     return { protocol: 'SPARK', network: this.network }
   }
@@ -286,13 +313,41 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     return [] // Spark has no LN channels
   }
   async listPayments(): Promise<any> {
-    throw this.notImplemented('listPayments')
+    // Outgoing transfers only.
+    const txs = await this.listTransactions()
+    return txs.filter((t) => t.type === 'send')
   }
   async listTransfers(): Promise<any> {
-    throw this.notImplemented('listTransfers')
+    this.assertConnected()
+    return this.account.getTransfers({ limit: 100 })
   }
   supportsSwaps(): boolean {
     return getCapabilities('SPARK').supportsSwaps
+  }
+
+  /** Map a spark-sdk Transfer (proto) → domain UnifiedTransaction (fields read defensively). */
+  private toUnifiedTx(t: any): UnifiedTransaction {
+    const dir = String(t?.transferDirection ?? t?.direction ?? '').toUpperCase()
+    const isReceive = dir.includes('INCOMING') || dir.includes('RECEIV')
+    const tsRaw = t?.createdTime ?? t?.updatedTime ?? t?.createdAt
+    const timestamp =
+      typeof tsRaw === 'number'
+        ? tsRaw
+        : tsRaw?.seconds
+          ? Number(tsRaw.seconds) * 1000
+          : tsRaw
+            ? new Date(tsRaw).getTime()
+            : 0
+    return {
+      id: t?.id ?? t?.sparkId ?? '',
+      type: isReceive ? 'receive' : 'send',
+      status: mapSparkStatus(t?.status),
+      timestamp,
+      amount: Number(t?.totalValue ?? t?.value ?? 0),
+      amountDisplay: '',
+      asset: undefined as unknown as UnifiedAsset,
+      protocolData: t,
+    }
   }
 
   // --- helpers ------------------------------------------------------------
@@ -300,8 +355,5 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     if (!this.connected || !this.account) {
       throw new ProtocolError('SparkWdkAdapter not connected', 'SPARK', 'NOT_CONNECTED')
     }
-  }
-  private notImplemented(method: string): ProtocolError {
-    return new ProtocolError(`SparkWdkAdapter.${method} not implemented (Phase 2)`, 'SPARK', 'NOT_IMPLEMENTED')
   }
 }

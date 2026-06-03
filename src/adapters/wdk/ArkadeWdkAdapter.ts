@@ -39,6 +39,7 @@ import {
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
 import { loadWdkModule } from './moduleLoader'
+import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 
 export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   protocol: 'ARKADE'
@@ -167,8 +168,13 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     throw new ProtocolError('Arkade on-chain receive uses getReceiveAddress/getBoardingAddress', 'ARKADE', 'NOT_SUPPORTED')
   }
 
-  async decodeInvoice(_invoice: string): Promise<DecodedInvoice> {
-    throw new ProtocolError('decodeInvoice not implemented for Arkade (Phase 3)', 'ARKADE', 'NOT_IMPLEMENTED')
+  async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
+    const dest = invoice.trim()
+    if (isBolt11(dest)) {
+      const { amountSat } = decodeBolt11(dest)
+      return { paymentHash: '', amount: amountSat, expiresAt: 0, destination: dest }
+    }
+    return { paymentHash: '', expiresAt: 0, destination: dest }
   }
 
   // --- Send ---------------------------------------------------------------
@@ -199,8 +205,11 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     return this.account.transfer({ token: params.token, recipient: params.recipient, amount: params.amount })
   }
 
-  async getPaymentStatus(_paymentHash: string): Promise<PaymentStatus> {
-    throw new ProtocolError('getPaymentStatus not implemented for Arkade (Phase 3)', 'ARKADE', 'NOT_IMPLEMENTED')
+  async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
+    this.assertConnected()
+    const r: any = await this.account.getTransactionReceipt?.(paymentHash).catch(() => null)
+    const status = (r?.confirmedAt || r?.settled ? 'confirmed' : 'pending') as TransactionStatus
+    return { paymentHash, status }
   }
 
   // --- Transactions -------------------------------------------------------
