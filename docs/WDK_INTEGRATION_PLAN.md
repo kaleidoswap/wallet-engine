@@ -156,7 +156,13 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
 
 ### Phase 3 — Fan out (parallel tracks) — ~3–5 wk
 - [ ] `RlnAdapter` → `@kaleidorg/wdk-wallet-rln` (move RGB wrapping down a layer).
-- [ ] `LiquidAdapter` → `@kaleidorg/wdk-wallet-liquid` (**NEW**; map "USD" → Liquid USDt asset).
+- [x] **`LiquidAdapter` → `@kaleidorg/wdk-wallet-liquid` — done early (2026-06-03):** the "USD"
+      path. Typechecks clean; derived a real testnet address `tlq1qq…` offline. Native
+      `listAssets()`/`getTokenBalance()` → USDt enumeration works (no upstream gap, unlike
+      Spark). On-chain only: `createInvoice` throws NOT_SUPPORTED, receive = `getReceiveAddress`.
+      `LIQUID_USDT_ASSET_ID` exported for the lite-mode "USD" mapping. Send via
+      `transfer`/`sendAsset`/`sendBtcOnchain`. Remaining: per-tx asset+amount enrichment in
+      `listTransactions` (lwk summary is sparse).
 - [ ] `ArkadeAdapter` → `@arkade-os/arkade-wdk`.
 - [ ] Native SDK stays as per-protocol fallback where the WDK module is too beta.
 - **Exit:** all protocols register + pass send/receive/balance in `rate`. Blast-radius test passes.
