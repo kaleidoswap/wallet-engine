@@ -3,16 +3,6 @@
     "target": "ES2020",
     "module": "ES2020",
     "lib": ["ES2020", "DOM"],
-    "paths": {
-      "kaleido-sdk": ["../rate/node_modules/kaleido-sdk"],
-      "kaleido-sdk/rln": ["../rate/node_modules/kaleido-sdk/dist/rln"],
-      "kaleido-sdk/*": ["../rate/node_modules/kaleido-sdk/*"],
-      "@flashnet/sdk": ["../rate/node_modules/@flashnet/sdk"],
-      "@arkade-os/sdk": ["../rate/node_modules/@arkade-os/sdk"],
-      "@buildonspark/spark-sdk": ["../rate/node_modules/@buildonspark/spark-sdk"],
-      "@scure/bip39": ["../rate/node_modules/@scure/bip39"],
-      "@scure/bip32": ["../rate/node_modules/@scure/bip32"]
-    },
     "declaration": true,
     "declarationMap": true,
     "sourceMap": true,

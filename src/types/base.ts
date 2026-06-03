@@ -4,7 +4,7 @@
  */
 
 // Protocol names
-export type ProtocolType = 'RGB' | 'SPARK' | 'ARKADE' | 'BTC'
+export type ProtocolType = 'RGB' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIQUID'
 
 // Layer types
 export type Layer =
@@ -12,10 +12,12 @@ export type Layer =
   | 'BTC_LN'          // Bitcoin Lightning
   | 'BTC_ARKADE'      // Bitcoin Arkade
   | 'BTC_SPARK'       // Bitcoin Spark
+  | 'BTC_LIQUID'      // L-BTC on Liquid
   | 'RGB_L1'          // RGB onchain
   | 'RGB_LN'          // RGB Lightning
   | 'SPARK_SPARK'     // Spark protocol
   | 'ARKADE_ARKADE'   // Arkade protocol
+  | 'LIQUID_ASSET'    // Liquid asset (e.g. USDt on Liquid — lite-mode "USD")
 
 // Asset interface - unified across all protocols
 export interface UnifiedAsset {
@@ -113,6 +115,8 @@ export interface InvoiceRequest {
   assetAmount?: number
   description?: string
   expirySeconds?: number
+  /** Optional target layer when a protocol can receive on more than one (e.g. Spark: BTC_LN vs SPARK_SPARK). */
+  layer?: Layer
 }
 
 export interface Invoice {
@@ -142,6 +146,8 @@ export interface DecodedInvoice {
 export interface PaymentRequest {
   invoice: string
   amount?: number
+  /** Cap on routing fee for Lightning sends (sats). Some protocols (Spark) require it. */
+  maxFeeSats?: number
 }
 
 export interface PaymentResult {
@@ -176,6 +182,7 @@ export type AddressFormat =
   | 'RGB_INVOICE'
   | 'SPARK_ADDRESS'
   | 'ARKADE_ADDRESS'
+  | 'LIQUID_ADDRESS'
 
 export interface ConnectionInfo {
   protocol: ProtocolType
