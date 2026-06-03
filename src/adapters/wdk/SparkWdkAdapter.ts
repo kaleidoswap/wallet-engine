@@ -41,6 +41,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { loadWdkModule } from './moduleLoader'
 
 export interface SparkAdapterConfig extends BaseProtocolConfig {
   protocol: 'SPARK'
@@ -77,9 +78,9 @@ export class SparkWdkAdapter implements IProtocolAdapter {
       throw new ProtocolError('SparkWdkAdapter requires a mnemonic', 'SPARK', 'CONFIG')
     }
     this.network = cfg.network ?? 'mainnet'
-    // Lazy import keeps the WDK module an optional dependency of the engine.
+    // Injectable loader (RN injects a static require; Node/Vite use the import fallback).
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
-    const mod = await import('@tetherto/wdk-wallet-spark')
+    const mod = await loadWdkModule('@tetherto/wdk-wallet-spark', () => import('@tetherto/wdk-wallet-spark'))
     const WalletManagerSpark = mod.default ?? mod
     this.manager = new WalletManagerSpark(cfg.mnemonic, {
       network: SPARK_NETWORK_MAP[this.network] ?? 'MAINNET',

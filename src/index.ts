@@ -32,6 +32,9 @@ export { RlnWdkAdapter, type RlnAdapterConfig } from './adapters/wdk/RlnWdkAdapt
 export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './adapters/wdk/ArkadeWdkAdapter'
 export { createWdkRegistry, type WdkRegistryOptions } from './registry/createWdkRegistry'
 
+// WDK module loader (RN injects static require; other hosts use dynamic import)
+export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './adapters/wdk/moduleLoader'
+
 // Cross-protocol router (chooses BETWEEN protocols)
 export {
   CrossProtocolRouter,
