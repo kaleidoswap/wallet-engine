@@ -117,8 +117,9 @@ export class SparkWdkAdapter implements IProtocolAdapter {
   // --- Balance ------------------------------------------------------------
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
     this.assertConnected()
-    const bal = await this.account.getBalance() // WDK shape held as `any`
-    const total = Number(bal?.balance ?? bal?.total ?? 0)
+    // WDK: getBalance(): Promise<bigint> — sats, settled balance.
+    const bal: bigint = await this.account.getBalance()
+    const total = Number(bal)
     return { confirmed: total, unconfirmed: 0, total }
   }
 
@@ -173,27 +174,42 @@ export class SparkWdkAdapter implements IProtocolAdapter {
   // --- Invoices / receive amounts ----------------------------------------
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
-    // Default to a Spark sats invoice; LN invoice when caller intends Lightning.
-    // TODO(Phase 2): confirm exact param shapes against the module's d.ts.
-    const raw =
-      request.asset && request.asset !== 'BTC'
-        ? await this.account.createSparkTokensInvoice({
-            tokenId: request.asset,
-            amount: request.assetAmount,
-            memo: request.description,
-          })
-        : await this.account.createSparkSatsInvoice({
-            amountSats: request.amount,
-            memo: request.description,
-          })
-    const invoice = typeof raw === 'string' ? raw : raw?.invoice ?? raw?.encoded ?? ''
-    return {
-      invoice,
-      paymentHash: raw?.paymentHash ?? raw?.id ?? '',
-      amount: request.amount,
-      expiresAt: raw?.expiresAt ?? Date.now() + (request.expirySeconds ?? 3600) * 1000,
-      description: request.description,
+    const expiresAt = Date.now() + (request.expirySeconds ?? 3600) * 1000
+
+    // 1) Lightning receive (BOLT11) — when the caller targets the LN layer.
+    if (request.layer === 'BTC_LN') {
+      // WDK createLightningInvoice({ amountSats, memo, expirySeconds }): LightningReceiveRequest
+      const r: any = await this.account.createLightningInvoice({
+        amountSats: request.amount ?? 0,
+        memo: request.description,
+        expirySeconds: request.expirySeconds,
+      })
+      const encoded = r?.invoice?.encodedInvoice ?? r?.encodedInvoice ?? r?.invoice ?? ''
+      return {
+        invoice: encoded,
+        paymentHash: r?.invoice?.paymentHash ?? r?.id ?? '',
+        amount: request.amount,
+        expiresAt,
+        description: request.description,
+      }
     }
+
+    // 2) Spark token invoice — returns a SparkAddressFormat string.
+    if (request.asset && request.asset !== 'BTC') {
+      const invoice: string = await this.account.createSparkTokensInvoice({
+        tokenIdentifier: request.asset,
+        amount: request.assetAmount != null ? BigInt(request.assetAmount) : undefined,
+        memo: request.description,
+      })
+      return { invoice, paymentHash: '', amount: request.assetAmount, expiresAt, description: request.description }
+    }
+
+    // 3) Default: native Spark sats invoice — returns a SparkAddressFormat string.
+    const invoice: string = await this.account.createSparkSatsInvoice({
+      amount: request.amount,
+      memo: request.description,
+    })
+    return { invoice, paymentHash: '', amount: request.amount, expiresAt, description: request.description }
   }
 
   // --- Send ---------------------------------------------------------------
@@ -201,18 +217,52 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     const dest = request.invoice.trim()
     const isBolt11 = /^ln(bc|tb|bcrt)/i.test(dest)
-    // TODO(Phase 2): confirm param shapes; spark/bolt11 routing.
-    const raw = isBolt11
-      ? await this.account.payLightningInvoice({ invoice: dest, maxFeeSats: undefined })
-      : await this.account.paySparkInvoice({ invoice: dest })
-    return {
-      paymentHash: raw?.paymentHash ?? raw?.id ?? '',
-      preimage: raw?.preimage,
-      amount: Number(raw?.amount ?? request.amount ?? 0),
-      fee: Number(raw?.fee ?? 0), // Spark = zero-fee (capability flag)
-      status: 'confirmed',
-      timestamp: Date.now(),
+    const timestamp = Date.now()
+
+    // 1) Lightning send — WDK requires a maxFeeSats cap.
+    if (isBolt11) {
+      const r: any = await this.account.payLightningInvoice({
+        invoice: dest,
+        maxFeeSats: request.maxFeeSats ?? this.defaultMaxFeeSats(request.amount),
+      })
+      return {
+        paymentHash: r?.paymentHash ?? r?.id ?? '',
+        preimage: r?.preimage,
+        amount: Number(r?.amountSats ?? request.amount ?? 0),
+        fee: Number(r?.feeSats ?? 0),
+        status: 'confirmed',
+        timestamp,
+      }
     }
+
+    // 2) Plain Spark address + explicit amount → direct transfer (zero-fee).
+    if (request.amount != null) {
+      const r: any = await this.account.sendTransaction({ to: dest, value: request.amount })
+      return {
+        paymentHash: r?.id ?? r?.transferId ?? '',
+        amount: request.amount,
+        fee: 0, // Spark transfers are zero-fee (capability flag)
+        status: 'confirmed',
+        timestamp,
+      }
+    }
+
+    // 3) Encoded Spark invoice (amount embedded) → fulfill. Takes an ARRAY.
+    const res: any = await this.account.paySparkInvoice([{ invoice: dest }])
+    const ok = res?.satsTransactionSuccess?.[0]
+    return {
+      paymentHash: ok?.transferResponse?.id ?? '',
+      amount: Number(request.amount ?? 0),
+      fee: 0,
+      status: ok ? 'confirmed' : 'failed',
+      timestamp,
+    }
+  }
+
+  /** Conservative default LN fee cap: 0.5% of amount, min 5 sats. */
+  private defaultMaxFeeSats(amount?: number): number {
+    if (!amount || amount <= 0) return 10
+    return Math.max(5, Math.ceil(amount * 0.005))
   }
 
   // --- Contract methods stubbed until Phase 2 -----------------------------

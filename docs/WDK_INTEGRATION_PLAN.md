@@ -138,8 +138,20 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
 `syncWalletBalance`, `toReadOnlyAccount`, `dispose`, `cleanupConnections`.
 
 ### Phase 2 — Spark vertical end-to-end in `rate` — ~2 wk
-- [ ] Complete `SparkWdkAdapter` (balance / receive / send / invoice).
-- [ ] Swap `rate`'s Spark path from native → WDK adapter behind the existing Redux view-model.
+- [x] `SparkWdkAdapter` wired to **real** WDK + spark-sdk signatures (typechecks clean): (2026-06-03)
+      - `getBtcBalance` ← `getBalance(): bigint`.
+      - `createInvoice` branches: `BTC_LN` → `createLightningInvoice({ amountSats,… })`;
+        token → `createSparkTokensInvoice({ tokenIdentifier, amount: bigint,… })` (string);
+        default → `createSparkSatsInvoice({ amount,… })` (string). Added optional
+        `InvoiceRequest.layer` (additive).
+      - `sendPayment` branches: BOLT11 → `payLightningInvoice({ invoice, maxFeeSats })`
+        (added optional `PaymentRequest.maxFeeSats` + safe default); plain address+amount →
+        `sendTransaction({ to, value })`; encoded Spark invoice → `paySparkInvoice([{ invoice }])`.
+      - Noted: spark-sdk ships a **React Native build** (`native/index.react-native.d.ts`) → good for `rate`.
+- [ ] `listAssets`: enumerate Spark tokens (WDK `getBalance` is BTC-sats only; needs the
+      underlying token balance map — small WDK-wrapper extension).
+- [ ] Confirm `LightningReceiveRequest` field names (encodedInvoice/paymentHash) on a live invoice.
+- [ ] Swap `rate`'s Spark path native → WDK behind the Redux view-model.
 - **Exit:** a real Spark send+receive in `rate` runs entirely through the WDK adapter. Pattern proven.
 
 ### Phase 3 — Fan out (parallel tracks) — ~3–5 wk

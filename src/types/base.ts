@@ -115,6 +115,8 @@ export interface InvoiceRequest {
   assetAmount?: number
   description?: string
   expirySeconds?: number
+  /** Optional target layer when a protocol can receive on more than one (e.g. Spark: BTC_LN vs SPARK_SPARK). */
+  layer?: Layer
 }
 
 export interface Invoice {
@@ -144,6 +146,8 @@ export interface DecodedInvoice {
 export interface PaymentRequest {
   invoice: string
   amount?: number
+  /** Cap on routing fee for Lightning sends (sats). Some protocols (Spark) require it. */
+  maxFeeSats?: number
 }
 
 export interface PaymentResult {
