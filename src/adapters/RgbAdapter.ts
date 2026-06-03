@@ -560,8 +560,9 @@ export class RgbAdapter implements IProtocolAdapter {
             ...(params.witness_data ? { witness_data: params.witness_data } : {}),
           }],
         },
+        // skip_sync is a valid runtime param; cast bridges kaleido-sdk type drift.
         skip_sync: false,
-      })
+      } as any)
     } catch (error: unknown) {
       throw this.handleSdkError(error, 'Failed to send RGB asset')
     }
