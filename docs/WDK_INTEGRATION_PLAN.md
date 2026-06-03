@@ -196,9 +196,19 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
 - **Exit:** all protocols register + pass send/receive/balance in `rate`. Blast-radius test passes.
 
 ### Phase 4 — Cross-protocol router + swap module — ~2 wk
-- [ ] Move `account-routing` / `route-resolver` logic into engine router.
-- [ ] Route swap/maker through `@kaleidorg/wdk-protocol-swap-kaleidoswap`.
-- **Exit:** any destination string resolves to the right protocol+route automatically.
+- [x] **Destination classifier (2026-06-03):** `router/destination.ts` — pure, dep-free
+      `classifyDestination()` → (kind, layer, format, candidate protocols, BIP21 lightning
+      fallback). **8/8 test cases pass** incl. real Spark/Liquid addrs + BIP21 fallback extraction.
+- [x] **`CrossProtocolRouter` (2026-06-03):** `router/index.ts` — sits on top of the registry,
+      chooses BETWEEN protocols. `resolveSend()` (with `.best` for lite-mode auto-select),
+      `resolveReceive(layer)`, `resolveByCapability()`. Filters to registered+connected adapters
+      via the capability manifest. Typechecks clean.
+- [x] **Swap wrapper (2026-06-03):** `swap/KaleidoswapSwap.ts` wraps
+      `@kaleidorg/wdk-protocol-swap-kaleidoswap` (RFQ maker) → domain `Quote`/`SwapResult`
+      (`getQuote`/`executeSwap`/`getSwapStatus`). Distinct from the lower-level cross-L2
+      (VHTLC/Boltz) atomic layer in `types/cross-l2`. Fixed stale `utils` Liquid mapping.
+- **Exit:** any destination string resolves to the right protocol+route automatically. ✓ (classifier+router)
+- [ ] Live end-to-end swap (needs connected adapters + maker) — deferred to live testing.
 
 ### Phase 5 — Lite/Advanced + unified QR — ~2–3 wk
 - [ ] `disclosureLevel` in engine (default at creation, reversible in settings).

@@ -12,7 +12,7 @@ export function networkTypeToProtocol(nt: NetworkType): ProtocolType | null {
     case 'rln': return 'RGB'
     case 'spark': return 'SPARK'
     case 'arkade': return 'ARKADE'
-    case 'liquid': return null // No adapter registered
+    case 'liquid': return 'LIQUID' // LiquidWdkAdapter now available
     default: return null
   }
 }
@@ -22,6 +22,7 @@ export function protocolToNetworkType(pt: ProtocolType): NetworkType | null {
     case 'RGB': return 'rln'
     case 'SPARK': return 'spark'
     case 'ARKADE': return 'arkade'
+    case 'LIQUID': return 'liquid'
     default: return null
   }
 }
