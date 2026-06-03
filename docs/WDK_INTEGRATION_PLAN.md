@@ -105,7 +105,21 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
         (`getAccount`/`getAccountByPath`/`getFeeRates`), **derived real address**
         `sparkrt1pgss...`. Account surface captured (see §3.1).
       - **Takeaway: WDK runs outside Bare in plain JS today → strong signal for RN/MV3 hosts.**
-- [ ] **Spike B (gating):** load a WDK module inside `rate-extension`'s MV3 service worker.
+- [~] **Spike B (gating) — STATIC PROXY PASS (2026-06-03):** bundled each module's non-Bare
+      export for a browser target with the extension's esbuild 0.27.7 (`--platform=browser`).
+      The static bundle is what usually *hard*-blocks MV3; it's green for all three with known
+      mechanical config:
+      - `@kaleidorg/wdk-wallet-rln` ✅ bundles clean out of the box (~545 KB).
+      - `@kaleidorg/wdk-wallet-liquid` ✅ bundles (~496 KB) once `lwk_wasm` is provided as a
+        WASM asset — the module already switches to its `lwk-web.js` web variant under the
+        browser condition (designed for web). WASM runs in MV3 (mind CSP `wasm-unsafe-eval`).
+      - `@tetherto/wdk-wallet-spark` ✅ bundles once `sodium-javascript` is installed +
+        bundler honors the `browser` main-field — `sodium-universal` already maps
+        `sodium-native → sodium-javascript`; the only blocker was the missing JS substitute
+        (its native addon must NOT reach the browser bundle).
+      - **Still to validate LIVE:** WASM instantiation under the extension's CSP, service-worker
+        lifecycle/eviction, and worker limits — run a real `rate-extension` load before committing
+        the extension half. The static gate (the common hard-blocker) is cleared.
 - [ ] **Spike C:** load a WDK module on a physical iOS+Android `rate` build (Bare-on-mobile).
 - [ ] Freeze the v1 `IProtocolAdapter` contract + `ProtocolCapabilities` shape.
 - **Exit:** documented pass/fail per host; per-protocol "WDK vs native fallback" decision.
