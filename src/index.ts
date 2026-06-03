@@ -53,6 +53,25 @@ export {
   type SwapExecuteRequest,
 } from './swap/KaleidoswapSwap'
 
+// Unified receive QR (single BIP21 with embedded LN/Ark/Spark/Liquid/RGB)
+export {
+  buildUnifiedReceiveURI,
+  parseUnifiedReceiveURI,
+  type UnifiedReceiveParams,
+} from './receive/unifiedReceive'
+
+// Lite/Advanced disclosure model
+export {
+  policyFor,
+  liteBucketOf,
+  aggregateForLite,
+  LITE_USD,
+  type DisclosureLevel,
+  type DisclosurePolicy,
+  type LiteBucket,
+  type LiteBalances,
+} from './disclosure'
+
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
 

@@ -211,10 +211,19 @@ The shared **contract** is the only cross-cutting seam, so it is **additive-only
 - [ ] Live end-to-end swap (needs connected adapters + maker) — deferred to live testing.
 
 ### Phase 5 — Lite/Advanced + unified QR — ~2–3 wk
-- [ ] `disclosureLevel` in engine (default at creation, reversible in settings).
-- [ ] Lite UI hides networks (BTC / USD=Liquid USDt / assets); advanced reveals selectors.
-- [ ] Unified QR: standards-compliant BIP21 base + Ark/Spark extra params; define on-chain
-      fallback + invoice refresh. Build on extension's `bip21.ts` + `BtcUnifiedReceive`.
+Engine-side (library) parts DONE 2026-06-03; UI parts pending the apps.
+- [x] **`disclosure/` model:** `DisclosureLevel` ('lite'|'advanced') + `policyFor()`
+      (showNetworks/showRouteSelector/showChannelManagement/showExperimental/showRawIds).
+      Default-at-creation/reversible is an app setting over this. Tested.
+- [x] **Lite asset aggregation:** `aggregateForLite()` collapses all BTC representations
+      (on-chain/LN/Spark/Arkade/L-BTC) → one **BTC**, USDt → **USD** (`LITE_USD` = Liquid
+      USDt), rest → "other". Verified: 50k+20k+30k→BTC 100k; USDt→USD; XAUT→other.
+- [x] **Unified QR:** `receive/unifiedReceive.ts` — `buildUnifiedReceiveURI()` /
+      `parseUnifiedReceiveURI()`. Standards-compliant `bitcoin:` BIP21 base (universal
+      fallback) + `lightning=` + Kaleido params `spark/ark/liquid/rgb/assetid/assetamount`.
+      Round-trip verified; non-Kaleido wallets degrade to on-chain+LN.
+- [ ] Wire into app receive UI (build on extension's `bip21.ts` + `BtcUnifiedReceive`);
+      define on-chain fallback address choice + invoice-refresh story.
 - [ ] Unified onboarding (lite = create→backup→done).
 - **Exit:** lite wallet receives via one QR and sends to an LN invoice with zero network names shown.
 
