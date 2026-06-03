@@ -1,0 +1,54 @@
+name: Publish to npm
+
+# Publishes @kaleidorg/wallet-protocols to npm.
+#   - Automatically on a pushed version tag (e.g. `git tag v1.0.0-beta.3 && git push --tags`).
+#   - Or manually via "Run workflow" (workflow_dispatch).
+# Requires repo secret NPM_TOKEN (an npm automation token with publish rights to @kaleidorg).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dist_tag:
+        description: 'npm dist-tag (leave blank to auto: beta for prereleases, latest otherwise)'
+        required: false
+        default: ''
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      # --ignore-scripts skips the WDK SDKs' native postinstalls; the build only needs types.
+      - run: npm install --ignore-scripts --no-audit --no-fund
+
+      - run: npm run build
+
+      - name: Resolve dist-tag
+        id: disttag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.dist_tag }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          if [ -n "$INPUT_TAG" ]; then
+            TAG="$INPUT_TAG"
+          elif printf '%s' "$VERSION" | grep -q '-'; then
+            TAG="beta"
+          else
+            TAG="latest"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Publishing $VERSION with dist-tag '$TAG'"
+
+      - name: Publish
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          DIST_TAG: ${{ steps.disttag.outputs.tag }}
+        run: npm publish --access public --tag "$DIST_TAG"
