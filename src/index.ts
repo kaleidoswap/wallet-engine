@@ -32,6 +32,27 @@ export { RlnWdkAdapter, type RlnAdapterConfig } from './adapters/wdk/RlnWdkAdapt
 export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './adapters/wdk/ArkadeWdkAdapter'
 export { createWdkRegistry, type WdkRegistryOptions } from './registry/createWdkRegistry'
 
+// Cross-protocol router (chooses BETWEEN protocols)
+export {
+  CrossProtocolRouter,
+  type SendRoute,
+  type SendResolution,
+  type ReceiveRoute,
+} from './router'
+export {
+  classifyDestination,
+  type ClassifiedDestination,
+  type DestinationKind,
+} from './router/destination'
+
+// Kaleidoswap RFQ swap wrapper
+export {
+  KaleidoswapSwap,
+  type KaleidoswapSwapConfig,
+  type SwapQuoteRequest,
+  type SwapExecuteRequest,
+} from './swap/KaleidoswapSwap'
+
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
 
