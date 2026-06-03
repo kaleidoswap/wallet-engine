@@ -1,7 +1,7 @@
 {
   "name": "@kaleidorg/wallet-protocols",
-  "version": "1.0.0-beta.1",
-  "description": "Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet",
+  "version": "1.0.0-beta.2",
+  "description": "WDK-based multi-protocol wallet engine (Spark, RGB/RLN, Liquid, Arkade): IProtocolAdapter contract + WDK adapters, cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -15,7 +15,7 @@
     "dist"
   ],
   "dependencies": {
-    "kaleido-sdk": "file:../kaleido-sdk/typescript-sdk",
+    "kaleido-sdk": "^0.1.6",
     "@scure/bip39": "^1.4.0",
     "@scure/bip32": "^1.5.0"
   },
@@ -23,11 +23,10 @@
     "@buildonspark/spark-sdk": "*",
     "@arkade-os/sdk": "*",
     "@flashnet/sdk": "*",
-    "@tetherto/wdk-wallet-spark": "*",
-    "@arkade-os/wdk": "*",
-    "@kaleidorg/wdk-wallet-rln": "*",
-    "@kaleidorg/wdk-wallet-liquid": "*",
-    "@kaleidorg/wdk-protocol-swap-kaleidoswap": "*"
+    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
+    "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
+    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.2",
+    "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2"
   },
   "publishConfig": {
     "access": "public"
