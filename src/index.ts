@@ -30,6 +30,7 @@ export { SparkWdkAdapter, type SparkAdapterConfig } from './adapters/wdk/SparkWd
 export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './adapters/wdk/LiquidWdkAdapter'
 export { RlnWdkAdapter, type RlnAdapterConfig } from './adapters/wdk/RlnWdkAdapter'
 export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './adapters/wdk/ArkadeWdkAdapter'
+export { createWdkRegistry, type WdkRegistryOptions } from './registry/createWdkRegistry'
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
