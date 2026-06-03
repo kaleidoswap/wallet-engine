@@ -4,7 +4,7 @@
  */
 
 // Protocol names
-export type ProtocolType = 'RGB' | 'SPARK' | 'ARKADE' | 'BTC'
+export type ProtocolType = 'RGB' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIQUID'
 
 // Layer types
 export type Layer =
@@ -12,10 +12,12 @@ export type Layer =
   | 'BTC_LN'          // Bitcoin Lightning
   | 'BTC_ARKADE'      // Bitcoin Arkade
   | 'BTC_SPARK'       // Bitcoin Spark
+  | 'BTC_LIQUID'      // L-BTC on Liquid
   | 'RGB_L1'          // RGB onchain
   | 'RGB_LN'          // RGB Lightning
   | 'SPARK_SPARK'     // Spark protocol
   | 'ARKADE_ARKADE'   // Arkade protocol
+  | 'LIQUID_ASSET'    // Liquid asset (e.g. USDt on Liquid — lite-mode "USD")
 
 // Asset interface - unified across all protocols
 export interface UnifiedAsset {
@@ -176,6 +178,7 @@ export type AddressFormat =
   | 'RGB_INVOICE'
   | 'SPARK_ADDRESS'
   | 'ARKADE_ADDRESS'
+  | 'LIQUID_ADDRESS'
 
 export interface ConnectionInfo {
   protocol: ProtocolType

@@ -11,7 +11,11 @@
       "@arkade-os/sdk": ["../rate/node_modules/@arkade-os/sdk"],
       "@buildonspark/spark-sdk": ["../rate/node_modules/@buildonspark/spark-sdk"],
       "@scure/bip39": ["../rate/node_modules/@scure/bip39"],
-      "@scure/bip32": ["../rate/node_modules/@scure/bip32"]
+      "@scure/bip32": ["../rate/node_modules/@scure/bip32"],
+      "@tetherto/wdk-wallet-spark": ["../wdk-wallet-spark"],
+      "@kaleidorg/wdk-wallet-rln": ["../wdk-wallet-rln"],
+      "@kaleidorg/wdk-wallet-liquid": ["../wdk-wallet-liquid"],
+      "@kaleidorg/wdk-protocol-swap-kaleidoswap": ["../wdk-protocol-swap-kaleidoswap"]
     },
     "declaration": true,
     "declarationMap": true,
