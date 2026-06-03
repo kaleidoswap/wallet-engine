@@ -29,6 +29,7 @@ export { RgbAdapter } from './adapters/RgbAdapter'
 export { SparkWdkAdapter, type SparkAdapterConfig } from './adapters/wdk/SparkWdkAdapter'
 export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './adapters/wdk/LiquidWdkAdapter'
 export { RlnWdkAdapter, type RlnAdapterConfig } from './adapters/wdk/RlnWdkAdapter'
+export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './adapters/wdk/ArkadeWdkAdapter'
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'

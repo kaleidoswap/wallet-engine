@@ -91,7 +91,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     boarding: true,
     invoiceExpiry: true,
     needsChannelLiquidity: false,
-    wdkModule: '@arkade-os/arkade-wdk',
+    wdkModule: '@arkade-os/wdk',
     maturity: 'beta',
   },
   RGB: {

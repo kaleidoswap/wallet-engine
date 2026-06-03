@@ -24,7 +24,7 @@
     "@arkade-os/sdk": "*",
     "@flashnet/sdk": "*",
     "@tetherto/wdk-wallet-spark": "*",
-    "@arkade-os/arkade-wdk": "*",
+    "@arkade-os/wdk": "*",
     "@kaleidorg/wdk-wallet-rln": "*",
     "@kaleidorg/wdk-wallet-liquid": "*",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "*"
