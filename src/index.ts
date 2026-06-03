@@ -14,10 +14,19 @@ export * from './types/flashnet'
 // Adapter interface
 export { type IProtocolAdapter, type BaseProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
 
-// Adapters
+// Capability manifest (differences-as-data backbone)
+export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type ProtocolCapabilities } from './capabilities'
+
+// Platform ports (injected per host)
+export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'
+
+// Adapters (native — being migrated to WDK)
 export { SparkAdapter } from './adapters/SparkAdapter'
 export { ArkadeAdapter } from './adapters/ArkadeAdapter'
 export { RgbAdapter } from './adapters/RgbAdapter'
+
+// Adapters (WDK-backed)
+export { SparkWdkAdapter, type SparkAdapterConfig } from './adapters/wdk/SparkWdkAdapter'
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
