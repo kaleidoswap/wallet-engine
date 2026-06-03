@@ -312,6 +312,15 @@ export class SparkWdkAdapter implements IProtocolAdapter {
   async listChannels(): Promise<any[]> {
     return [] // Spark has no LN channels
   }
+
+  /**
+   * Escape hatch: the underlying spark-sdk SparkWallet, for integrations that need the
+   * raw client (e.g. the flashnet Spark-DEX, which piggybacks on a SparkWallet). Returns
+   * the same instance this adapter uses (no duplicate wallet). Null if not connected.
+   */
+  getUnderlyingSparkWallet(): any {
+    return (this.account as any)?._wallet ?? null
+  }
   async listPayments(): Promise<any> {
     // Outgoing transfers only.
     const txs = await this.listTransactions()
