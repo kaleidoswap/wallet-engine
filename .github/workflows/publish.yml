@@ -1,6 +1,6 @@
 name: Publish to npm
 
-# Publishes @kaleidorg/wallet-protocols to npm.
+# Publishes @kaleidorg/wallet-engine to npm.
 #   - Automatically on a pushed version tag (e.g. `git tag v1.0.0-beta.3 && git push --tags`).
 #   - Or manually via "Run workflow" (workflow_dispatch).
 # Requires repo secret NPM_TOKEN (an npm automation token with publish rights to @kaleidorg).

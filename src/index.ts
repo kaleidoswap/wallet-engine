@@ -1,6 +1,7 @@
 /**
- * @kaleidorg/wallet-protocols
- * Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet.
+ * @kaleidorg/wallet-engine
+ * Multi-protocol Bitcoin L2 wallet engine — native or WDK-backed adapters
+ * (Spark, Arkade, RGB/RLN, Liquid) behind one IProtocolAdapter contract.
  */
 
 // Types
@@ -20,7 +21,7 @@ export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type Protoco
 // Platform ports (injected per host)
 export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'
 
-// Adapters (native — being migrated to WDK)
+// Adapters (native — direct SDK integrations)
 export { SparkAdapter } from './adapters/SparkAdapter'
 export { ArkadeAdapter } from './adapters/ArkadeAdapter'
 export { RgbAdapter } from './adapters/RgbAdapter'
