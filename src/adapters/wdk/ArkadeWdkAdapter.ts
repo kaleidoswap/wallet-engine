@@ -182,7 +182,14 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     const dest = request.invoice.trim()
     if (/^ln(bc|tb|bcrt)/i.test(dest)) {
-      // Lightning send via Boltz submarine swap is not exposed as a simple method in v0.1.3.
+      // TODO(boltz): Lightning SEND via Boltz submarine swap (Arkade VTXO → LN).
+      // @arkade-os/wdk v0.1.3 doesn't expose pay-a-BOLT11 directly. rate-extension
+      // does this with `@arkade-os/boltz-swap` (ArkadeSwaps.sendLightningPayment),
+      // backed by a persistent SwapManager + IndexedDb repo that auto-claims/refunds.
+      // To implement here: add an arkadeSwaps client manager (see docs/BOLTZ_TODO.md),
+      // init it on connect(), and route LN sends through swaps.sendLightningPayment().
+      // Note: Lightning RECEIVE already works above via account.createLightningInvoice
+      // (Boltz reverse swap), so only the SEND leg is missing.
       throw new ProtocolError('Arkade Lightning send not available in this module version', 'ARKADE', 'NOT_SUPPORTED')
     }
     if (request.amount == null) {

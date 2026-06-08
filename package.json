@@ -1,6 +1,6 @@
 {
   "name": "@kaleidorg/wallet-engine",
-  "version": "1.0.0-beta.3",
+  "version": "1.0.0-beta.4",
   "description": "Multi-protocol Bitcoin L2 wallet engine (Spark · RGB/RLN · Liquid · Arkade) — native or WDK-backed adapters behind one IProtocolAdapter contract, with a cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.",
   "type": "module",
   "main": "dist/index.js",

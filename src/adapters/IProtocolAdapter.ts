@@ -21,6 +21,8 @@ import {
   QuoteRequest,
   Quote,
   SwapResult,
+  DepositClaimResult,
+  DepositSweepResult,
 } from '../types/base'
 
 export interface BaseProtocolConfig {
@@ -71,6 +73,13 @@ export interface IProtocolAdapter {
   getInvoiceStatus?(params: { invoice: string }): Promise<any>
   sendAsset?(params: any): Promise<any>
   sendBtcOnchain?(params: { address: string; amount: number; feeRate?: number }): Promise<any>
+
+  // On-chain deposit claim/sweep (Optional) — for protocols where a confirmed
+  // on-chain deposit must be claimed into the wallet (e.g. Spark L1 deposits).
+  /** Claim confirmed on-chain UTXO(s) sent to a single deposit `address`. */
+  claimL1Deposit?(address: string): Promise<DepositClaimResult>
+  /** Sweep every unclaimed single-use deposit address (recovers earlier deposits). */
+  sweepL1Deposits?(): Promise<DepositSweepResult>
 
   // Swap Operations (Optional)
   supportsSwaps(): boolean

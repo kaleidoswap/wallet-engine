@@ -40,6 +40,8 @@ import {
   TransactionFilter,
   TransactionStatus,
   ProtocolError,
+  DepositClaimResult,
+  DepositSweepResult,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
 import { loadWdkModule } from './moduleLoader'
@@ -119,10 +121,108 @@ export class SparkWdkAdapter implements IProtocolAdapter {
   }
 
   // --- Address / receive --------------------------------------------------
-  async getReceiveAddress(): Promise<Address> {
+  // Default → the native Spark address (`sp1…`). When the caller targets the
+  // BTC L1 layer (passes 'onchain' or the BTC asset id) we return a real
+  // on-chain Bitcoin deposit address instead. We use a SINGLE-USE deposit
+  // address (not the static one) so that deposits are recoverable via
+  // `sweepL1Deposits()` — the sweep enumerates unused single-use addresses and
+  // claims their confirmed UTXOs. Without this branch an "on-chain" receive
+  // would incorrectly surface the Spark address.
+  async getReceiveAddress(assetId?: string): Promise<Address> {
     this.assertConnected()
+    if (assetId === 'onchain' || assetId === 'BTC') {
+      const address: string = await this.account.getSingleUseDepositAddress()
+      return { address, format: 'BTC_ADDRESS' }
+    }
     const address = await this.account.getAddress()
     return { address, format: 'SPARK_ADDRESS' }
+  }
+
+  // --- On-chain deposit claim / sweep ------------------------------------
+  // Spark on-chain (L1) deposits land at a single-use deposit address and must
+  // be CLAIMED into the wallet before they show up in the balance. These mirror
+  // rate-extension's claimSparkL1Deposit / sweepSparkL1Deposits, but drive the
+  // WDK account API: getUtxosForDepositAddress({depositAddress, …}) →
+  // claimDeposit(txid), and getUnusedDepositAddresses() for the sweep.
+
+  /** Claim any confirmed UTXO(s) sent to a single deposit `address`. */
+  async claimL1Deposit(address: string): Promise<DepositClaimResult> {
+    this.assertConnected()
+    const depositAddress = address?.trim()
+    if (!depositAddress) return { status: 'error', error: 'address is required' }
+
+    let utxos: Array<{ txid: string; vout: number }>
+    try {
+      const res: any = await this.account.getUtxosForDepositAddress({
+        depositAddress,
+        limit: 10,
+        offset: 0,
+        excludeClaimed: true,
+      })
+      utxos = res?.utxos ?? []
+    } catch (error: any) {
+      return { status: 'error', error: error?.message ?? 'utxo lookup failed' }
+    }
+    if (utxos.length === 0) return { status: 'awaiting' }
+
+    const txids: string[] = []
+    let lastError: string | undefined
+    for (const utxo of utxos) {
+      try {
+        await this.account.claimDeposit(utxo.txid)
+        txids.push(utxo.txid)
+      } catch (error: any) {
+        lastError = error?.message ?? String(error)
+      }
+    }
+    if (txids.length === 0) return { status: 'error', error: lastError ?? 'no utxos claimed' }
+    return { status: 'claimed', txids }
+  }
+
+  /** Sweep every unclaimed single-use deposit address (recovers earlier deposits). */
+  async sweepL1Deposits(): Promise<DepositSweepResult> {
+    this.assertConnected()
+
+    let addresses: string[]
+    try {
+      const res: any = await this.account.getUnusedDepositAddresses()
+      // WDK returns { depositAddresses: [{ depositAddress, … }], offset }.
+      addresses = (res?.depositAddresses ?? [])
+        .map((d: any) => (typeof d === 'string' ? d : d?.depositAddress))
+        .filter((a: any): a is string => !!a)
+    } catch (error: any) {
+      return {
+        addressesChecked: 0,
+        claimedTxids: [],
+        errors: [error?.message ?? 'getUnusedDepositAddresses failed'],
+      }
+    }
+    if (addresses.length === 0) return { addressesChecked: 0, claimedTxids: [], errors: [] }
+
+    const claimedTxids: string[] = []
+    const errors: string[] = []
+    for (const addr of addresses) {
+      try {
+        const res: any = await this.account.getUtxosForDepositAddress({
+          depositAddress: addr,
+          limit: 10,
+          offset: 0,
+          excludeClaimed: true,
+        })
+        const utxos: Array<{ txid: string }> = res?.utxos ?? []
+        for (const utxo of utxos) {
+          try {
+            await this.account.claimDeposit(utxo.txid)
+            claimedTxids.push(utxo.txid)
+          } catch (claimErr: any) {
+            errors.push(claimErr?.message ?? String(claimErr))
+          }
+        }
+      } catch (lookupErr: any) {
+        errors.push(lookupErr?.message ?? String(lookupErr))
+      }
+    }
+    return { addressesChecked: addresses.length, claimedTxids, errors }
   }
 
   // --- Balance ------------------------------------------------------------

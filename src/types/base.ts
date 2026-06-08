@@ -168,6 +168,29 @@ export interface PaymentStatus {
   error?: string
 }
 
+/**
+ * Result of claiming the confirmed on-chain UTXO(s) sent to a single deposit
+ * address (e.g. a Spark single-use L1 deposit address → wallet balance).
+ *  - 'awaiting' — no confirmed UTXO yet; keep polling.
+ *  - 'claimed'  — one or more deposits claimed (see `txids`).
+ *  - 'error'    — lookup/claim failed (see `error`).
+ */
+export interface DepositClaimResult {
+  status: 'awaiting' | 'claimed' | 'error'
+  txids?: string[]
+  error?: string
+}
+
+/**
+ * Result of a one-shot sweep over every unclaimed single-use deposit address —
+ * recovers on-chain deposits made to addresses from earlier sessions.
+ */
+export interface DepositSweepResult {
+  addressesChecked: number
+  claimedTxids: string[]
+  errors: string[]
+}
+
 export interface Address {
   address: string
   format: AddressFormat
