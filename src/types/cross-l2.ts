@@ -63,6 +63,22 @@ export interface HodlInvoiceDescriptor {
   expires_at: number
 }
 
+/**
+ * Descriptor for an outbound Spark HTLC payment, used in the
+ * Arkade -> Spark direction. The maker SENDs a Spark HTLC to the taker;
+ * once the taker claims it, the preimage propagates back to the maker via
+ * `Payment.htlc_details.preimage` so the maker can claim its source-side
+ * Arkade VHTLC. The descriptor carries the SDK payment id needed to drive
+ * the polling.
+ */
+export interface SparkHtlcSendDescriptor {
+  payment_id: string
+  payment_hash: string
+  amount_sats: number
+  receiver_address: string
+  expires_at: number
+}
+
 export interface CrossL2QuoteRequest {
   from_layer: Layer
   to_layer: Layer
@@ -86,23 +102,58 @@ export interface CrossL2Quote {
  * Cross-L2 swap initiation, taker-driven.
  *
  * The TAKER generates a single secret preimage P and supplies sha256(P)
- * as `payment_hash`. The same hash is used on BOTH sides:
- *   - source: Spark Lightning HODL committed to sha256(P)
- *   - destination: Arkade SHA256-VHTLC committed to sha256(P)
- * Atomicity holds because knowledge of P unlocks both sides; the taker
- * reveals P on Arkade by claiming the VHTLC, the maker scrapes P from
- * the spend witness and settles the HODL on Spark.
+ * as `payment_hash`. The same hash is used on BOTH sides of the swap.
+ *
+ * Spark -> Arkade direction:
+ *   - source: Spark Lightning HODL committed to sha256(P) (taker pays)
+ *   - destination: Arkade SHA256-VHTLC committed to sha256(P) (maker
+ *     funds, taker claims with P). `receiver_dest_pubkey` = taker's
+ *     Arkade x-only pubkey (VHTLC receiver). `taker_spark_address` is
+ *     unused.
+ *
+ * Arkade -> Spark direction:
+ *   - source: Arkade SHA256-VHTLC committed to sha256(P) (taker funds,
+ *     maker claims with P). `receiver_dest_pubkey` = taker's Arkade
+ *     x-only pubkey (VHTLC sender — refund-path beneficiary).
+ *   - destination: Spark HTLC payment to `taker_spark_address` (maker
+ *     sends, taker claims with P; preimage propagates back to maker
+ *     via Payment.htlc_details.preimage).
+ *
+ * Atomicity holds because a single preimage unlocks both sides.
  */
 export interface CrossL2InitiatePayload {
   quote_id: string
-  /** sha256(preimage), 32-byte hex. Used for both source HODL and dest SHA256-VHTLC. */
+  /** sha256(preimage), 32-byte hex. Used for both source and dest. */
   payment_hash: string
+  /**
+   * Taker's Arkade x-only pubkey (32-byte hex). VHTLC receiver in
+   * Spark->Arkade; VHTLC sender in Arkade->Spark.
+   */
   receiver_dest_pubkey: string
+  /**
+   * Taker's Spark address. Required for Arkade->Spark (maker SENDs the
+   * Spark HTLC to this address). Ignored for Spark->Arkade.
+   */
+  taker_spark_address?: string
 }
 
+/**
+ * Direction-aware /initiate response.
+ *
+ * Spark -> Arkade:
+ *   - `source_invoice` is the Spark Lightning HODL invoice (taker pays).
+ *   - `dest_vhtlc_address` / `vhtlc_params` describe the destination
+ *     Arkade VHTLC the maker has already FUNDED (taker claims with P).
+ *
+ * Arkade -> Spark:
+ *   - `source_invoice` is null (no source Lightning invoice).
+ *   - `dest_vhtlc_address` / `vhtlc_params` describe the SOURCE Arkade
+ *     VHTLC the taker MUST FUND (maker later claims with P). Despite the
+ *     legacy field name, it is the source-side VHTLC in this direction.
+ */
 export interface CrossL2InitiateResponse {
   swap_id: string
-  source_invoice: string
+  source_invoice: string | null
   dest_vhtlc_address: string
   vhtlc_params: VhtlcParams
   vhtlc_script_hex: string

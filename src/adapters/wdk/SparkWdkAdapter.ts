@@ -264,8 +264,52 @@ export class SparkWdkAdapter implements IProtocolAdapter {
         supportsOnchain: true,
       },
     }
-    // TODO(Phase 2): enumerate Spark tokens from account.getBalance() token map.
-    return [btc]
+    const assets: UnifiedAsset[] = [btc]
+
+    // Enumerate Spark tokens (e.g. USDB bought on the Flashnet AMM). The WDK
+    // account.getBalance() only returns BTC sats, so read the richer
+    // { balance, tokenBalances } map off the underlying spark-sdk wallet.
+    // tokenBalances is keyed by the bech32m token identifier (btkn1…).
+    try {
+      const wallet = this.getUnderlyingSparkWallet()
+      const res: any = wallet ? await wallet.getBalance() : null
+      const tokenBalances: Map<string, any> | undefined = res?.tokenBalances
+      if (tokenBalances && typeof tokenBalances.forEach === 'function') {
+        tokenBalances.forEach((info: any, tokenId: string) => {
+          const meta = info?.tokenMetadata ?? info?.tokenInfo ?? {}
+          const owned = Number(info?.ownedBalance ?? info?.balance ?? 0)
+          const available = Number(info?.availableToSendBalance ?? info?.ownedBalance ?? info?.balance ?? 0)
+          const precision = Number(meta?.decimals ?? meta?.tokenDecimals ?? 0)
+          assets.push({
+            id: tokenId,
+            name: meta?.tokenName ?? meta?.name ?? tokenId,
+            ticker: meta?.tokenTicker ?? meta?.symbol ?? '',
+            precision,
+            protocol: 'SPARK',
+            layer: 'SPARK_SPARK',
+            balance: {
+              total: owned,
+              available,
+              pending: 0,
+              totalDisplay: String(owned),
+              availableDisplay: String(available),
+            },
+            capabilities: {
+              canSend: true,
+              canReceive: true,
+              canSwap: true,
+              supportsLightning: false,
+              supportsOnchain: false,
+            },
+          })
+        })
+      }
+    } catch (err) {
+      // Non-fatal: token enumeration must not break the BTC listing.
+      console.warn('[SparkWdkAdapter] token enumeration failed:', err)
+    }
+
+    return assets
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
