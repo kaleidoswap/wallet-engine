@@ -47,3 +47,18 @@ Engine tests/fixtures: `test/spark-history.test.ts`, `test/arkade-history.test.t
 - `settled` ⇒ confirmed
 - received & non-boarding (off-chain VTXO) ⇒ confirmed
 - else ⇒ pending (unsettled boarding rows, unsettled sends)
+
+## Send-path notes
+
+- **Amountless Lightning invoices (both Spark adapters).** spark-sdk's
+  `payLightningInvoice` requires `amountSatsToSend` for 0-amount invoices and
+  rejects it for invoices that carry an amount. Both `SparkAdapter` (raw SDK)
+  and `SparkWdkAdapter` (WDK module, which forwards options verbatim to
+  spark-sdk) pass it only when an explicit amount is provided. Applied to both
+  adapters so behavior is identical regardless of which one the host app
+  instantiates.
+- **Arkade BTC offboards always guard for a tx id.** `sendPayment()` routes any
+  Bitcoin-address destination through `sendBtcOnchain()`, which returns
+  `pending` and throws if the SDK returns no tx id/hash. This prevents the
+  "UI says it went through but no network tx exists" failure even when a caller
+  uses the generic `sendPayment()` entry point instead of `sendBtcOnchain()`.
