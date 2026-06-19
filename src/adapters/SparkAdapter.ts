@@ -281,6 +281,9 @@ export class SparkAdapter implements IProtocolAdapter {
         result = await wallet.payLightningInvoice({
           invoice: request.invoice,
           maxFeeSats: DEFAULT_MAX_FEE_SATS,
+          // Required by the Spark SDK for 0-amount (amountless) invoices; for
+          // invoices that already carry an amount this must be omitted.
+          ...(request.amount && request.amount > 0 ? { amountSatsToSend: request.amount } : {}),
         })
       } else {
         // Spark-to-Spark transfer
