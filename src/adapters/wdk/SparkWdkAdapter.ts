@@ -45,12 +45,32 @@ import { getCapabilities } from '../../capabilities'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 
+/** Lower-case hex string for a Uint8Array / Buffer / hex string (for identity-key compare). */
+function toHexLower(bytes: any): string {
+  if (!bytes) return ''
+  if (typeof bytes === 'string') return bytes.toLowerCase()
+  try {
+    let out = ''
+    for (const b of bytes) out += b.toString(16).padStart(2, '0')
+    return out.toLowerCase()
+  } catch {
+    return ''
+  }
+}
+
 /** Map a spark-sdk Transfer proto status → domain TransactionStatus. */
 function mapSparkStatus(s?: string): TransactionStatus {
   const v = String(s ?? '').toUpperCase()
   if (v.includes('COMPLET')) return 'confirmed'
   if (v.includes('FAIL') || v.includes('EXPIRED') || v.includes('RETURN')) return 'failed'
   return 'pending'
+}
+
+function isDirectSparkTransfer(t: any): boolean {
+  const type = String(t?.type ?? t?.transferType ?? t?.sparkTransactionType ?? '').toUpperCase()
+  const hasUserRequest = t?.userRequest != null || t?.userRequestId != null
+  const hasTransferShape = t?.receiverIdentityPublicKey != null || t?.senderIdentityPublicKey != null || t?.totalValue != null
+  return type === 'TRANSFER' || type === '2' || (!hasUserRequest && hasTransferShape)
 }
 
 export interface SparkAdapterConfig extends BaseProtocolConfig {
@@ -80,6 +100,10 @@ export class SparkWdkAdapter implements IProtocolAdapter {
   private account: any = null
   private connected = false
   private network = 'mainnet'
+  // Cached account identity pubkey (hex) — used to derive transfer direction,
+  // since the spark-sdk Transfer proto exposes sender/receiver identity keys
+  // rather than an explicit direction flag.
+  private identityPubKeyHex: string | null = null
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -96,6 +120,11 @@ export class SparkWdkAdapter implements IProtocolAdapter {
       network: SPARK_NETWORK_MAP[this.network] ?? 'MAINNET',
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
+    try {
+      this.identityPubKeyHex = toHexLower(await this.account.getIdentityKey?.()) || null
+    } catch {
+      this.identityPubKeyHex = null
+    }
     this.connected = true
   }
 
@@ -336,8 +365,20 @@ export class SparkWdkAdapter implements IProtocolAdapter {
 
   /** Map a spark-sdk Transfer (proto) → domain UnifiedTransaction (fields read defensively). */
   private toUnifiedTx(t: any): UnifiedTransaction {
-    const dir = String(t?.transferDirection ?? t?.direction ?? '').toUpperCase()
-    const isReceive = dir.includes('INCOMING') || dir.includes('RECEIV')
+    // The spark-sdk Transfer proto has no direction flag — direction is whether
+    // *we* are the receiver. Compare our cached identity pubkey against the
+    // transfer's receiver/sender identity keys. Fall back to the (legacy, usually
+    // absent) direction fields only when the identity key is unknown.
+    const me = this.identityPubKeyHex
+    const receiverHex = toHexLower(t?.receiverIdentityPublicKey)
+    const senderHex = toHexLower(t?.senderIdentityPublicKey)
+    let isReceive: boolean
+    if (me && (receiverHex || senderHex)) {
+      isReceive = receiverHex === me && senderHex !== me
+    } else {
+      const dir = String(t?.transferDirection ?? t?.direction ?? '').toUpperCase()
+      isReceive = dir.includes('INCOMING') || dir.includes('RECEIV')
+    }
     const tsRaw = t?.createdTime ?? t?.updatedTime ?? t?.createdAt
     const timestamp =
       typeof tsRaw === 'number'
@@ -350,7 +391,7 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     return {
       id: t?.id ?? t?.sparkId ?? '',
       type: isReceive ? 'receive' : 'send',
-      status: mapSparkStatus(t?.status),
+      status: isDirectSparkTransfer(t) ? 'confirmed' : mapSparkStatus(t?.status),
       timestamp,
       amount: Number(t?.totalValue ?? t?.value ?? 0),
       amountDisplay: '',
