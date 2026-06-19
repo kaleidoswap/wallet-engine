@@ -8,6 +8,8 @@
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },
@@ -15,24 +17,25 @@
     "dist"
   ],
   "dependencies": {
-    "kaleido-sdk": "^0.1.6",
+    "@scure/bip32": "^1.5.0",
     "@scure/bip39": "^1.4.0",
-    "@scure/bip32": "^1.5.0"
+    "kaleido-sdk": "^0.1.6"
   },
   "optionalDependencies": {
-    "@buildonspark/spark-sdk": "*",
     "@arkade-os/sdk": "*",
+    "@buildonspark/spark-sdk": "*",
     "@flashnet/sdk": "*",
-    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
-    "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
+    "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.2",
-    "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2"
+    "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
+    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17"
   },
   "devDependencies": {
-    "@buildonspark/spark-sdk": "^0.7.10",
     "@arkade-os/sdk": "^0.4.14",
+    "@buildonspark/spark-sdk": "^0.7.10",
     "@flashnet/sdk": "^0.5.7",
-    "typescript": "~5.9.3"
+    "typescript": "~5.9.3",
+    "vitest": "^2.1.9"
   },
   "publishConfig": {
     "access": "public"
