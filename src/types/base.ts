@@ -152,6 +152,7 @@ export interface PaymentRequest {
 
 export interface PaymentResult {
   paymentHash: string
+  txid?: string
   preimage?: string
   amount: number
   fee: number

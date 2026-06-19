@@ -41,6 +41,8 @@ import { getCapabilities } from '../../capabilities'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 
+const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(value.trim())
+
 export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   protocol: 'ARKADE'
   /** BIP-39 mnemonic for this wallet. */
@@ -190,11 +192,31 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     }
     // Off-chain Ark transfer to an Ark address.
     const r: any = await this.account.sendTransaction({ to: dest, value: request.amount })
+    const hash = r?.hash ?? ''
     return {
-      paymentHash: r?.hash ?? '',
+      paymentHash: hash,
+      txid: hash,
       amount: request.amount,
       fee: Number(r?.fee ?? 0),
-      status: 'confirmed',
+      status: isBitcoinAddress(dest) ? 'pending' : 'confirmed',
+      timestamp: Date.now(),
+    }
+  }
+
+  /** Arkade BTC send/offboard. Bitcoin destinations settle on-chain asynchronously. */
+  async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
+    this.assertConnected()
+    const r: any = await this.account.sendTransaction({ to: params.address.trim(), value: params.amount })
+    const hash = r?.hash ?? ''
+    if (!hash) {
+      throw new ProtocolError('Arkade offboard did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
+    }
+    return {
+      txid: hash,
+      paymentHash: hash,
+      amount: params.amount,
+      fee: Number(r?.fee ?? 0),
+      status: 'pending',
       timestamp: Date.now(),
     }
   }
@@ -216,16 +238,30 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
   async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const history: any[] = await this.account.getTransactionHistory()
-    return (history ?? []).map((t) => ({
-      id: t.txid ?? t.key?.boardingTxid ?? t.key?.roundTxid ?? '',
-      type: (Number(t.amount ?? 0) < 0 ? 'send' : 'receive') as UnifiedTransaction['type'],
-      status: (t.confirmedAt ? 'confirmed' : 'pending') as TransactionStatus,
-      timestamp: Number(t.createdAt ?? t.confirmedAt ?? 0) * 1000,
-      amount: Math.abs(Number(t.amount ?? 0)),
-      amountDisplay: '',
-      asset: undefined as unknown as UnifiedAsset,
-      protocolData: t,
-    }))
+    return (history ?? []).map((t) => {
+      // @arkade-os/sdk ArkTransaction shape:
+      //   { key:{ arkTxid, commitmentTxid, boardingTxid }, type:'SENT'|'RECEIVED',
+      //     amount(sats, net), settled(boolean), createdAt(ms since epoch) }.
+      // The txid lives on `key` (the unused fields are empty strings, so we must
+      // pick the first NON-EMPTY one — `??` would stop at `''`). Direction is the
+      // explicit `type`, not the amount sign (amount is reported as a magnitude).
+      // `createdAt` is already milliseconds; the old `* 1000` pushed every entry
+      // ~50k years into the future, breaking sort order and the displayed date.
+      const key = t?.key ?? {}
+      const id = t?.txid || key.arkTxid || key.commitmentTxid || key.boardingTxid || ''
+      const isSend = String(t?.type ?? '').toUpperCase() === 'SENT'
+      const createdAt = Number(t?.createdAt ?? 0)
+      return {
+        id,
+        type: isSend ? 'send' : 'receive',
+        status: (t?.settled || (!isSend && !key.boardingTxid) ? 'confirmed' : 'pending') as TransactionStatus,
+        timestamp: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : 0,
+        amount: Math.abs(Number(t?.amount ?? 0)),
+        amountDisplay: '',
+        asset: undefined as unknown as UnifiedAsset,
+        protocolData: t,
+      }
+    })
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
