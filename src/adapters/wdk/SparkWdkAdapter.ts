@@ -264,6 +264,10 @@ export class SparkWdkAdapter implements IProtocolAdapter {
       const r: any = await this.account.payLightningInvoice({
         invoice: dest,
         maxFeeSats: request.maxFeeSats ?? this.defaultMaxFeeSats(request.amount),
+        // Required by the underlying Spark SDK for 0-amount (amountless) invoices;
+        // for invoices that already carry an amount this must be omitted. The WDK
+        // module forwards these options verbatim to spark-sdk's payLightningInvoice.
+        ...(request.amount && request.amount > 0 ? { amountSatsToSend: request.amount } : {}),
       })
       return {
         paymentHash: r?.paymentHash ?? r?.id ?? '',

@@ -37,6 +37,13 @@ describe('ArkadeWdkAdapter.sendPayment (issue #5)', () => {
     expect(r.status).toBe('pending')
     expect(r.txid).toBe('btctxid456')
   })
+
+  it('throws (not silent success) for a BTC destination that returns no tx id', async () => {
+    const { adapter } = adapterSending({ hash: '' })
+    await expect(adapter.sendPayment({ invoice: BTC_ADDR, amount: 9_000 } as any)).rejects.toThrow(
+      /did not return a transaction id/i,
+    )
+  })
 })
 
 describe('ArkadeWdkAdapter.sendBtcOnchain (issue #5)', () => {

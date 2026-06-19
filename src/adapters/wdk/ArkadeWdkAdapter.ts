@@ -190,7 +190,13 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     if (request.amount == null) {
       throw new ProtocolError('Arkade send requires an explicit amount', 'ARKADE', 'NO_AMOUNT')
     }
-    // Off-chain Ark transfer to an Ark address.
+    // Bitcoin destination → on-chain offboard. Route through sendBtcOnchain so the
+    // missing-tx-id guard and async `pending` status apply regardless of entry point
+    // (otherwise a BTC offboard with no hash would falsely report success).
+    if (isBitcoinAddress(dest)) {
+      return this.sendBtcOnchain({ address: dest, amount: request.amount })
+    }
+    // Off-chain Ark transfer to an Ark address (settles immediately, zero-conf UX).
     const r: any = await this.account.sendTransaction({ to: dest, value: request.amount })
     const hash = r?.hash ?? ''
     return {
@@ -198,13 +204,13 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
       txid: hash,
       amount: request.amount,
       fee: Number(r?.fee ?? 0),
-      status: isBitcoinAddress(dest) ? 'pending' : 'confirmed',
+      status: 'confirmed',
       timestamp: Date.now(),
     }
   }
 
   /** Arkade BTC send/offboard. Bitcoin destinations settle on-chain asynchronously. */
-  async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
+  async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<PaymentResult> {
     this.assertConnected()
     const r: any = await this.account.sendTransaction({ to: params.address.trim(), value: params.amount })
     const hash = r?.hash ?? ''
