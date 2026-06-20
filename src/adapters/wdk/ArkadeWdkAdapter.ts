@@ -135,8 +135,52 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
       balance: { total, available: total, pending: 0, totalDisplay: String(total), availableDisplay: String(total) },
       capabilities: { canSend: true, canReceive: true, canSwap: false, supportsLightning: true, supportsOnchain: true },
     }
-    // Arkade exposes getTokenBalance(id) but no token enumeration → BTC only here.
-    return [btc]
+    const out: UnifiedAsset[] = [btc]
+
+    // Arkade tokens. The account has no token enumeration, but its underlying
+    // wallet exposes the VTXO set (each VTXO carries `assets: { assetId, amount }[]`)
+    // and an `assetManager.getAssetDetails(assetId)` for metadata. Aggregate
+    // amounts per asset across VTXOs, then resolve names/decimals. Best-effort.
+    try {
+      const wallet: any = (this.account as any)?._wallet
+      const vtxos: any[] = wallet?.getVtxos ? (await wallet.getVtxos()) ?? [] : []
+      const byAsset = new Map<string, number>()
+      for (const v of vtxos) {
+        for (const a of (v?.assets ?? [])) {
+          if (!a?.assetId) continue
+          byAsset.set(a.assetId, (byAsset.get(a.assetId) ?? 0) + Number(a.amount ?? 0))
+        }
+      }
+      for (const [assetId, amount] of byAsset) {
+        let meta: any = {}
+        try {
+          meta = (await wallet?.assetManager?.getAssetDetails?.(assetId))?.metadata ?? {}
+        } catch {
+          // metadata lookup is optional — fall back to the raw id
+        }
+        const decimals = Number(meta.decimals ?? meta.tokenDecimals ?? 0)
+        const ticker = meta.ticker ?? meta.symbol ?? assetId.slice(0, 6)
+        out.push({
+          id: assetId,
+          name: meta.name ?? ticker,
+          ticker,
+          precision: decimals,
+          protocol: 'ARKADE',
+          layer: 'ARKADE_ARKADE',
+          balance: {
+            total: amount,
+            available: amount,
+            pending: 0,
+            totalDisplay: String(amount),
+            availableDisplay: String(amount),
+          },
+          capabilities: { canSend: true, canReceive: true, canSwap: false, supportsLightning: false, supportsOnchain: false },
+        })
+      }
+    } catch {
+      // token enumeration is best-effort — keep BTC even if VTXOs are unavailable
+    }
+    return out
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
