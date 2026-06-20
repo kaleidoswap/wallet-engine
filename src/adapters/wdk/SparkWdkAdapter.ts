@@ -193,8 +193,52 @@ export class SparkWdkAdapter implements IProtocolAdapter {
         supportsOnchain: true,
       },
     }
-    // TODO(Phase 2): enumerate Spark tokens from account.getBalance() token map.
-    return [btc]
+    const out: UnifiedAsset[] = [btc]
+
+    // Spark tokens. The WDK account wraps a SparkWallet whose `getBalance()`
+    // returns `{ satsBalance, tokenBalances }`, where tokenBalances is a
+    // Map<bech32m identifier, { balance, tokenMetadata|tokenInfo }>. Token
+    // enumeration is best-effort: never let it break the BTC listing.
+    try {
+      const wallet: any = (this.account as any)?._wallet
+      const full: any = wallet?.getBalance ? await wallet.getBalance() : null
+      const tokenBalances: any = full?.tokenBalances
+      if (tokenBalances && typeof tokenBalances.forEach === 'function') {
+        tokenBalances.forEach((entry: any, key: string) => {
+          const info: any = entry?.tokenMetadata ?? entry?.tokenInfo ?? {}
+          const id: string = info.tokenAddress ?? info.tokenIdentifier ?? String(key)
+          if (!id) return
+          const amount = Number(entry?.balance ?? 0)
+          const decimals = Number(info.tokenDecimals ?? info.decimals ?? 0)
+          const ticker = info.tokenTicker ?? info.tokenSymbol ?? info.symbol ?? id.slice(0, 6)
+          out.push({
+            id,
+            name: info.tokenName ?? info.name ?? ticker,
+            ticker,
+            precision: decimals,
+            protocol: 'SPARK',
+            layer: 'SPARK_SPARK',
+            balance: {
+              total: amount,
+              available: amount,
+              pending: 0,
+              totalDisplay: String(amount),
+              availableDisplay: String(amount),
+            },
+            capabilities: {
+              canSend: true,
+              canReceive: true,
+              canSwap: true,
+              supportsLightning: false,
+              supportsOnchain: false,
+            },
+          })
+        })
+      }
+    } catch {
+      // tokens are best-effort — keep BTC even if the token map is unavailable
+    }
+    return out
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
