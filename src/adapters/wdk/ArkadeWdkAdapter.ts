@@ -137,39 +137,30 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     }
     const out: UnifiedAsset[] = [btc]
 
-    // Arkade tokens. The account has no token enumeration, but its underlying
-    // wallet exposes the VTXO set (each VTXO carries `assets: { assetId, amount }[]`)
-    // and an `assetManager.getAssetDetails(assetId)` for metadata. Aggregate
-    // amounts per asset across VTXOs, then resolve names/decimals. Best-effort.
+    // Arkade tokens. Per the extension's working adapter, the wallet's
+    // `getBalance()` already includes `assets: { assetId, amount }[]` — token
+    // discovery does NOT come from getVtxos(). Resolve metadata (decimals /
+    // ticker / name) via `assetManager.getAssetDetails(assetId).metadata`.
     try {
       const wallet: any = (this.account as any)?._wallet
-      const vtxos: any[] = wallet?.getVtxos ? (await wallet.getVtxos()) ?? [] : []
-      const byAsset = new Map<string, number>()
-      let withAssets = 0
-      for (const v of vtxos) {
-        // VirtualCoin.assets?: Asset[] = { assetId, amount: bigint }
-        const list: any[] = v?.assets ?? []
-        if (list.length) withAssets++
-        for (const a of list) {
-          if (!a?.assetId) continue
-          byAsset.set(a.assetId, (byAsset.get(a.assetId) ?? 0) + Number(a.amount ?? 0))
-        }
-      }
-      // Diagnostic (temporary): surface why Arkade tokens may not appear.
-      // eslint-disable-next-line no-console
-      console.log(`[ArkadeWdkAdapter] listAssets: vtxos=${vtxos.length} withAssets=${withAssets} distinctAssets=${byAsset.size}`)
-      for (const [assetId, amount] of byAsset) {
+      const rawBalance: any = wallet?.getBalance ? await wallet.getBalance() : null
+      const rawAssets: any[] = Array.isArray(rawBalance?.assets) ? rawBalance.assets : []
+      for (const entry of rawAssets) {
+        const assetId = String(entry?.assetId ?? '')
+        const amount = Number(entry?.amount ?? 0)
+        if (!assetId || amount <= 0) continue
         let meta: any = {}
         try {
           meta = (await wallet?.assetManager?.getAssetDetails?.(assetId))?.metadata ?? {}
         } catch {
           // metadata lookup is optional — fall back to the raw id
         }
-        const decimals = Number(meta.decimals ?? meta.tokenDecimals ?? 0)
-        const ticker = meta.ticker ?? meta.symbol ?? assetId.slice(0, 6)
+        const decimals = Number(meta.decimals ?? 0) || 0
+        const ticker = (typeof meta.ticker === 'string' && meta.ticker.trim()) ? meta.ticker : assetId.slice(0, 6)
+        const name = (typeof meta.name === 'string' && meta.name.trim()) ? meta.name : ticker
         out.push({
           id: assetId,
-          name: meta.name ?? ticker,
+          name,
           ticker,
           precision: decimals,
           protocol: 'ARKADE',
@@ -181,11 +172,12 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
             totalDisplay: String(amount),
             availableDisplay: String(amount),
           },
+          icon: typeof meta.icon === 'string' ? meta.icon : undefined,
           capabilities: { canSend: true, canReceive: true, canSwap: false, supportsLightning: false, supportsOnchain: false },
         })
       }
     } catch {
-      // token enumeration is best-effort — keep BTC even if VTXOs are unavailable
+      // token enumeration is best-effort — keep BTC even if balance is unavailable
     }
     return out
   }
