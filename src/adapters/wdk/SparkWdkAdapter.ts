@@ -204,26 +204,30 @@ export class SparkWdkAdapter implements IProtocolAdapter {
       const full: any = wallet?.getBalance ? await wallet.getBalance() : null
       const tokenBalances: any = full?.tokenBalances
       if (tokenBalances && typeof tokenBalances.forEach === 'function') {
+        // TokenBalanceMap value = { ownedBalance, availableToSendBalance, tokenMetadata }
+        // (UserTokenMetadata: tokenName/tokenTicker/decimals). There is NO `balance`
+        // field — reading it returned 0. The Map key is the bech32m token identifier.
         tokenBalances.forEach((entry: any, key: string) => {
-          const info: any = entry?.tokenMetadata ?? entry?.tokenInfo ?? {}
-          const id: string = info.tokenAddress ?? info.tokenIdentifier ?? String(key)
+          const meta: any = entry?.tokenMetadata ?? entry?.tokenInfo ?? {}
+          const id: string = String(key)
           if (!id) return
-          const amount = Number(entry?.balance ?? 0)
-          const decimals = Number(info.tokenDecimals ?? info.decimals ?? 0)
-          const ticker = info.tokenTicker ?? info.tokenSymbol ?? info.symbol ?? id.slice(0, 6)
+          const owned = Number(entry?.ownedBalance ?? entry?.balance ?? 0)
+          const available = Number(entry?.availableToSendBalance ?? entry?.ownedBalance ?? 0)
+          const decimals = Number(meta.decimals ?? meta.tokenDecimals ?? 0)
+          const ticker = meta.tokenTicker ?? meta.tokenSymbol ?? meta.symbol ?? id.slice(0, 6)
           out.push({
             id,
-            name: info.tokenName ?? info.name ?? ticker,
+            name: meta.tokenName ?? meta.name ?? ticker,
             ticker,
             precision: decimals,
             protocol: 'SPARK',
             layer: 'SPARK_SPARK',
             balance: {
-              total: amount,
-              available: amount,
+              total: owned,
+              available,
               pending: 0,
-              totalDisplay: String(amount),
-              availableDisplay: String(amount),
+              totalDisplay: String(owned),
+              availableDisplay: String(available),
             },
             capabilities: {
               canSend: true,

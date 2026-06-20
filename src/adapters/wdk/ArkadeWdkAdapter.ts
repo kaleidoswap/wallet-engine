@@ -145,12 +145,19 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
       const wallet: any = (this.account as any)?._wallet
       const vtxos: any[] = wallet?.getVtxos ? (await wallet.getVtxos()) ?? [] : []
       const byAsset = new Map<string, number>()
+      let withAssets = 0
       for (const v of vtxos) {
-        for (const a of (v?.assets ?? [])) {
+        // VirtualCoin.assets?: Asset[] = { assetId, amount: bigint }
+        const list: any[] = v?.assets ?? []
+        if (list.length) withAssets++
+        for (const a of list) {
           if (!a?.assetId) continue
           byAsset.set(a.assetId, (byAsset.get(a.assetId) ?? 0) + Number(a.amount ?? 0))
         }
       }
+      // Diagnostic (temporary): surface why Arkade tokens may not appear.
+      // eslint-disable-next-line no-console
+      console.log(`[ArkadeWdkAdapter] listAssets: vtxos=${vtxos.length} withAssets=${withAssets} distinctAssets=${byAsset.size}`)
       for (const [assetId, amount] of byAsset) {
         let meta: any = {}
         try {
