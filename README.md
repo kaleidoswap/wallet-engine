@@ -4,6 +4,12 @@
 > **Spark · RGB/RLN · Liquid · Arkade** behind one `IProtocolAdapter` contract,
 > with a cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.
 
+> [!WARNING]
+> **Alpha — experimental, not production-ready.** This engine moves real funds across
+> Bitcoin L2s. APIs may change without notice, adapters are incomplete, and it has not
+> been independently audited. Do not use it with mainnet funds you cannot afford to lose.
+> Use at your own risk.
+
 `wallet-engine` is the headless core you build a multi-protocol Bitcoin wallet on.
 It hides the differences between Bitcoin L2s behind one interface, keeps the app code
 the same across React Native, browser extension, and Node hosts, and ships the hard
@@ -236,9 +242,11 @@ consumers of `wallet-engine` never import `kaleido-sdk` directly.
 
 ## Status
 
-Beta (`1.0.0-beta`). WDK adapters are `beta` maturity (native fallbacks remain
-available); see the `maturity` field per protocol in the capability manifest.
+**Alpha — experimental.** Published under a `1.0.0-beta` version tag, but treat the
+project as alpha: interfaces are unstable, several adapters are partial, and nothing has
+been audited. WDK adapters are `beta` maturity (native fallbacks remain available); see
+the `maturity` field per protocol in the capability manifest.
 
 ## License
 
-MIT
+[MIT](LICENSE)
