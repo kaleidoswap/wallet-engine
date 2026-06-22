@@ -5,12 +5,28 @@
 
 import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
 
+/**
+ * How the RGB Lightning Node (RLN) is reached.
+ *  - "http": direct HTTP RPC to `nodeUrl` (optional Biscuit/JWT auth).
+ *  - "nwc":  Nostr Wallet Connect — the node is reached over a relay using a
+ *            `nostr+walletconnect://` connection string (`nwcUri`). The maker
+ *            stays a separate optional HTTP concern regardless of transport.
+ */
+export type RgbTransport = 'http' | 'nwc'
+
 export interface RgbConfig extends BaseProtocolConfig {
   protocol: 'RGB'
-  makerUrl?: string
-  nodeUrl: string
-  jwt?: string
-  apiKey?: string
+  makerUrl: string // Kaleidoswap maker URL
+  /** Node transport. Defaults to "http" when omitted. */
+  transport?: RgbTransport
+  nodeUrl?: string // RGB Lightning node URL (required for transport "http")
+  jwt?: string // JWT token for node authentication (optional)
+  apiKey?: string // API key for maker (optional)
+  /**
+   * `nostr+walletconnect://` connection string. Required for transport "nwc".
+   * Sensitive (carries the client secret) — encrypted at rest, never logged.
+   */
+  nwcUri?: string
 }
 
 export interface RgbAssetMetadata {

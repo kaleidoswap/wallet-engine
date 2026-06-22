@@ -5,6 +5,7 @@
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from './IProtocolAdapter'
+import { getProtocolCapabilities } from '../protocol-capabilities'
 import { kaleidoClientManager } from '../lib/kaleido-client-manager'
 import type {
   CreateSwapOrderRequest,
@@ -55,6 +56,7 @@ import {
 import { RgbConfig } from '../types/rgb'
 
 export class RgbAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('RGB')
   readonly protocolName: ProtocolType = 'RGB'
   readonly supportedLayers: Layer[] = ['RGB_L1', 'RGB_LN', 'BTC_L1', 'BTC_LN']
   readonly version = '1.0.0'

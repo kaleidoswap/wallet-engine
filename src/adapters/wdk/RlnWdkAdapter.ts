@@ -18,6 +18,7 @@
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
+import { getProtocolCapabilities } from '../../protocol-capabilities'
 import {
   ProtocolType,
   Layer,
@@ -57,6 +58,7 @@ function mapStatus(s?: string): TransactionStatus {
 }
 
 export class RlnWdkAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('RGB')
   readonly protocolName: ProtocolType = 'RGB'
   readonly supportedLayers: Layer[] = getCapabilities('RGB').layers
   readonly version = '0.1.0-wdk'

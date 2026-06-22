@@ -38,6 +38,7 @@ import {
   TransactionStatus,
   ProtocolError,
 } from '../../types/base'
+import { getProtocolCapabilities } from '../../protocol-capabilities'
 import { getCapabilities } from '../../capabilities'
 import { loadWdkModule } from './moduleLoader'
 
@@ -71,6 +72,7 @@ const KNOWN_ASSETS: Record<string, { ticker: string; name: string; precision: nu
 }
 
 export class LiquidWdkAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('LIQUID')
   readonly protocolName: ProtocolType = 'LIQUID'
   readonly supportedLayers: Layer[] = getCapabilities('LIQUID').layers
   readonly version = '0.1.0-wdk'

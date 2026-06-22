@@ -5,6 +5,7 @@
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from './IProtocolAdapter'
+import { getProtocolCapabilities } from '../protocol-capabilities'
 import { sparkClientManager } from '../lib/spark-client-manager'
 import { SparkConfig } from '../types/spark'
 import {
@@ -32,6 +33,7 @@ import {
 const DEFAULT_MAX_FEE_SATS = 1000
 
 export class SparkAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('SPARK')
   readonly protocolName: ProtocolType = 'SPARK'
   readonly supportedLayers: Layer[] = ['SPARK_SPARK', 'BTC_LN']
   readonly version = '1.0.0'

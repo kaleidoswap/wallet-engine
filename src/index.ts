@@ -8,14 +8,22 @@ export * from './types/base'
 export * from './types/cross-l2'
 export type { SparkConfig, SparkTransfer, SparkLightningInvoice, SparkLightningSend, SparkNodeInfo } from './types/spark'
 export type { ArkadeConfig, ArkadeVtxo, ArkadeBalance, ArkadeTransaction } from './types/arkade'
-export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, KaleidoswapQuote, RgbNodeInfo, TradingPair } from './types/rgb'
+export type { RgbConfig, RgbTransport, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, KaleidoswapQuote, RgbNodeInfo, TradingPair } from './types/rgb'
 export * from './types/flashnet'
 
 // Adapter interface
-export { type IProtocolAdapter, type BaseProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
+export { type IProtocolAdapter, type BaseProtocolConfig, type ProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
 
-// Capability manifest (differences-as-data backbone)
+// Capability manifest (differences-as-data backbone — behavioural quirks)
 export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type ProtocolCapabilities } from './capabilities'
+
+// Operation-capability manifest (backs IProtocolAdapter.capabilities)
+export {
+  type ProtocolCapability,
+  PROTOCOL_OPERATION_CAPABILITIES,
+  getProtocolCapabilities,
+  protocolSupports,
+} from './protocol-capabilities'
 
 // Platform ports (injected per host)
 export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'

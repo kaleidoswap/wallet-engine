@@ -24,6 +24,7 @@
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
+import { getProtocolCapabilities } from '../../protocol-capabilities'
 import {
   ProtocolType,
   Layer,
@@ -92,6 +93,7 @@ const SPARK_NETWORK_MAP: Record<string, SparkNetwork> = {
 }
 
 export class SparkWdkAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('SPARK')
   readonly protocolName: ProtocolType = 'SPARK'
   readonly supportedLayers: Layer[] = getCapabilities('SPARK').layers
   readonly version = '0.1.0-wdk'

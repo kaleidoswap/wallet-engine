@@ -5,6 +5,7 @@
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from './IProtocolAdapter'
+import { getProtocolCapabilities } from '../protocol-capabilities'
 import { arkadeClientManager } from '../lib/arkade-client-manager'
 import { ArkadeConfig } from '../types/arkade'
 import {
@@ -30,6 +31,7 @@ import {
 } from '../types/base'
 
 export class ArkadeAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('ARKADE')
   readonly protocolName: ProtocolType = 'ARKADE'
   readonly supportedLayers: Layer[] = ['BTC_ARKADE', 'BTC_L1', 'ARKADE_ARKADE']
   readonly version = '1.0.0'

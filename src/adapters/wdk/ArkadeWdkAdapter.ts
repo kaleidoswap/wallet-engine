@@ -20,6 +20,7 @@
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
+import { getProtocolCapabilities } from '../../protocol-capabilities'
 import {
   ProtocolType,
   Layer,
@@ -54,6 +55,7 @@ export interface ArkadeAdapterConfig extends BaseProtocolConfig {
 }
 
 export class ArkadeWdkAdapter implements IProtocolAdapter {
+  readonly capabilities = getProtocolCapabilities('ARKADE')
   readonly protocolName: ProtocolType = 'ARKADE'
   readonly supportedLayers: Layer[] = getCapabilities('ARKADE').layers
   readonly version = '0.1.0-wdk'
