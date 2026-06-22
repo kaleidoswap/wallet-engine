@@ -84,7 +84,7 @@ export {
 } from './disclosure'
 
 // Manager
-export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
+export { ProtocolManager, type ProtocolManagerConfig, type ProtocolManagerLogger } from './manager/ProtocolManager'
 
 // Client managers
 export { sparkClientManager } from './lib/spark-client-manager'
