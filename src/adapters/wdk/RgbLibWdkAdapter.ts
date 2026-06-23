@@ -14,9 +14,15 @@
  * Discipline: no WDK/rgb-lib types cross the contract — domain types only; the
  * module account is read as `any` and translated.
  *
- * NOTE: the exact rgb-lib method names/response shapes are read defensively
- * (optional chaining + fallbacks) and should be validated on-device against the
- * installed @utexo/wdk-wallet-rgb version.
+ * Wired against @utexo/wdk-wallet-rgb@2.0.3's published types:
+ *   - WalletManagerRgb(seed, RgbWalletConfig).getAccount() → WalletAccountRgb
+ *   - account: getAddress / registerWallet()→{address,btcBalance} / listAssets()
+ *     (sync array) / receiveAsset / transfer(TransferOptions) / createUtxos /
+ *     signPsbt / refreshWallet / syncWallet / listTransfers / listTransactions.
+ *   - NO invoice decoder, NO Lightning, NO swaps on the WDK account surface.
+ * Per-asset balance rides on listAssets(); BTC balance rides on registerWallet().
+ * Response field names (InvoiceReceiveData, BtcBalance, ListAssetsResponse) are
+ * read defensively and should still be smoke-tested on-device.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -110,27 +116,38 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
   async getReceiveAddress(assetId?: string): Promise<Address> {
     this.assertConnected()
     if (assetId) {
-      const inv: any = await this.account.receiveAsset({ assetId, witness: true })
+      // receiveAsset requires an amount + a witness flag; 0 = "any amount".
+      const inv: any = await this.account.receiveAsset({ assetId, amount: 0, witness: true })
       return { address: inv?.invoice ?? '', format: 'RGB_INVOICE', asset: assetId }
     }
-    const address: string = await this.account.getAddress()
+    // The base account exposes getAddress(); registerWallet() also returns it.
+    const address: string =
+      (await this.account.getAddress?.()) ?? (await this.account.registerWallet()).address
     return { address, format: 'BTC_ADDRESS' }
   }
 
   // --- Balance ------------------------------------------------------------
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
     this.assertConnected()
-    const b: any = (await this.account.getBtcBalance?.()) ?? (await this.account.registerWallet?.()) ?? {}
-    // rgb-lib exposes a vanilla/colored split; fall back to a flat shape or btcBalance.
-    const v = b?.vanilla ?? b ?? {}
-    const settled = Number(v.settled ?? b.btcBalance ?? 0)
+    // The WDK account has no standalone BTC-balance call; registerWallet()
+    // returns { address, btcBalance }. btcBalance is the rgb-lib vanilla/colored
+    // split; read the vanilla (uncolored) sats.
+    const reg: any = await this.account.registerWallet()
+    const v = reg?.btcBalance?.vanilla ?? reg?.btcBalance ?? {}
+    const settled = Number(v.settled ?? 0)
     const spendable = Number(v.spendable ?? settled)
     return { confirmed: settled, unconfirmed: Math.max(0, Number(v.future ?? spendable) - settled), total: spendable }
   }
 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
-    await (this.account.refreshWallet?.() ?? this.account.syncWallet?.())?.catch?.(() => {})
+    // refreshWallet()/syncWallet() are synchronous void on the WDK account.
+    try {
+      this.account.refreshWallet?.()
+      this.account.syncWallet?.()
+    } catch {
+      /* best-effort */
+    }
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
@@ -138,16 +155,19 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RGB_L1_PROFILE)]
 
+    // listAssets() is synchronous and returns the asset array directly (it may
+    // also come wrapped as { nia, cfa, uda } depending on rgb-sdk version).
     const res: any = await this.account.listAssets()
-    const nia: any[] = res?.nia ?? res?.assets?.nia ?? []
-    for (const a of nia) out.push(rgbNiaAsset(a, RGB_L1_PROFILE))
+    const assets: any[] = Array.isArray(res) ? res : res?.nia ?? res?.assets?.nia ?? []
+    for (const a of assets) out.push(rgbNiaAsset(normalizeAsset(a), RGB_L1_PROFILE))
     return out
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
     this.assertConnected()
-    const b: any = await this.account.getAssetBalance(assetId)
-    return rgbAssetBalance(b)
+    // No standalone balance call; the per-asset balance rides on listAssets().
+    const a = (await this.listAssets()).find((x) => x.id === assetId)
+    return a?.balance ?? rgbAssetBalance({})
   }
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
@@ -166,7 +186,7 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     }
     const inv: any = await this.account.receiveAsset({
       assetId: request.asset,
-      amount: request.assetAmount,
+      amount: request.assetAmount ?? 0, // amount is required; 0 = any amount
       witness: true,
     })
     return {
@@ -178,18 +198,10 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     }
   }
 
-  async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    this.assertConnected()
-    const d: any = await this.account.decodeRGBInvoice({ invoice })
-    return {
-      paymentHash: d?.recipientId ?? d?.recipient_id ?? '',
-      amount: d?.amount,
-      description: d?.description,
-      expiresAt: (d?.expirationTimestamp ?? d?.expiration_timestamp ?? 0) * 1000,
-      destination: d?.recipientId ?? d?.recipient_id ?? '',
-      asset_id: d?.assetId ?? d?.asset_id,
-      asset_amount: d?.amount,
-    }
+  async decodeInvoice(_invoice: string): Promise<DecodedInvoice> {
+    // The WDK account does not expose an invoice decoder; decoding would require
+    // dropping to getRgbWallet() (the underlying rgb-sdk). Not supported here.
+    throw new ProtocolError('RGB-L1 adapter does not decode invoices', 'RGB_L1', 'NOT_SUPPORTED')
   }
 
   // --- Send ---------------------------------------------------------------
@@ -239,9 +251,14 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     return this.account.receiveAsset(params)
   }
 
-  async decodeRgbInvoice(params: any): Promise<any> {
+  /**
+   * Sign a PSBT with the wallet's keys (rgb-lib signs wallet-owned inputs).
+   * Returns the contract's `{ psbt, unchanged }` shape.
+   */
+  async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
     this.assertConnected()
-    return this.account.decodeRGBInvoice(params?.invoice ? params : { invoice: params })
+    const signed: string = await this.account.signPsbt(psbtHex)
+    return { psbt: signed ?? psbtHex, unchanged: !signed || signed === psbtHex }
   }
 
   async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }): Promise<{ success: boolean }> {
@@ -271,5 +288,25 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     if (!this.connected || !this.account) {
       throw new ProtocolError('RgbLibWdkAdapter not connected', 'RGB_L1', 'NOT_CONNECTED')
     }
+  }
+}
+
+/**
+ * Normalize an rgb-sdk asset record (which may use camelCase `assetId` or
+ * snake_case `asset_id`) into the shape `RgbCore.rgbNiaAsset` expects.
+ */
+function normalizeAsset(a: any): {
+  asset_id: string
+  name?: string
+  ticker?: string
+  precision?: number | string
+  balance?: { spendable?: number; settled?: number; future?: number }
+} {
+  return {
+    asset_id: a?.assetId ?? a?.asset_id ?? a?.id ?? '',
+    name: a?.name,
+    ticker: a?.ticker,
+    precision: a?.precision,
+    balance: a?.balance,
   }
 }

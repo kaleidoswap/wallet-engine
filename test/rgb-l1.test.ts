@@ -80,23 +80,35 @@ describe('RgbLibWdkAdapter', () => {
     return adapter
   }
 
-  it('lists assets with the RGB_L1 profile (no lightning, RGB_L1 layer)', async () => {
+  it('lists assets with the RGB_L1 profile (BTC via registerWallet, assets via listAssets array)', async () => {
     const adapter = connected({
-      getBtcBalance: async () => ({ vanilla: { settled: 1000, spendable: 1000 } }),
-      listAssets: async () => ({ nia: [{ asset_id: 'rgb:USDT', ticker: 'USDT', precision: 2, balance: { spendable: 500 } }] }),
+      // Real API: registerWallet() returns { address, btcBalance } where
+      // btcBalance is the vanilla/colored split; listAssets() is a sync array
+      // whose entries use camelCase `assetId`.
+      registerWallet: async () => ({ address: 'bcrt1q', btcBalance: { vanilla: { settled: 1000, spendable: 1000 } } }),
+      listAssets: () => [{ assetId: 'rgb:USDT', ticker: 'USDT', precision: 2, balance: { spendable: 500 } }],
     })
     const assets = await adapter.listAssets()
     expect(assets.map((a) => a.protocol)).toEqual(['RGB_L1', 'RGB_L1'])
+    expect(assets[0]).toMatchObject({ id: 'BTC', layer: 'BTC_L1' })
+    expect(assets[0].balance.total).toBe(1000)
     const usdt = assets.find((a) => a.id === 'rgb:USDT')!
     expect(usdt.layer).toBe('RGB_L1')
+    expect(usdt.balance.total).toBe(500)
     expect(usdt.capabilities.supportsLightning).toBe(false)
     expect(usdt.capabilities.canSwap).toBe(false)
   })
 
-  it('refuses a BTC Lightning invoice (no LN on L1)', async () => {
+  it('refuses BTC Lightning invoices, LN sends, and invoice decoding (on-chain only)', async () => {
     const adapter = connected({})
     await expect(adapter.createInvoice({ asset: 'BTC' } as any)).rejects.toThrow(/no Lightning/i)
     await expect(adapter.sendPayment({ invoice: 'lnbc1' } as any)).rejects.toThrow(/no Lightning/i)
+    await expect(adapter.decodeInvoice('rgb:any')).rejects.toThrow(/does not decode/i)
+  })
+
+  it('signs a PSBT via the rgb-lib account', async () => {
+    const adapter = connected({ signPsbt: async (p: string) => `signed:${p}` })
+    expect(await adapter.signPsbt('psbtbase64')).toEqual({ psbt: 'signed:psbtbase64', unchanged: false })
   })
 
   it('creates an RGB asset invoice', async () => {
