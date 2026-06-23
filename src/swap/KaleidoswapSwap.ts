@@ -47,6 +47,37 @@ export interface SwapExecuteRequest extends SwapQuoteRequest {
   receiverAddressFormat: string
 }
 
+/**
+ * Thin response shapes for the swap module's RFQ calls. These are NOT the
+ * module's own types (it stays `any` at construction) — they exist so a
+ * renamed/missing money field is a compile error here, not a silent `NaN`.
+ */
+interface RawQuote {
+  rfqId: string
+  tokenInAmount: number | string
+  tokenOutAmount: number | string
+  price: number | string
+  fee: number | string
+  expiresAt: number | string
+}
+interface RawSwap {
+  orderId: string
+  tokenInAmount: number | string
+  tokenOutAmount: number | string
+  price?: number | string
+  fee: number | string
+  depositAddress?: string | null
+  depositAddressFormat?: string | null
+}
+interface RawOrderStatus {
+  id: string
+  status?: string
+  rfq_id?: string
+  price?: number | string
+  from_asset?: { asset_id?: string; amount?: number | string }
+  to_asset?: { asset_id?: string; amount?: number | string }
+}
+
 export class KaleidoswapSwap {
   private proto: any = null
 
@@ -70,7 +101,7 @@ export class KaleidoswapSwap {
       throw new ProtocolError('Swap quote requires fromAmount', 'RGB', 'NO_AMOUNT')
     }
     const proto = await this.ensure()
-    const q: any = await proto.quoteSwap({
+    const q: RawQuote = await proto.quoteSwap({
       fromAssetId: req.fromAsset,
       toAssetId: req.toAsset,
       fromLayer: req.fromLayer,
@@ -95,7 +126,7 @@ export class KaleidoswapSwap {
       throw new ProtocolError('Swap requires fromAmount', 'RGB', 'NO_AMOUNT')
     }
     const proto = await this.ensure()
-    const r: any = await proto.swap({
+    const r: RawSwap = await proto.swap({
       fromAssetId: req.fromAsset,
       toAssetId: req.toAsset,
       fromLayer: req.fromLayer,
@@ -127,19 +158,19 @@ export class KaleidoswapSwap {
 
   async getSwapStatus(orderId: string): Promise<SwapResult> {
     const proto = await this.ensure()
-    const o: any = await proto.getOrderStatus(orderId)
+    const o: RawOrderStatus = await proto.getOrderStatus(orderId)
     const status = mapOrderStatus(o?.status)
     return {
       swapId: o.id,
       status,
       quote: {
-        id: o.rfq_id,
-        fromAsset: o.from_asset?.asset_id,
-        fromAmount: Number(o.from_asset?.amount ?? 0),
-        toAsset: o.to_asset?.asset_id,
-        toAmount: Number(o.to_asset?.amount ?? 0),
-        price: Number(o.price ?? 0),
-        fee: { amount: 0, asset: o.from_asset?.asset_id },
+        id: o.rfq_id ?? o.id,
+        fromAsset: o.from_asset?.asset_id ?? '',
+        fromAmount: toAmount(o.from_asset?.amount ?? 0, 'from_asset.amount'),
+        toAsset: o.to_asset?.asset_id ?? '',
+        toAmount: toAmount(o.to_asset?.amount ?? 0, 'to_asset.amount'),
+        price: toAmount(o.price ?? 0, 'price'),
+        fee: { amount: 0, asset: o.from_asset?.asset_id ?? '' },
         expiresAt: 0,
         provider: 'kaleidoswap',
       },
