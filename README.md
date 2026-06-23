@@ -69,18 +69,13 @@ The router and UI read that manifest — they never special-case a protocol by n
 
 ## Install
 
-> **Heads-up:** during the `wallet-protocols → wallet-engine` rename, the package is
-> still published to npm as
-> [`@kaleidorg/wallet-protocols`](https://www.npmjs.com/package/@kaleidorg/wallet-protocols).
-> Until the `@kaleidorg/wallet-engine` name is published, install it under the current
-> name — or alias it to the future import path:
-
 ```bash
-# current published name
-pnpm add @kaleidorg/wallet-protocols
-# or alias it so your code can import '@kaleidorg/wallet-engine' today:
-pnpm add @kaleidorg/wallet-engine@npm:@kaleidorg/wallet-protocols
+pnpm add @kaleidorg/wallet-engine
 ```
+
+> Published as [`@kaleidorg/wallet-engine`](https://www.npmjs.com/package/@kaleidorg/wallet-engine)
+> (renamed from the earlier `@kaleidorg/wallet-protocols`; versions ≤ 1.0.0-beta.11 were
+> published under the old name).
 
 Heavy protocol SDKs are **optional dependencies** — install only the adapters you use:
 

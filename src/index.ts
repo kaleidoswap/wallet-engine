@@ -1,5 +1,5 @@
 /**
- * @kaleidorg/wallet-protocols
+ * @kaleidorg/wallet-engine
  * Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet.
  */
 
@@ -29,9 +29,9 @@ export { LIQUID_USDT_ASSET_ID } from './constants'
 // NOTE: adapters are deliberately NOT exported from this barrel — they pull
 // heavy SDKs / WDK weight an extension host does not want. Import them from the
 // opt-in sub-paths instead:
-//   @kaleidorg/wallet-protocols/adapters/native  (SDK-backed + client managers)
-//   @kaleidorg/wallet-protocols/adapters/wdk     (WDK-backed + createWdkRegistry)
-//   @kaleidorg/wallet-protocols/swap             (Kaleidoswap RFQ wrapper)
+//   @kaleidorg/wallet-engine/adapters/native  (SDK-backed + client managers)
+//   @kaleidorg/wallet-engine/adapters/wdk     (WDK-backed + createWdkRegistry)
+//   @kaleidorg/wallet-engine/swap             (Kaleidoswap RFQ wrapper)
 
 // Cross-protocol router (chooses BETWEEN protocols)
 export {
