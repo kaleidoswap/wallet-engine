@@ -11,6 +11,7 @@ import {
   InvoiceRequest,
   Invoice,
   DecodedInvoice,
+  KeysendRequest,
   PaymentRequest,
   PaymentResult,
   PaymentStatus,
@@ -28,7 +29,11 @@ import {
   ProtocolConfig,
   ProtocolAdapterRegistry,
 } from '../adapters/IProtocolAdapter'
+import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
+
+/** Per-protocol timeout for cross-protocol fan-out reads (assets/transactions). */
+const PER_PROTOCOL_TIMEOUT_MS = 8_000
 
 export interface ProtocolManagerConfig {
   defaultProtocol?: ProtocolType
@@ -36,17 +41,26 @@ export interface ProtocolManagerConfig {
   enabledProtocols?: ProtocolType[]
   /** Logger override; defaults to the injected platform logger (or console). */
   logger?: Logger
+  /**
+   * Generic message-verification fallback used by `verifyMessage` when the
+   * active adapter does not implement `verifyMessage` itself. Hosts inject a
+   * recoverable-ECDSA verifier (returns the signer's hex pubkey). When absent,
+   * `verifyMessage` throws NOT_SUPPORTED for adapters without native support.
+   */
+  verifyMessageFallback?: (message: string, signature: string) => Promise<string>
 }
 
 export class ProtocolManager {
   private registry: ProtocolAdapterRegistry
   private activeProtocol: ProtocolType | null = null
   private log: Logger
+  private verifyMessageFallback?: (message: string, signature: string) => Promise<string>
 
   constructor(_config: ProtocolManagerConfig = {}) {
     this.registry = new ProtocolAdapterRegistry()
     this.activeProtocol = _config.defaultProtocol || null
     this.log = _config.logger ?? getLogger()
+    this.verifyMessageFallback = _config.verifyMessageFallback
   }
 
   // ========================================================================
@@ -64,6 +78,32 @@ export class ProtocolManager {
 
   isProtocolSupported(protocol: ProtocolType): boolean {
     return this.registry.has(protocol)
+  }
+
+  // ========================================================================
+  // Capability Manifest
+  // ========================================================================
+
+  /**
+   * Static capability manifest for a registered protocol (empty if not
+   * registered). Capabilities are static, so this works while unconfigured.
+   */
+  getCapabilities(protocol: ProtocolType): readonly ProtocolCapability[] {
+    return this.registry.get(protocol)?.capabilities ?? []
+  }
+
+  /** Capability manifest for every registered protocol. */
+  getAllCapabilities(): Partial<Record<ProtocolType, readonly ProtocolCapability[]>> {
+    const result: Partial<Record<ProtocolType, readonly ProtocolCapability[]>> = {}
+    for (const adapter of this.registry.getAll()) {
+      result[adapter.protocolName] = adapter.capabilities
+    }
+    return result
+  }
+
+  /** Whether a protocol declares support for a given operation. */
+  protocolSupports(protocol: ProtocolType, capability: ProtocolCapability): boolean {
+    return this.getCapabilities(protocol).includes(capability)
   }
 
   // ========================================================================
@@ -187,8 +227,14 @@ export class ProtocolManager {
     return this.getActiveAdapter().getAssetBalance(assetId)
   }
 
+  /**
+   * Invalidate every connected adapter's balance cache so the next read is
+   * fresh. Tolerates per-adapter failures — one slow protocol can't block the
+   * others.
+   */
   async refreshBalances(): Promise<void> {
-    return this.getActiveAdapter().refreshBalances()
+    const adapters = this.registry.getAll().filter((a) => a.isConnected())
+    await Promise.allSettled(adapters.map((a) => a.refreshBalances()))
   }
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
@@ -211,8 +257,57 @@ export class ProtocolManager {
     return this.getActiveAdapter().sendPayment(request)
   }
 
+  async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
+    const adapter = this.getActiveAdapter()
+    if (!adapter.payKeysend) {
+      throw new ProtocolError(
+        'Keysend not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED'
+      )
+    }
+    return adapter.payKeysend(request)
+  }
+
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     return this.getActiveAdapter().getPaymentStatus(paymentHash)
+  }
+
+  /**
+   * Sign a message with the active adapter's wallet identity key (LND-style
+   * zbase32 recoverable ECDSA). Throws if the adapter doesn't implement it —
+   * callers fall back to their own mnemonic-derived signer.
+   */
+  async signMessage(message: string): Promise<string> {
+    const adapter = this.getActiveAdapter()
+    if (typeof adapter.signMessage !== 'function') {
+      throw new ProtocolError(
+        'signMessage not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED'
+      )
+    }
+    return adapter.signMessage(message)
+  }
+
+  /**
+   * Verify an LND-style zbase32 signature, returning the signer's hex pubkey.
+   * Routes to the active adapter, else the injected generic fallback, else
+   * throws NOT_SUPPORTED.
+   */
+  async verifyMessage(message: string, signature: string): Promise<string> {
+    const adapter = this.getActiveAdapter()
+    if (typeof adapter.verifyMessage === 'function') {
+      return adapter.verifyMessage(message, signature)
+    }
+    if (this.verifyMessageFallback) {
+      return this.verifyMessageFallback(message, signature)
+    }
+    throw new ProtocolError(
+      'verifyMessage not supported by active protocol',
+      adapter.protocolName,
+      'NOT_SUPPORTED'
+    )
   }
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
@@ -247,38 +342,56 @@ export class ProtocolManager {
   // Cross-Protocol Operations
   // ========================================================================
 
+  /**
+   * Assets across all connected protocols. Runs per-adapter calls in parallel
+   * with an 8s timeout each — a single slow/degraded backend can't freeze the
+   * whole list for every consumer of asset data.
+   */
   async listAllAssets(): Promise<UnifiedAsset[]> {
+    const adapters = this.registry.getAll().filter((a) => a.isConnected())
+    const results = await Promise.allSettled(
+      adapters.map((adapter) => this.withTimeout(adapter.listAssets(), adapter.protocolName, 'listAssets'))
+    )
+
     const allAssets: UnifiedAsset[] = []
-
-    for (const adapter of this.registry.getAll()) {
-      if (adapter.isConnected()) {
-        try {
-          const assets = await adapter.listAssets()
-          allAssets.push(...assets)
-        } catch (error) {
-          this.log.error(`[ProtocolManager] Error listing assets for ${adapter.protocolName}:`, error)
-        }
-      }
-    }
-
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') allAssets.push(...result.value)
+      else this.log.error(`[ProtocolManager] Error listing assets for ${adapters[index].protocolName}:`, result.reason)
+    })
     return allAssets
   }
 
+  /**
+   * Transactions across all connected protocols. Parallel + per-protocol
+   * timeout, for the same reason as `listAllAssets`.
+   */
   async listAllTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+    const adapters = this.registry.getAll().filter((a) => a.isConnected())
+    const results = await Promise.allSettled(
+      adapters.map((adapter) =>
+        this.withTimeout(adapter.listTransactions(filter), adapter.protocolName, 'listTransactions')
+      )
+    )
+
     const allTransactions: UnifiedTransaction[] = []
-
-    for (const adapter of this.registry.getAll()) {
-      if (adapter.isConnected()) {
-        try {
-          const transactions = await adapter.listTransactions(filter)
-          allTransactions.push(...transactions)
-        } catch (error) {
-          this.log.error(`[ProtocolManager] Error listing transactions for ${adapter.protocolName}:`, error)
-        }
-      }
-    }
-
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') allTransactions.push(...result.value)
+      else this.log.error(`[ProtocolManager] Error listing transactions for ${adapters[index].protocolName}:`, result.reason)
+    })
     return allTransactions.sort((a, b) => b.timestamp - a.timestamp)
+  }
+
+  /** Race a per-protocol call against an 8s timeout. */
+  private withTimeout<T>(p: Promise<T>, protocol: ProtocolType, op: string): Promise<T> {
+    return Promise.race([
+      p,
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`${op}(${protocol}) timed out after ${PER_PROTOCOL_TIMEOUT_MS}ms`)),
+          PER_PROTOCOL_TIMEOUT_MS
+        )
+      ),
+    ])
   }
 
   async findAsset(assetId: string): Promise<UnifiedAsset | null> {
