@@ -10,7 +10,7 @@
  */
 
 import { ProtocolType, UnifiedAsset } from '../types/base'
-import { LIQUID_USDT_ASSET_ID } from '../adapters/wdk/LiquidWdkAdapter'
+import { LIQUID_USDT_ASSET_ID } from '../constants'
 
 export type DisclosureLevel = 'lite' | 'advanced'
 

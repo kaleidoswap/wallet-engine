@@ -42,9 +42,10 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 
-/** Well-known Liquid mainnet Tether USD (USDt) asset id — the lite-mode "USD". */
-export const LIQUID_USDT_ASSET_ID =
-  'ce091c998b83c78bb71a632313ba3760f1763d9cfcffae02258ffa9865a37bd2'
+// Re-exported from the neutral constants module so core (disclosure) never has
+// to import this adapter to reach the asset id.
+export { LIQUID_USDT_ASSET_ID } from '../../constants'
+import { LIQUID_USDT_ASSET_ID } from '../../constants'
 
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'

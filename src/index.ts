@@ -23,20 +23,15 @@ export { PROTOCOL_OPERATIONS, getProtocolOperations, protocolSupportsOperation, 
 // Platform ports (injected per host)
 export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'
 
-// Adapters (native — being migrated to WDK)
-export { SparkAdapter } from './adapters/SparkAdapter'
-export { ArkadeAdapter } from './adapters/ArkadeAdapter'
-export { RgbAdapter } from './adapters/RgbAdapter'
+// Shared constants
+export { LIQUID_USDT_ASSET_ID } from './constants'
 
-// Adapters (WDK-backed)
-export { SparkWdkAdapter, type SparkAdapterConfig } from './adapters/wdk/SparkWdkAdapter'
-export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './adapters/wdk/LiquidWdkAdapter'
-export { RlnWdkAdapter, type RlnAdapterConfig } from './adapters/wdk/RlnWdkAdapter'
-export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './adapters/wdk/ArkadeWdkAdapter'
-export { createWdkRegistry, type WdkRegistryOptions } from './registry/createWdkRegistry'
-
-// WDK module loader (RN injects static require; other hosts use dynamic import)
-export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './adapters/wdk/moduleLoader'
+// NOTE: adapters are deliberately NOT exported from this barrel — they pull
+// heavy SDKs / WDK weight an extension host does not want. Import them from the
+// opt-in sub-paths instead:
+//   @kaleidorg/wallet-protocols/adapters/native  (SDK-backed + client managers)
+//   @kaleidorg/wallet-protocols/adapters/wdk     (WDK-backed + createWdkRegistry)
+//   @kaleidorg/wallet-protocols/swap             (Kaleidoswap RFQ wrapper)
 
 // Cross-protocol router (chooses BETWEEN protocols)
 export {
@@ -50,14 +45,6 @@ export {
   type ClassifiedDestination,
   type DestinationKind,
 } from './router/destination'
-
-// Kaleidoswap RFQ swap wrapper
-export {
-  KaleidoswapSwap,
-  type KaleidoswapSwapConfig,
-  type SwapQuoteRequest,
-  type SwapExecuteRequest,
-} from './swap/KaleidoswapSwap'
 
 // Unified receive QR (single BIP21 with embedded LN/Ark/Spark/Liquid/RGB)
 export {
@@ -80,12 +67,6 @@ export {
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
-
-// Client managers
-export { sparkClientManager } from './lib/spark-client-manager'
-export { arkadeClientManager, type ArkadePlatformProviders } from './lib/arkade-client-manager'
-export { kaleidoClientManager, type KaleidoClientConfig } from './lib/kaleido-client-manager'
-export { flashnetClientManager } from './lib/flashnet-client-manager'
 
 // Utilities
 export { networkTypeToProtocol, protocolToNetworkType } from './utils'
