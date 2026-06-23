@@ -1,7 +1,7 @@
 /**
  * WDK-backed adapters + the WDK registry factory + module loader seam.
  *
- * Opt-in sub-path export: `@kaleidorg/wallet-protocols/adapters/wdk`. WDK
+ * Opt-in sub-path export: `@kaleidorg/wallet-engine/adapters/wdk`. WDK
  * modules are lazy-loaded via `loadWdkModule`, but these adapters are still
  * kept out of the main barrel so hosts that supply their own adapters never
  * reference them.

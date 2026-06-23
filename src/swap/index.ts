@@ -1,7 +1,7 @@
 /**
  * Kaleidoswap RFQ swap wrapper.
  *
- * Opt-in sub-path export: `@kaleidorg/wallet-protocols/swap`. Uses the WDK
+ * Opt-in sub-path export: `@kaleidorg/wallet-engine/swap`. Uses the WDK
  * module loader, so it is kept out of the adapter-free main barrel.
  */
 export {
