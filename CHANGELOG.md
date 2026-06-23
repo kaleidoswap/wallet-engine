@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.13] - 2026-06-23
+
 ### Security
 - **Destination classifier hardened to fail closed.** Matchers are now strict and
   anchored: arbitrary text (e.g. `Hello`, `VToken`, `not-an-address`) no longer
