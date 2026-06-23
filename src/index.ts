@@ -12,10 +12,13 @@ export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, 
 export * from './types/flashnet'
 
 // Adapter interface
-export { type IProtocolAdapter, type BaseProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
+export { type IProtocolAdapter, type BaseProtocolConfig, type ProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
 
 // Capability manifest (differences-as-data backbone)
 export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type ProtocolCapabilities } from './capabilities'
+
+// Operation-level capability manifest (per-adapter `capabilities` field)
+export { PROTOCOL_OPERATIONS, getProtocolOperations, protocolSupportsOperation, type ProtocolCapability } from './capabilities/operations'
 
 // Platform ports (injected per host)
 export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'

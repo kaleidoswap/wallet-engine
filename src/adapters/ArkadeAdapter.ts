@@ -28,9 +28,11 @@ import {
   ConnectionError,
   TransactionStatus,
 } from '../types/base'
+import { PROTOCOL_OPERATIONS } from '../capabilities/operations'
 
 export class ArkadeAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'ARKADE'
+  readonly capabilities = PROTOCOL_OPERATIONS.ARKADE
   readonly supportedLayers: Layer[] = ['BTC_ARKADE', 'BTC_L1', 'ARKADE_ARKADE']
   readonly version = '1.0.0'
 

@@ -38,6 +38,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 
@@ -55,6 +56,7 @@ export interface ArkadeAdapterConfig extends BaseProtocolConfig {
 
 export class ArkadeWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'ARKADE'
+  readonly capabilities = PROTOCOL_OPERATIONS.ARKADE
   readonly supportedLayers: Layer[] = getCapabilities('ARKADE').layers
   readonly version = '0.1.0-wdk'
 

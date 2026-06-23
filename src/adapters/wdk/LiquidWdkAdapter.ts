@@ -39,6 +39,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 
 /** Well-known Liquid mainnet Tether USD (USDt) asset id — the lite-mode "USD". */
@@ -72,6 +73,7 @@ const KNOWN_ASSETS: Record<string, { ticker: string; name: string; precision: nu
 
 export class LiquidWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'LIQUID'
+  readonly capabilities = PROTOCOL_OPERATIONS.LIQUID
   readonly supportedLayers: Layer[] = getCapabilities('LIQUID').layers
   readonly version = '0.1.0-wdk'
 

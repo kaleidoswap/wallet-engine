@@ -42,6 +42,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 
@@ -93,6 +94,7 @@ const SPARK_NETWORK_MAP: Record<string, SparkNetwork> = {
 
 export class SparkWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'SPARK'
+  readonly capabilities = PROTOCOL_OPERATIONS.SPARK
   readonly supportedLayers: Layer[] = getCapabilities('SPARK').layers
   readonly version = '0.1.0-wdk'
 

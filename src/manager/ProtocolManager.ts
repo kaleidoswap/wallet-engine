@@ -25,7 +25,7 @@ import {
 
 import {
   IProtocolAdapter,
-  BaseProtocolConfig,
+  ProtocolConfig,
   ProtocolAdapterRegistry,
 } from '../adapters/IProtocolAdapter'
 
@@ -115,7 +115,7 @@ export class ProtocolManager {
   // Connection Management
   // ========================================================================
 
-  async connect(protocol: ProtocolType, config: BaseProtocolConfig): Promise<void> {
+  async connect(protocol: ProtocolType, config: ProtocolConfig): Promise<void> {
     const adapter = this.registry.get(protocol)
     if (!adapter) {
       throw new ProtocolError(`Protocol not found: ${protocol}`, protocol, 'NOT_FOUND')
