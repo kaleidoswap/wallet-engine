@@ -4,9 +4,9 @@
  */
 
 // Protocol names
-// 'RGB' = RGB over an rgb-lightning-node (BTC L1/LN + RGB L1/LN, swaps).
+// 'RGB_LN' = RGB over an rgb-lightning-node (BTC L1/LN + RGB L1/LN, swaps).
 // 'RGB_L1' = RGB on-chain only, backed by rgb-lib locally (no Lightning).
-export type ProtocolType = 'RGB' | 'RGB_L1' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIQUID'
+export type ProtocolType = 'RGB_LN' | 'RGB_L1' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIQUID'
 
 // Layer types
 export type Layer =

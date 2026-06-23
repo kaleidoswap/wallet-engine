@@ -43,7 +43,7 @@ import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } 
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
-  protocol: 'RGB'
+  protocol: 'RGB_LN'
   /** BIP-39 mnemonic for this wallet. */
   mnemonic: string
   /** Base URL of the RLN HTTP API (e.g. http://localhost:3001). */
@@ -86,15 +86,15 @@ const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
 ])
 
 export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
-  readonly protocolName: ProtocolType = 'RGB'
-  readonly capabilities = PROTOCOL_OPERATIONS.RGB
-  readonly supportedLayers: Layer[] = getCapabilities('RGB').layers
+  readonly protocolName: ProtocolType = 'RGB_LN'
+  readonly capabilities = PROTOCOL_OPERATIONS.RGB_LN
+  readonly supportedLayers: Layer[] = getCapabilities('RGB_LN').layers
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
     const cfg = config as RlnAdapterConfig
-    if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB', 'CONFIG')
-    if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB', 'CONFIG')
+    if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB_LN', 'CONFIG')
+    if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB_LN', 'CONFIG')
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-rln', () => import('@kaleidorg/wdk-wallet-rln'))
@@ -108,7 +108,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     const info: any = await this.account.getNodeInfo()
     return {
-      protocol: 'RGB',
+      protocol: 'RGB_LN',
       connected: this.connected,
       nodeId: info?.pubkey,
       network: this.network,
@@ -163,7 +163,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   async getAsset(assetId: string): Promise<UnifiedAsset> {
     const assets = await this.listAssets()
     const found = assets.find((a) => a.id === assetId)
-    if (!found) throw new ProtocolError(`Unknown asset ${assetId}`, 'RGB', 'NO_ASSET')
+    if (!found) throw new ProtocolError(`Unknown asset ${assetId}`, 'RGB_LN', 'NO_ASSET')
     return found
   }
 
@@ -258,7 +258,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
     const all = await this.listTransactions()
     const found = all.find((t) => t.id === txId)
-    if (!found) throw new ProtocolError(`Unknown tx ${txId}`, 'RGB', 'NO_TX')
+    if (!found) throw new ProtocolError(`Unknown tx ${txId}`, 'RGB_LN', 'NO_TX')
     return found
   }
 

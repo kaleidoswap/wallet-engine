@@ -21,10 +21,10 @@ import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 function toAmount(value: unknown, field: string): number {
   const n = Number(value)
   if (!Number.isFinite(n)) {
-    throw new ProtocolError(`Swap response field '${field}' is not a finite number`, 'RGB', 'BAD_AMOUNT')
+    throw new ProtocolError(`Swap response field '${field}' is not a finite number`, 'RGB_LN', 'BAD_AMOUNT')
   }
   if (Math.abs(n) > Number.MAX_SAFE_INTEGER) {
-    throw new ProtocolError(`Swap response field '${field}' exceeds safe integer precision`, 'RGB', 'BAD_AMOUNT')
+    throw new ProtocolError(`Swap response field '${field}' exceeds safe integer precision`, 'RGB_LN', 'BAD_AMOUNT')
   }
   return n
 }
@@ -98,7 +98,7 @@ export class KaleidoswapSwap {
 
   async getQuote(req: SwapQuoteRequest): Promise<Quote> {
     if (req.fromAmount == null) {
-      throw new ProtocolError('Swap quote requires fromAmount', 'RGB', 'NO_AMOUNT')
+      throw new ProtocolError('Swap quote requires fromAmount', 'RGB_LN', 'NO_AMOUNT')
     }
     const proto = await this.ensure()
     const q: RawQuote = await proto.quoteSwap({
@@ -123,7 +123,7 @@ export class KaleidoswapSwap {
 
   async executeSwap(req: SwapExecuteRequest): Promise<SwapResult & { depositAddress: string | null; depositAddressFormat: string | null }> {
     if (req.fromAmount == null) {
-      throw new ProtocolError('Swap requires fromAmount', 'RGB', 'NO_AMOUNT')
+      throw new ProtocolError('Swap requires fromAmount', 'RGB_LN', 'NO_AMOUNT')
     }
     const proto = await this.ensure()
     const r: RawSwap = await proto.swap({

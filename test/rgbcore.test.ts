@@ -13,14 +13,14 @@ describe('RgbCore translation helpers', () => {
 
   it('builds the BTC asset entry for the RLN profile', () => {
     const a = rgbBtcAsset(12345, RLN_PROFILE)
-    expect(a).toMatchObject({ id: 'BTC', ticker: 'BTC', protocol: 'RGB', layer: 'BTC_L1' })
+    expect(a).toMatchObject({ id: 'BTC', ticker: 'BTC', protocol: 'RGB_LN', layer: 'BTC_L1' })
     expect(a.balance.total).toBe(12345)
     expect(a.capabilities.supportsLightning).toBe(true)
   })
 
   it('maps a NIA asset with the RLN (RGB-LN) profile', () => {
     const a = rgbNiaAsset({ asset_id: 'rgb:USDT', ticker: 'USDT', name: 'Tether', precision: 2, balance: { spendable: 500 } }, RLN_PROFILE)
-    expect(a).toMatchObject({ id: 'rgb:USDT', ticker: 'USDT', name: 'Tether', precision: 2, protocol: 'RGB', layer: 'RGB_LN' })
+    expect(a).toMatchObject({ id: 'rgb:USDT', ticker: 'USDT', name: 'Tether', precision: 2, protocol: 'RGB_LN', layer: 'RGB_LN' })
     expect(a.balance.total).toBe(500)
     expect(a.capabilities.supportsLightning).toBe(true)
   })

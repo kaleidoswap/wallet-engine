@@ -12,7 +12,7 @@ describe('classifyDestination', () => {
     const r = classifyDestination('lnbc1pexamplexyz')
     expect(r.kind).toBe('BOLT11')
     expect(r.layer).toBe('BTC_LN')
-    expect(r.candidates).toContain('RGB')
+    expect(r.candidates).toContain('RGB_LN')
     expect(r.candidates).not.toContain('LIQUID')
   })
 
@@ -24,7 +24,7 @@ describe('classifyDestination', () => {
   it('classifies an RGB invoice (payable by either RGB backing)', () => {
     const r = classifyDestination('rgb:utxob:abcdef')
     expect(r.kind).toBe('RGB_INVOICE')
-    expect(r.candidates).toEqual(['RGB', 'RGB_L1'])
+    expect(r.candidates).toEqual(['RGB_LN', 'RGB_L1'])
   })
 
   it('classifies a Spark address', () => {

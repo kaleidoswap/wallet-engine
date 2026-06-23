@@ -30,7 +30,7 @@ describe('classifyDestination BOLT12', () => {
     const r = classifyDestination(BOLT12)
     expect(r.kind).toBe('BOLT12')
     expect(r.layer).toBe('BTC_LN')
-    expect(r.candidates).toContain('RGB')
+    expect(r.candidates).toContain('RGB_LN')
   })
 })
 
@@ -43,7 +43,7 @@ describe('resolveUnifiedSend — multi-rail BIP321', () => {
   })
 
   it('Lightning-first default: BOLT12 offer wins over BOLT11 and on-chain', () => {
-    const res = routerWith('RGB', 'LIQUID').resolveUnifiedSend(uri)
+    const res = routerWith('RGB_LN', 'LIQUID').resolveUnifiedSend(uri)
     expect(res.source).not.toBeNull()
     expect(res.best?.rail).toBe('lno')
     expect(res.best?.direct).toBe(true)
@@ -66,21 +66,21 @@ describe('resolveUnifiedSend — multi-rail BIP321', () => {
       liquidAddress: 'lq1qqexampleliquidaddrxyz',
       assetId: 'usdt-asset-id',
     })
-    const res = routerWith('RGB', 'LIQUID').resolveUnifiedSend(usdtUri, {
+    const res = routerWith('RGB_LN', 'LIQUID').resolveUnifiedSend(usdtUri, {
       preference: { perAsset: { 'usdt-asset-id': ['BTC_LIQUID', 'BTC_LN'] } },
     })
     expect(res.best?.rail).toBe('liquid')
   })
 
   it('honors a global layer preference (on-chain first)', () => {
-    const res = routerWith('RGB').resolveUnifiedSend(uri, {
+    const res = routerWith('RGB_LN').resolveUnifiedSend(uri, {
       preference: { layers: ['BTC_L1', 'BTC_LN'] },
     })
     expect(res.best?.rail).toBe('onchain')
   })
 
   it('falls back to single-rail resolveSend for a plain (non-URI) destination', () => {
-    const res = routerWith('RGB').resolveUnifiedSend(BOLT11)
+    const res = routerWith('RGB_LN').resolveUnifiedSend(BOLT11)
     expect(res.source).toBeNull()
     expect(res.best?.rail).toBe('lightning')
     expect(res.best?.value).toBe(BOLT11)

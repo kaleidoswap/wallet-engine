@@ -30,7 +30,7 @@ export type ProtocolCapability =
   | 'arkade-offboard'
 
 export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapability[]> = {
-  RGB: [
+  RGB_LN: [
     'onchain-send',
     'onchain-receive',
     'lightning-send',

@@ -80,28 +80,28 @@ export function classifyDestination(raw: string): ClassifiedDestination {
       // On-chain BTC can be served by any protocol with a Bitcoin on-chain path.
       // LIQUID is excluded: it's a separate L1 and cannot settle a BTC address.
       // (An embedded `lightning=` fallback widens the route at the router layer.)
-      candidates: ['RGB', 'RGB_L1', 'ARKADE', 'SPARK'],
+      candidates: ['RGB_LN', 'RGB_L1', 'ARKADE', 'SPARK'],
       lightningFallback,
       value: addr,
     }
   }
 
   if (RE.bolt12.test(dest)) {
-    return { kind: 'BOLT12', layer: 'BTC_LN', format: 'BOLT12', candidates: ['RGB', 'SPARK', 'ARKADE'], value: dest }
+    return { kind: 'BOLT12', layer: 'BTC_LN', format: 'BOLT12', candidates: ['RGB_LN', 'SPARK', 'ARKADE'], value: dest }
   }
 
   if (RE.bolt11.test(dest)) {
-    return { kind: 'BOLT11', layer: 'BTC_LN', format: 'BOLT11', candidates: ['RGB', 'SPARK', 'ARKADE'], value: dest }
+    return { kind: 'BOLT11', layer: 'BTC_LN', format: 'BOLT11', candidates: ['RGB_LN', 'SPARK', 'ARKADE'], value: dest }
   }
 
   if (RE.lnurl.test(dest) || RE.lnAddress.test(dest)) {
-    return { kind: 'LN_ADDRESS', layer: 'BTC_LN', format: 'BOLT11', candidates: ['RGB', 'SPARK', 'ARKADE'], value: dest }
+    return { kind: 'LN_ADDRESS', layer: 'BTC_LN', format: 'BOLT11', candidates: ['RGB_LN', 'SPARK', 'ARKADE'], value: dest }
   }
 
   if (RE.rgb.test(dest)) {
     // Either RGB backing can pay an RGB invoice; the router filters to whichever
     // is registered + connected (and verifies it can settle the layer).
-    return { kind: 'RGB_INVOICE', layer: 'RGB_LN', format: 'RGB_INVOICE', candidates: ['RGB', 'RGB_L1'], value: dest }
+    return { kind: 'RGB_INVOICE', layer: 'RGB_LN', format: 'RGB_INVOICE', candidates: ['RGB_LN', 'RGB_L1'], value: dest }
   }
 
   if (RE.spark.test(dest)) {
@@ -121,7 +121,7 @@ export function classifyDestination(raw: string): ClassifiedDestination {
       kind: 'BTC_ONCHAIN',
       layer: 'BTC_L1',
       format: 'BTC_ADDRESS',
-      candidates: ['RGB', 'RGB_L1', 'ARKADE', 'SPARK'], // protocols that can pay an on-chain BTC address
+      candidates: ['RGB_LN', 'RGB_L1', 'ARKADE', 'SPARK'], // protocols that can pay an on-chain BTC address
       value: dest,
     }
   }

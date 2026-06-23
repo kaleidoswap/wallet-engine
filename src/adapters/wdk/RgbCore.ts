@@ -31,7 +31,7 @@ export interface RgbProfile {
 
 /** Node-backed RGB over an rgb-lightning-node (Lightning + swaps). */
 export const RLN_PROFILE: RgbProfile = {
-  protocol: 'RGB',
+  protocol: 'RGB_LN',
   assetLayer: 'RGB_LN',
   supportsLightning: true,
   supportsSwaps: true,

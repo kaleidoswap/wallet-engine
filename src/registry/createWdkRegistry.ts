@@ -26,14 +26,14 @@ export interface WdkRegistryOptions {
 
 // RGB_L1 is opt-in (not in the default set): it needs a local rgb-lib data dir
 // and is an alternative to the node-backed RGB path, not an addition to it.
-const ALL: ProtocolType[] = ['SPARK', 'LIQUID', 'RGB', 'ARKADE']
+const ALL: ProtocolType[] = ['SPARK', 'LIQUID', 'RGB_LN', 'ARKADE']
 
 export function createWdkRegistry(opts: WdkRegistryOptions = {}): ProtocolAdapterRegistry {
   const enabled = opts.enabled ?? ALL
   const registry = new ProtocolAdapterRegistry()
   if (enabled.includes('SPARK')) registry.register(new SparkWdkAdapter())
   if (enabled.includes('LIQUID')) registry.register(new LiquidWdkAdapter())
-  if (enabled.includes('RGB')) registry.register(new RlnWdkAdapter())
+  if (enabled.includes('RGB_LN')) registry.register(new RlnWdkAdapter())
   if (enabled.includes('RGB_L1')) registry.register(new RgbLibWdkAdapter())
   if (enabled.includes('ARKADE')) registry.register(new ArkadeWdkAdapter())
   return registry

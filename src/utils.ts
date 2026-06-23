@@ -9,7 +9,7 @@ type NetworkType = 'spark' | 'arkade' | 'rln' | 'liquid'
 
 export function networkTypeToProtocol(nt: NetworkType): ProtocolType | null {
   switch (nt) {
-    case 'rln': return 'RGB'
+    case 'rln': return 'RGB_LN'
     case 'spark': return 'SPARK'
     case 'arkade': return 'ARKADE'
     case 'liquid': return 'LIQUID' // LiquidWdkAdapter now available
@@ -19,7 +19,7 @@ export function networkTypeToProtocol(nt: NetworkType): ProtocolType | null {
 
 export function protocolToNetworkType(pt: ProtocolType): NetworkType | null {
   switch (pt) {
-    case 'RGB': return 'rln'
+    case 'RGB_LN': return 'rln'
     case 'SPARK': return 'spark'
     case 'ARKADE': return 'arkade'
     case 'LIQUID': return 'liquid'

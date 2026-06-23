@@ -49,6 +49,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - `SECURITY.md`, `CONTRIBUTING.md`, and `examples/minimal-adapter`.
 
 ### Changed
+- **Renamed the node-backed `RGB` protocol to `RGB_LN`** — the RGB rail is now
+  always qualified: `RGB_LN` (RGB over an rgb-lightning-node, with Lightning +
+  swaps) and `RGB_L1` (on-chain RGB via rgb-lib). There is no bare `RGB`
+  `ProtocolType` anymore. Both the native `RgbAdapter` and the WDK `RlnWdkAdapter`
+  now report `protocolName: 'RGB_LN'`; capability/operations manifest keys, the
+  destination classifier candidates, and `createWdkRegistry` were updated to match.
 - Introduced `BaseWdkAdapter` — the five WDK adapters (Spark, Liquid, RGB/RLN,
   RGB-L1, Arkade) now share connection lifecycle (`isConnected`/`disconnect`),
   the connected-guard, `supportsSwaps`, `version`, and the allowlisted escape

@@ -94,8 +94,8 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     wdkModule: '@arkade-os/wdk',
     maturity: 'beta',
   },
-  RGB: {
-    protocol: 'RGB',
+  RGB_LN: {
+    protocol: 'RGB_LN',
     layers: ['BTC_L1', 'BTC_LN', 'RGB_L1', 'RGB_LN'],
     supportsOnchain: true,
     supportsLightning: true,

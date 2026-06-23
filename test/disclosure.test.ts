@@ -9,7 +9,7 @@ function asset(partial: Partial<UnifiedAsset> & { id: string; ticker: string; to
     name: partial.name ?? partial.ticker,
     ticker: partial.ticker,
     precision: partial.precision ?? 8,
-    protocol: partial.protocol ?? 'RGB',
+    protocol: partial.protocol ?? 'RGB_LN',
     layer: partial.layer ?? 'BTC_L1',
     balance: {
       total: partial.total,

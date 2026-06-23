@@ -1,7 +1,7 @@
 # @kaleidorg/wallet-engine
 
 > Multi-protocol Bitcoin L2 wallet engine — **native or WDK-backed** adapters for
-> **Spark · RGB/RLN · Liquid · Arkade** behind one `IProtocolAdapter` contract,
+> **Spark · RGB-LN · RGB-L1 · Liquid · Arkade** behind one `IProtocolAdapter` contract,
 > with a cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.
 
 > [!WARNING]
@@ -58,7 +58,7 @@ with `if (protocol === …)` smeared across every screen.
 |---|---|---|:---:|---|---|
 | **BTC**    | on-chain | — | — | base on-chain only | (native) |
 | **SPARK**  | Spark, LN, on-chain | Spark tokens | — | zero-fee, static receive addr | `@tetherto/wdk-wallet-spark` |
-| **RGB/RLN**| RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
+| **RGB-LN** | RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
 | **RGB-L1** | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
 | **LIQUID** | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
 | **ARKADE** | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
@@ -102,14 +102,14 @@ import {
 } from '@kaleidorg/wallet-engine'
 
 // 1. Build a registry of WDK-backed adapters (pick the protocols you want).
-const registry = createWdkRegistry({ enabled: ['RGB', 'LIQUID', 'SPARK'] })
+const registry = createWdkRegistry({ enabled: ['RGB_LN', 'LIQUID', 'SPARK'] })
 
 // 2. Connect each protocol (config carries the mnemonic + endpoints).
-await registry.get('RGB')!.connect({ protocol: 'RGB', network: 'mainnet', /* … */ })
+await registry.get('RGB_LN')!.connect({ protocol: 'RGB_LN', network: 'mainnet', /* … */ })
 await registry.get('LIQUID')!.connect({ protocol: 'LIQUID', network: 'mainnet', /* … */ })
 
 // 3. Drive everything through the manager — no protocol SDK in app code.
-const manager = new ProtocolManager({ defaultProtocol: 'RGB' })
+const manager = new ProtocolManager({ defaultProtocol: 'RGB_LN' })
 for (const a of registry.getAll()) manager.registerAdapter(a)
 
 const assets = await manager.listAllAssets()           // unified across protocols
