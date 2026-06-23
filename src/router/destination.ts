@@ -14,6 +14,7 @@ import { ProtocolType, Layer, AddressFormat } from '../types/base'
 
 export type DestinationKind =
   | 'BOLT11' // Lightning invoice
+  | 'BOLT12' // Lightning offer (BIP321 `lno=`)
   | 'LN_ADDRESS' // lightning address / LNURL
   | 'RGB_INVOICE' // RGB invoice
   | 'SPARK' // Spark address/invoice
@@ -44,6 +45,7 @@ export interface ClassifiedDestination {
 // bug, not a convenience.
 const RE = {
   bolt11: /^ln(bc|tb|bcrt|sb)[0-9]/i,
+  bolt12: /^lno1[0-9a-z]+$/i,
   lnurl: /^lnurl[0-9a-z]+$/i,
   lnAddress: /^[^@\s]+@[^@\s]+\.[^@\s]+$/i,
   rgb: /^(rgb:|utxob:)/i,
@@ -82,6 +84,10 @@ export function classifyDestination(raw: string): ClassifiedDestination {
       lightningFallback,
       value: addr,
     }
+  }
+
+  if (RE.bolt12.test(dest)) {
+    return { kind: 'BOLT12', layer: 'BTC_LN', format: 'BOLT12', candidates: ['RGB', 'SPARK', 'ARKADE'], value: dest }
   }
 
   if (RE.bolt11.test(dest)) {

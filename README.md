@@ -155,6 +155,13 @@ active adapter and provides cross-protocol aggregates (`listAllAssets`,
 layer and returns the protocol(s) that can fulfil it, filtered to what's registered and
 connected. `resolveSend().best` is the auto-route that makes **lite mode** possible.
 
+For a unified payment URI that carries several rails at once (BIP21/BIP321 with a
+BOLT12 offer + BOLT11 + Spark/Arkade/Liquid/RGB/on-chain), `resolveUnifiedSend(uri,
+{ preference })` matches every rail to the protocols that can settle it and ranks them
+by the user's `RoutePreference` (a per-asset layer ranking) — falling back to a
+**Lightning-first** default. `.best` is the lite-mode pick; advanced mode shows the
+full ranked list. (BIP353 `₿user@domain` is resolved to a URI by the host first.)
+
 ### Unified receive (BIP321)
 [`src/receive/unifiedReceive.ts`](src/receive/unifiedReceive.ts) builds **one** `bitcoin:`
 URI carrying on-chain + Lightning (BOLT11/BOLT12) + Spark + Arkade + Liquid + RGB. Other

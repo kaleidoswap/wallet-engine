@@ -26,6 +26,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `@flashnet/sdk`) from floating `"*"` to caret ranges.
 
 ### Added
+- **Multi-rail unified send routing** — `CrossProtocolRouter.resolveUnifiedSend(uri,
+  { preference })` parses a BIP21/BIP321 URI carrying several rails at once
+  (BOLT12 offer, BOLT11, Spark/Arkade/Liquid addresses, RGB invoice, on-chain),
+  matches each to the connected protocols that can settle it, and ranks them by a
+  user `RoutePreference` (per-asset layer ranking) falling back to a Lightning-first
+  default (`DEFAULT_RAIL_ORDER`). `.best` is the lite-mode auto-route; advanced mode
+  gets the full ranked list. A plain (non-`bitcoin:`) string falls back to
+  single-rail `resolveSend`. BOLT12 offers (`lno1…`) are now classified. BIP353
+  (₿user@domain) is deferred — resolve it to a BIP321 URI in the host first.
 - **RGB-L1 protocol** — a new `RGB_L1` protocol type and `RgbLibWdkAdapter`
   backed by local rgb-lib (`@utexo/wdk-wallet-rgb`): on-chain BTC + RGB assets,
   no Lightning/channels/swaps. Described once in the capability manifest; the
