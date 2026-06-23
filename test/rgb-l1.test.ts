@@ -123,4 +123,34 @@ describe('RgbLibWdkAdapter', () => {
   it('does not support swaps', () => {
     expect(connected({}).supportsSwaps()).toBe(false)
   })
+
+  // --- BTC-L1 support (RGB-L1 is RGB + Bitcoin on-chain) -------------------
+  it('supports BTC on-chain: address, balance, send', async () => {
+    const sent: any[] = []
+    const adapter = connected({
+      getAddress: async () => 'bcrt1qbtcaddr',
+      registerWallet: async () => ({ address: 'bcrt1qbtcaddr', btcBalance: { vanilla: { settled: 2500, spendable: 2500 } } }),
+      sendTransaction: async (o: any) => sent.push(o),
+    })
+    // receive address (no assetId) → a BTC address
+    expect(await adapter.getReceiveAddress()).toMatchObject({ address: 'bcrt1qbtcaddr', format: 'BTC_ADDRESS' })
+    // balance
+    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 2500, total: 2500 })
+    // on-chain send maps to the rgb-lib sendTransaction({ to, value })
+    await adapter.sendBtcOnchain({ address: 'bcrt1qdest', amount: 1000, feeRate: 2 })
+    expect(sent[0]).toMatchObject({ to: 'bcrt1qdest', value: 1000, feeRate: 2 })
+  })
+
+  it('lists BTC-L1 transaction history', async () => {
+    const adapter = connected({
+      listTransactions: () => [
+        { txid: 'tx1', received: 5000, sent: 0, confirmation_time: { timestamp: 1_700_000 } },
+        { txid: 'tx2', received: 0, sent: 1200 },
+      ],
+    })
+    const txs = await adapter.listTransactions()
+    expect(txs).toHaveLength(2)
+    expect(txs[0]).toMatchObject({ id: 'tx1', type: 'receive', status: 'confirmed', amount: 5000 })
+    expect(txs[1]).toMatchObject({ id: 'tx2', type: 'send', status: 'pending', amount: 1200 })
+  })
 })

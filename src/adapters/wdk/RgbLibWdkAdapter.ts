@@ -40,6 +40,7 @@ import {
   Address,
   ConnectionInfo,
   TransactionFilter,
+  TransactionStatus,
   NodeInfo,
   ProtocolError,
 } from '../../types/base'
@@ -195,15 +196,36 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Transactions -------------------------------------------------------
+  /**
+   * BTC-L1 (vanilla) transaction history from rgb-lib. `listTransactions()` is
+   * synchronous and returns the wallet's Bitcoin transactions; RGB asset detail
+   * is per-asset via `listTransfers({ asset_id })`. Fields are read defensively.
+   */
   async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
-    // rgb-lib transfers are per-asset; a unified on-chain history is not exposed
-    // as a single call. Callers should use listTransfers({ asset_id }) for detail.
-    return []
+    const raw: any = await this.account.listTransactions()
+    const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
+    return txs.map((t) => {
+      const received = Number(t.received ?? 0)
+      const sent = Number(t.sent ?? 0)
+      const confTime = t.confirmation_time ?? t.confirmationTime
+      return {
+        id: t.txid ?? t.transaction_id ?? '',
+        type: (received >= sent ? 'receive' : 'send') as UnifiedTransaction['type'],
+        status: (confTime ? 'confirmed' : 'pending') as TransactionStatus,
+        timestamp: Number(confTime?.timestamp ?? 0) * 1000,
+        amount: Math.abs(received - sent) || received || sent,
+        amountDisplay: '',
+        asset: undefined as unknown as UnifiedAsset,
+        protocolData: t,
+      }
+    })
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
-    throw new ProtocolError(`Unknown tx ${txId}`, 'RGB_L1', 'NO_TX')
+    const found = (await this.listTransactions()).find((t) => t.id === txId)
+    if (!found) throw new ProtocolError(`Unknown tx ${txId}`, 'RGB_L1', 'NO_TX')
+    return found
   }
 
   async getNodeInfo(): Promise<NodeInfo> {
