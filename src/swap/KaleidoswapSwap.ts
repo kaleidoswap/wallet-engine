@@ -12,6 +12,23 @@
 import { Quote, QuoteRequest, SwapResult, ProtocolError } from '../types/base'
 import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 
+/**
+ * Coerce an SDK money field to a number, failing CLOSED on values that would
+ * silently corrupt: `NaN`/`Infinity` (a renamed/missing field), or magnitudes
+ * past `Number.MAX_SAFE_INTEGER` where JS would lose integer precision. Money
+ * must never flow through as a quietly-wrong number.
+ */
+function toAmount(value: unknown, field: string): number {
+  const n = Number(value)
+  if (!Number.isFinite(n)) {
+    throw new ProtocolError(`Swap response field '${field}' is not a finite number`, 'RGB', 'BAD_AMOUNT')
+  }
+  if (Math.abs(n) > Number.MAX_SAFE_INTEGER) {
+    throw new ProtocolError(`Swap response field '${field}' exceeds safe integer precision`, 'RGB', 'BAD_AMOUNT')
+  }
+  return n
+}
+
 export interface KaleidoswapSwapConfig {
   /** KaleidoSwap maker API base URL. */
   baseUrl: string
@@ -63,12 +80,12 @@ export class KaleidoswapSwap {
     return {
       id: q.rfqId,
       fromAsset: req.fromAsset,
-      fromAmount: Number(q.tokenInAmount),
+      fromAmount: toAmount(q.tokenInAmount, 'tokenInAmount'),
       toAsset: req.toAsset,
-      toAmount: Number(q.tokenOutAmount),
-      price: Number(q.price),
-      fee: { amount: Number(q.fee), asset: req.fromAsset },
-      expiresAt: Number(q.expiresAt) * 1000,
+      toAmount: toAmount(q.tokenOutAmount, 'tokenOutAmount'),
+      price: toAmount(q.price, 'price'),
+      fee: { amount: toAmount(q.fee, 'fee'), asset: req.fromAsset },
+      expiresAt: toAmount(q.expiresAt, 'expiresAt') * 1000,
       provider: 'kaleidoswap',
     }
   }
@@ -93,11 +110,12 @@ export class KaleidoswapSwap {
       quote: {
         id: r.orderId,
         fromAsset: req.fromAsset,
-        fromAmount: Number(r.tokenInAmount),
+        fromAmount: toAmount(r.tokenInAmount, 'tokenInAmount'),
         toAsset: req.toAsset,
-        toAmount: Number(r.tokenOutAmount),
-        price: 0,
-        fee: { amount: Number(r.fee), asset: req.fromAsset },
+        toAmount: toAmount(r.tokenOutAmount, 'tokenOutAmount'),
+        // Carry the executed price through when the maker returns it (was dropped to 0).
+        price: r.price != null ? toAmount(r.price, 'price') : 0,
+        fee: { amount: toAmount(r.fee, 'fee'), asset: req.fromAsset },
         expiresAt: 0,
         provider: 'kaleidoswap',
       },

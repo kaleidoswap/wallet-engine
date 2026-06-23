@@ -54,6 +54,24 @@ export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   arkadeConfig?: Record<string, any>
 }
 
+/**
+ * Allowlist of Arkade account methods reachable via `executeProtocolOperation`.
+ * Anything not listed here is rejected — see the method's SECURITY note.
+ */
+const ARKADE_ALLOWED_OPS: ReadonlySet<string> = new Set([
+  'waitForLightningPayment',
+  'getLightningLimits',
+  'getLightningFees',
+  'subscribeToIncomingFunds',
+  'getBoardingAddress',
+  'getTokenBalance',
+  'getTransactionHistory',
+  'onboard',
+  'offboard',
+  'getVtxos',
+  'getBoardingUtxos',
+])
+
 export class ArkadeWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'ARKADE'
   readonly capabilities = PROTOCOL_OPERATIONS.ARKADE
@@ -342,9 +360,18 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     return getCapabilities('ARKADE').supportsSwaps
   }
 
-  /** Escape hatch for Arkade-specific ops (waitForLightningPayment, getLightningLimits, …). */
+  /**
+   * Escape hatch for Arkade-specific ops (waitForLightningPayment, getLightningLimits, …).
+   *
+   * SECURITY: `operation` is checked against an explicit allowlist before dispatch
+   * (see RlnWdkAdapter for rationale) — it is never used to index the account
+   * object directly, blocking access to meta members or non-whitelisted methods.
+   */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
     this.assertConnected()
+    if (!ARKADE_ALLOWED_OPS.has(operation)) {
+      throw new ProtocolError(`Arkade operation not allowed: '${operation}'`, 'ARKADE', 'NO_OP')
+    }
     const fn = (this.account as any)[operation]
     if (typeof fn !== 'function') {
       throw new ProtocolError(`Unknown Arkade operation '${operation}'`, 'ARKADE', 'NO_OP')

@@ -50,6 +50,7 @@ export {
 export {
   buildUnifiedReceiveURI,
   parseUnifiedReceiveURI,
+  receiveMethodsOf,
   type UnifiedReceiveParams,
 } from './receive/unifiedReceive'
 

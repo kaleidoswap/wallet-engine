@@ -49,6 +49,39 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   accountIndex?: number
 }
 
+/**
+ * Allowlist of RLN account methods reachable via `executeProtocolOperation`.
+ * Only RLN-specific operations not already exposed as typed adapter methods.
+ * Anything not listed here is rejected — see the method's SECURITY note.
+ */
+const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
+  'openChannel',
+  'closeChannel',
+  'getChannelId',
+  'connectPeer',
+  'disconnectPeer',
+  'listPeers',
+  'keysend',
+  'createUtxos',
+  'listUnspents',
+  'estimateFee',
+  'failTransfers',
+  'syncRgbWallet',
+  'getAssetMetadata',
+  'getAssetMedia',
+  'whitelistSwap',
+  'getTakerPubkey',
+  'atomicTaker',
+  'listSwaps',
+  'getSwap',
+  'makerInit',
+  'makerExecute',
+  'backup',
+  'restore',
+  'changePassword',
+  'signMessage',
+])
+
 /** Map RLN node status strings → domain TransactionStatus. */
 function mapStatus(s?: string): TransactionStatus {
   const v = (s ?? '').toLowerCase()
@@ -340,9 +373,19 @@ export class RlnWdkAdapter implements IProtocolAdapter {
     return getCapabilities('RGB').supportsSwaps
   }
 
-  /** Generic escape hatch for RLN-specific ops not on the core contract. */
+  /**
+   * Generic escape hatch for RLN-specific ops not on the core contract.
+   *
+   * SECURITY: `operation` may be influenced by callers (deep links, chat/MCP tool
+   * args), so it is checked against an explicit allowlist before dispatch — never
+   * used to index the account object directly. This blocks reaching meta members
+   * (`constructor`, `__proto__`, prototype methods) or any non-whitelisted method.
+   */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
     this.assertConnected()
+    if (!RLN_ALLOWED_OPS.has(operation)) {
+      throw new ProtocolError(`RLN operation not allowed: '${operation}'`, 'RGB', 'NO_OP')
+    }
     const fn = (this.account as any)[operation]
     if (typeof fn !== 'function') {
       throw new ProtocolError(`Unknown RLN operation '${operation}'`, 'RGB', 'NO_OP')

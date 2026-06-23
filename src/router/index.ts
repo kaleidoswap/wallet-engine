@@ -15,6 +15,34 @@ import { ProtocolType, Layer } from '../types/base'
 import { getCapabilities } from '../capabilities'
 import { classifyDestination, ClassifiedDestination } from './destination'
 
+/**
+ * Whether `protocol` can pay `dest` DIRECTLY (no swap), per the capability
+ * manifest. Reads capability flags rather than exact layer strings so a protocol
+ * that reaches a surface by a different path (e.g. Spark paying on-chain via a
+ * deposit/exit) is still recognised.
+ */
+function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination): boolean {
+  const caps = getCapabilities(protocol)
+  switch (dest.kind) {
+    case 'BOLT11':
+    case 'LN_ADDRESS':
+      return caps.supportsLightning
+    case 'BTC_ONCHAIN':
+    case 'BIP21':
+      return caps.supportsOnchain
+    case 'RGB_INVOICE':
+      return caps.supportsAssets && caps.layers.some((l) => l.startsWith('RGB'))
+    case 'SPARK':
+      return protocol === 'SPARK'
+    case 'ARKADE':
+      return protocol === 'ARKADE'
+    case 'LIQUID':
+      return protocol === 'LIQUID'
+    default:
+      return false
+  }
+}
+
 export interface SendRoute {
   protocol: ProtocolType
   adapter: IProtocolAdapter
@@ -57,10 +85,17 @@ export class CrossProtocolRouter {
     for (const protocol of classified.candidates) {
       const adapter = this.connected(protocol)
       if (!adapter) continue
-      routes.push({ protocol, adapter, layer: classified.layer, direct: true })
+      // `direct` is verified against the capability manifest, not assumed: a
+      // candidate is only a direct route if its protocol actually supports the
+      // surface this destination settles on. Lite mode's auto-route (`best`)
+      // must never claim a protocol can pay directly when the manifest disagrees.
+      const direct = canSettleDirectly(protocol, classified)
+      routes.push({ protocol, adapter, layer: classified.layer, direct })
     }
 
-    return { destination: classified, routes, best: routes[0] ?? null }
+    // Direct routes first, so `best` is always a genuinely-direct route (or null).
+    routes.sort((a, b) => Number(b.direct) - Number(a.direct))
+    return { destination: classified, routes, best: routes.find((r) => r.direct) ?? null }
   }
 
   /**
