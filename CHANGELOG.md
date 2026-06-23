@@ -40,6 +40,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - `SECURITY.md`, `CONTRIBUTING.md`, and `examples/minimal-adapter`.
 
 ### Changed
+- Introduced `BaseWdkAdapter` — the five WDK adapters (Spark, Liquid, RGB/RLN,
+  RGB-L1, Arkade) now share connection lifecycle (`isConnected`/`disconnect`),
+  the connected-guard, `supportsSwaps`, `version`, and the allowlisted escape
+  hatch, removing ~170 lines of duplicated boilerplate. Native adapters untouched.
 - Extracted shared, transport-agnostic RGB translation helpers into
   `adapters/wdk/RgbCore.ts` (one source of truth for RGB asset/balance/status
   mapping; reused by the node-backed adapter and future RGB-L1 adapter).

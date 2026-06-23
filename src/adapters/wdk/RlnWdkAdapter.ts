@@ -40,6 +40,7 @@ import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { isBolt11 } from '../../lib/bolt11'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
+import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB'
@@ -84,16 +85,10 @@ const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
   'signMessage',
 ])
 
-export class RlnWdkAdapter implements IProtocolAdapter {
+export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'RGB'
   readonly capabilities = PROTOCOL_OPERATIONS.RGB
   readonly supportedLayers: Layer[] = getCapabilities('RGB').layers
-  readonly version = '0.1.0-wdk'
-
-  private manager: any = null
-  private account: any = null
-  private connected = false
-  private network = 'mainnet'
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -107,21 +102,6 @@ export class RlnWdkAdapter implements IProtocolAdapter {
     this.manager = new RlnWalletManager(cfg.mnemonic, { nodeUrl: cfg.nodeUrl })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
-  }
-
-  async disconnect(): Promise<void> {
-    try {
-      this.account?.dispose?.()
-      this.manager?.dispose?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -335,35 +315,9 @@ export class RlnWdkAdapter implements IProtocolAdapter {
     return { ok: true }
   }
 
-  // --- Swaps --------------------------------------------------------------
-  supportsSwaps(): boolean {
-    return getCapabilities('RGB').supportsSwaps
-  }
-
-  /**
-   * Generic escape hatch for RLN-specific ops not on the core contract.
-   *
-   * SECURITY: `operation` may be influenced by callers (deep links, chat/MCP tool
-   * args), so it is checked against an explicit allowlist before dispatch — never
-   * used to index the account object directly. This blocks reaching meta members
-   * (`constructor`, `__proto__`, prototype methods) or any non-whitelisted method.
-   */
+  // --- Escape hatch -------------------------------------------------------
+  /** Generic escape hatch for RLN-specific ops not on the core contract (allowlisted). */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
-    this.assertConnected()
-    if (!RLN_ALLOWED_OPS.has(operation)) {
-      throw new ProtocolError(`RLN operation not allowed: '${operation}'`, 'RGB', 'NO_OP')
-    }
-    const fn = (this.account as any)[operation]
-    if (typeof fn !== 'function') {
-      throw new ProtocolError(`Unknown RLN operation '${operation}'`, 'RGB', 'NO_OP')
-    }
-    return fn.call(this.account, params)
-  }
-
-  // --- helpers ------------------------------------------------------------
-  private assertConnected(): void {
-    if (!this.connected || !this.account) {
-      throw new ProtocolError('RlnWdkAdapter not connected', 'RGB', 'NOT_CONNECTED')
-    }
+    return this.runAllowlistedOp(RLN_ALLOWED_OPS, operation, params)
   }
 }

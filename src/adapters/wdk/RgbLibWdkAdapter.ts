@@ -47,6 +47,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './RgbCore'
+import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 export interface RgbLibAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_L1'
@@ -60,16 +61,10 @@ export interface RgbLibAdapterConfig extends BaseProtocolConfig {
   transportEndpoint?: string
 }
 
-export class RgbLibWdkAdapter implements IProtocolAdapter {
+export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'RGB_L1'
   readonly capabilities = PROTOCOL_OPERATIONS.RGB_L1
   readonly supportedLayers: Layer[] = getCapabilities('RGB_L1').layers
-  readonly version = '0.1.0-wdk'
-
-  private manager: any = null
-  private account: any = null
-  private connected = false
-  private network = 'mainnet'
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -90,21 +85,6 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     // rgb-lib needs the wallet registered with the indexer before first use.
     await this.account.registerWallet?.().catch(() => {})
     this.connected = true
-  }
-
-  async disconnect(): Promise<void> {
-    try {
-      this.account?.dispose?.()
-      this.manager?.dispose?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -278,17 +258,6 @@ export class RgbLibWdkAdapter implements IProtocolAdapter {
     return { ok: true }
   }
 
-  // --- Swaps --------------------------------------------------------------
-  supportsSwaps(): boolean {
-    return getCapabilities('RGB_L1').supportsSwaps // false
-  }
-
-  // --- helpers ------------------------------------------------------------
-  private assertConnected(): void {
-    if (!this.connected || !this.account) {
-      throw new ProtocolError('RgbLibWdkAdapter not connected', 'RGB_L1', 'NOT_CONNECTED')
-    }
-  }
 }
 
 /**
