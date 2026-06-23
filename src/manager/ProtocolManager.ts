@@ -381,29 +381,30 @@ export class ProtocolManager {
     return allTransactions.sort((a, b) => b.timestamp - a.timestamp)
   }
 
-  /** Race a per-protocol call against an 8s timeout. */
+  /** Race a per-protocol call against an 8s timeout, clearing the timer on settle. */
   private withTimeout<T>(p: Promise<T>, protocol: ProtocolType, op: string): Promise<T> {
-    return Promise.race([
-      p,
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`${op}(${protocol}) timed out after ${PER_PROTOCOL_TIMEOUT_MS}ms`)),
-          PER_PROTOCOL_TIMEOUT_MS
-        )
-      ),
-    ])
+    let timer: ReturnType<typeof setTimeout>
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () => reject(new Error(`${op}(${protocol}) timed out after ${PER_PROTOCOL_TIMEOUT_MS}ms`)),
+        PER_PROTOCOL_TIMEOUT_MS
+      )
+    })
+    // Clear the timer whether p resolves or rejects, so a fast call never leaves
+    // an 8s timer pinning the event loop alive.
+    return Promise.race([p, timeout]).finally(() => clearTimeout(timer))
   }
 
   async findAsset(assetId: string): Promise<UnifiedAsset | null> {
-    for (const adapter of this.registry.getAll()) {
-      if (adapter.isConnected()) {
-        try {
-          const asset = await adapter.getAsset(assetId)
-          if (asset) return asset
-        } catch (_error) {
-          // Asset not found in this protocol, continue
-        }
-      }
+    // Query every connected protocol in parallel (with the same per-protocol
+    // timeout as the other fan-out reads) rather than serially awaiting each —
+    // a single slow backend must not stall the lookup.
+    const adapters = this.registry.getAll().filter((a) => a.isConnected())
+    const results = await Promise.allSettled(
+      adapters.map((a) => this.withTimeout(a.getAsset(assetId), a.protocolName, 'getAsset'))
+    )
+    for (const result of results) {
+      if (result.status === 'fulfilled' && result.value) return result.value
     }
     return null
   }

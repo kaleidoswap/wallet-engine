@@ -94,8 +94,8 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     wdkModule: '@arkade-os/wdk',
     maturity: 'beta',
   },
-  RGB: {
-    protocol: 'RGB',
+  RGB_LN: {
+    protocol: 'RGB_LN',
     layers: ['BTC_L1', 'BTC_LN', 'RGB_L1', 'RGB_LN'],
     supportsOnchain: true,
     supportsLightning: true,
@@ -107,6 +107,21 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     invoiceExpiry: true,
     needsChannelLiquidity: true, // RGB-LN needs channels / LSPS1
     wdkModule: '@kaleidorg/wdk-wallet-rln',
+    maturity: 'beta',
+  },
+  RGB_L1: {
+    protocol: 'RGB_L1',
+    layers: ['BTC_L1', 'RGB_L1'],
+    supportsOnchain: true,
+    supportsLightning: false, // rgb-lib is on-chain only — no channels
+    supportsAssets: true, // RGB assets (USDT, XAUT) on L1
+    supportsSwaps: false, // RGB-LN atomic swaps need the node-backed RGB path
+    zeroFee: false,
+    staticReceiveAddress: false,
+    boarding: false,
+    invoiceExpiry: true, // RGB invoices expire
+    needsChannelLiquidity: false,
+    wdkModule: '@utexo/wdk-wallet-rgb',
     maturity: 'beta',
   },
   LIQUID: {

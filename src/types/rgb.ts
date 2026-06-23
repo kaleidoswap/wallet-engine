@@ -14,7 +14,7 @@ import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
 export type RgbTransport = 'http' | 'nwc'
 
 export interface RgbConfig extends BaseProtocolConfig {
-  protocol: 'RGB'
+  protocol: 'RGB_LN'
   makerUrl: string // Kaleidoswap maker URL
   /** Node transport. Defaults to "http" when omitted. */
   transport?: RgbTransport

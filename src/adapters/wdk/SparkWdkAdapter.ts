@@ -45,6 +45,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
+import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 /** Lower-case hex string for a Uint8Array / Buffer / hex string (for identity-key compare). */
 function toHexLower(bytes: any): string {
@@ -92,16 +93,11 @@ const SPARK_NETWORK_MAP: Record<string, SparkNetwork> = {
   signet: 'SIGNET', // Spark supports SIGNET natively
 }
 
-export class SparkWdkAdapter implements IProtocolAdapter {
+export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'SPARK'
   readonly capabilities = PROTOCOL_OPERATIONS.SPARK
   readonly supportedLayers: Layer[] = getCapabilities('SPARK').layers
-  readonly version = '0.1.0-wdk'
 
-  private manager: any = null
-  private account: any = null
-  private connected = false
-  private network = 'mainnet'
   // Cached account identity pubkey (hex) — used to derive transfer direction,
   // since the spark-sdk Transfer proto exposes sender/receiver identity keys
   // rather than an explicit direction flag.
@@ -130,20 +126,6 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     this.connected = true
   }
 
-  async disconnect(): Promise<void> {
-    try {
-      await this.account?.dispose?.()
-      await this.account?.cleanupConnections?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected
-  }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
     return { protocol: 'SPARK', connected: this.connected, network: this.network }
@@ -413,9 +395,6 @@ export class SparkWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     return this.account.getTransfers({ limit: 100 })
   }
-  supportsSwaps(): boolean {
-    return getCapabilities('SPARK').supportsSwaps
-  }
 
   /** Map a spark-sdk Transfer (proto) → domain UnifiedTransaction (fields read defensively). */
   private toUnifiedTx(t: any): UnifiedTransaction {
@@ -451,13 +430,6 @@ export class SparkWdkAdapter implements IProtocolAdapter {
       amountDisplay: '',
       asset: undefined as unknown as UnifiedAsset,
       protocolData: t,
-    }
-  }
-
-  // --- helpers ------------------------------------------------------------
-  private assertConnected(): void {
-    if (!this.connected || !this.account) {
-      throw new ProtocolError('SparkWdkAdapter not connected', 'SPARK', 'NOT_CONNECTED')
     }
   }
 }

@@ -38,6 +38,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
@@ -54,16 +55,28 @@ export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   arkadeConfig?: Record<string, any>
 }
 
-export class ArkadeWdkAdapter implements IProtocolAdapter {
+/**
+ * Allowlist of Arkade account methods reachable via `executeProtocolOperation`.
+ * Anything not listed here is rejected — see the method's SECURITY note.
+ */
+const ARKADE_ALLOWED_OPS: ReadonlySet<string> = new Set([
+  'waitForLightningPayment',
+  'getLightningLimits',
+  'getLightningFees',
+  'subscribeToIncomingFunds',
+  'getBoardingAddress',
+  'getTokenBalance',
+  'getTransactionHistory',
+  'onboard',
+  'offboard',
+  'getVtxos',
+  'getBoardingUtxos',
+])
+
+export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'ARKADE'
   readonly capabilities = PROTOCOL_OPERATIONS.ARKADE
   readonly supportedLayers: Layer[] = getCapabilities('ARKADE').layers
-  readonly version = '0.1.0-wdk'
-
-  private manager: any = null
-  private account: any = null
-  private connected = false
-  private network = 'mainnet'
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -76,21 +89,6 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     this.manager = new WalletManagerArkade(cfg.mnemonic, cfg.arkadeConfig ?? {})
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
-  }
-
-  async disconnect(): Promise<void> {
-    try {
-      this.account?.dispose?.()
-      await this.manager?.dispose?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -338,24 +336,8 @@ export class ArkadeWdkAdapter implements IProtocolAdapter {
     return this.account.getTransactionHistory()
   }
 
-  supportsSwaps(): boolean {
-    return getCapabilities('ARKADE').supportsSwaps
-  }
-
-  /** Escape hatch for Arkade-specific ops (waitForLightningPayment, getLightningLimits, …). */
+  /** Escape hatch for Arkade-specific ops (waitForLightningPayment, getLightningLimits, …) — allowlisted. */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
-    this.assertConnected()
-    const fn = (this.account as any)[operation]
-    if (typeof fn !== 'function') {
-      throw new ProtocolError(`Unknown Arkade operation '${operation}'`, 'ARKADE', 'NO_OP')
-    }
-    return fn.call(this.account, params)
-  }
-
-  // --- helpers ------------------------------------------------------------
-  private assertConnected(): void {
-    if (!this.connected || !this.account) {
-      throw new ProtocolError('ArkadeWdkAdapter not connected', 'ARKADE', 'NOT_CONNECTED')
-    }
+    return this.runAllowlistedOp(ARKADE_ALLOWED_OPS, operation, params)
   }
 }

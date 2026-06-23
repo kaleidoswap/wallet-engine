@@ -41,6 +41,7 @@ import {
 import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
+import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 // Re-exported from the neutral constants module so core (disclosure) never has
 // to import this adapter to reach the asset id.
@@ -72,16 +73,11 @@ const KNOWN_ASSETS: Record<string, { ticker: string; name: string; precision: nu
   [LIQUID_USDT_ASSET_ID]: { ticker: 'USDt', name: 'Tether USD', precision: 8 },
 }
 
-export class LiquidWdkAdapter implements IProtocolAdapter {
+export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'LIQUID'
   readonly capabilities = PROTOCOL_OPERATIONS.LIQUID
   readonly supportedLayers: Layer[] = getCapabilities('LIQUID').layers
-  readonly version = '0.1.0-wdk'
 
-  private manager: any = null
-  private account: any = null
-  private connected = false
-  private network = 'mainnet'
   private policyAsset: string | null = null
 
   // --- Connection ---------------------------------------------------------
@@ -103,19 +99,8 @@ export class LiquidWdkAdapter implements IProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
-    try {
-      this.account?.dispose?.()
-      this.manager?.dispose?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-      this.policyAsset = null
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected
+    await super.disconnect()
+    this.policyAsset = null
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -292,9 +277,6 @@ export class LiquidWdkAdapter implements IProtocolAdapter {
   async listTransfers(): Promise<any> {
     return this.account.listTransactions()
   }
-  supportsSwaps(): boolean {
-    return getCapabilities('LIQUID').supportsSwaps
-  }
 
   // --- helpers ------------------------------------------------------------
   private async getPolicyAsset(): Promise<string> {
@@ -326,12 +308,6 @@ export class LiquidWdkAdapter implements IProtocolAdapter {
         supportsLightning: false,
         supportsOnchain: true,
       },
-    }
-  }
-
-  private assertConnected(): void {
-    if (!this.connected || !this.account) {
-      throw new ProtocolError('LiquidWdkAdapter not connected', 'LIQUID', 'NOT_CONNECTED')
     }
   }
 }

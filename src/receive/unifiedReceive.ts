@@ -99,11 +99,12 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
   if (!m) return null
   const btcAddress = m[1] || undefined
   const params = new URLSearchParams(m[2] ?? '')
-  const amount = params.get('amount')
-  const assetAmount = params.get(K.assetAmount)
   return {
     btcAddress,
-    amountBtc: amount != null ? Number(amount) : undefined,
+    // Amounts are coerced through a finite/non-negative guard: a junk, negative,
+    // or non-finite `amount=` must surface as `undefined`, never as NaN/-1/Infinity
+    // flowing into a send.
+    amountBtc: toNonNegativeFinite(params.get('amount')),
     label: params.get('label') ?? undefined,
     lightningInvoice: params.get(K.lightning) ?? undefined,
     lightningOffer: params.get(K.lno) ?? undefined,
@@ -112,11 +113,42 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
     liquidAddress: params.get(K.liquid) ?? undefined,
     rgbInvoice: params.get(K.rgb) ?? undefined,
     assetId: params.get(K.assetId) ?? undefined,
-    assetAmount: assetAmount != null ? Number(assetAmount) : undefined,
+    assetAmount: toNonNegativeFinite(params.get(K.assetAmount)),
   }
+}
+
+/** Parse a query value as a finite, non-negative number, else `undefined`. */
+function toNonNegativeFinite(v: string | null): number | undefined {
+  if (v == null || v.trim() === '') return undefined
+  const n = Number(v)
+  return Number.isFinite(n) && n >= 0 ? n : undefined
 }
 
 /** BIP21/BIP321 amounts are in BTC with up to 8 decimals, no trailing zeros / exponent. */
 function formatBtc(amountBtc: number): string {
   return amountBtc.toFixed(8).replace(/\.?0+$/, '')
+}
+
+/**
+ * The distinct payment methods present in a parsed unified URI.
+ *
+ * A unified `bitcoin:` URI may carry several independent payment methods (an
+ * on-chain address AND a `lightning=` invoice AND an asset invoice). They are
+ * NOT cryptographically bound to one another — a scanned QR could pair an
+ * address with an unrelated invoice. Consumers MUST present the methods and let
+ * the user/router choose one explicitly; they must not silently auto-pay a
+ * different method than the one the user intended. This helper enumerates what's
+ * on offer so the UI can do that.
+ */
+export function receiveMethodsOf(p: UnifiedReceiveParams): Array<keyof UnifiedReceiveParams> {
+  const keys: Array<keyof UnifiedReceiveParams> = [
+    'btcAddress',
+    'lightningInvoice',
+    'lightningOffer',
+    'sparkAddress',
+    'arkadeAddress',
+    'liquidAddress',
+    'rgbInvoice',
+  ]
+  return keys.filter((k) => p[k] != null && p[k] !== '')
 }

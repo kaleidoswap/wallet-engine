@@ -39,17 +39,27 @@ export {
   type SendRoute,
   type SendResolution,
   type ReceiveRoute,
+  type UnifiedSendRoute,
+  type UnifiedSendResolution,
 } from './router'
 export {
   classifyDestination,
   type ClassifiedDestination,
   type DestinationKind,
 } from './router/destination'
+export {
+  DEFAULT_RAIL_ORDER,
+  layerPreferenceFor,
+  railOfKind,
+  type Rail,
+  type RoutePreference,
+} from './router/preference'
 
 // Unified receive QR (single BIP21 with embedded LN/Ark/Spark/Liquid/RGB)
 export {
   buildUnifiedReceiveURI,
   parseUnifiedReceiveURI,
+  receiveMethodsOf,
   type UnifiedReceiveParams,
 } from './receive/unifiedReceive'
 

@@ -38,9 +38,12 @@ import {
 import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
+import { isBolt11 } from '../../lib/bolt11'
+import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
+import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
-  protocol: 'RGB'
+  protocol: 'RGB_LN'
   /** BIP-39 mnemonic for this wallet. */
   mnemonic: string
   /** Base URL of the RLN HTTP API (e.g. http://localhost:3001). */
@@ -49,30 +52,49 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   accountIndex?: number
 }
 
-/** Map RLN node status strings → domain TransactionStatus. */
-function mapStatus(s?: string): TransactionStatus {
-  const v = (s ?? '').toLowerCase()
-  if (v.includes('succeed') || v.includes('settled') || v === 'paid') return 'confirmed'
-  if (v.includes('fail')) return 'failed'
-  return 'pending'
-}
+/**
+ * Allowlist of RLN account methods reachable via `executeProtocolOperation`.
+ * Only RLN-specific operations not already exposed as typed adapter methods.
+ * Anything not listed here is rejected — see the method's SECURITY note.
+ */
+const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
+  'openChannel',
+  'closeChannel',
+  'getChannelId',
+  'connectPeer',
+  'disconnectPeer',
+  'listPeers',
+  'keysend',
+  'createUtxos',
+  'listUnspents',
+  'estimateFee',
+  'failTransfers',
+  'syncRgbWallet',
+  'getAssetMetadata',
+  'getAssetMedia',
+  'whitelistSwap',
+  'getTakerPubkey',
+  'atomicTaker',
+  'listSwaps',
+  'getSwap',
+  'makerInit',
+  'makerExecute',
+  'backup',
+  'restore',
+  'changePassword',
+  'signMessage',
+])
 
-export class RlnWdkAdapter implements IProtocolAdapter {
-  readonly protocolName: ProtocolType = 'RGB'
-  readonly capabilities = PROTOCOL_OPERATIONS.RGB
-  readonly supportedLayers: Layer[] = getCapabilities('RGB').layers
-  readonly version = '0.1.0-wdk'
-
-  private manager: any = null
-  private account: any = null
-  private connected = false
-  private network = 'mainnet'
+export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
+  readonly protocolName: ProtocolType = 'RGB_LN'
+  readonly capabilities = PROTOCOL_OPERATIONS.RGB_LN
+  readonly supportedLayers: Layer[] = getCapabilities('RGB_LN').layers
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
     const cfg = config as RlnAdapterConfig
-    if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB', 'CONFIG')
-    if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB', 'CONFIG')
+    if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB_LN', 'CONFIG')
+    if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB_LN', 'CONFIG')
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-rln', () => import('@kaleidorg/wdk-wallet-rln'))
@@ -82,26 +104,11 @@ export class RlnWdkAdapter implements IProtocolAdapter {
     this.connected = true
   }
 
-  async disconnect(): Promise<void> {
-    try {
-      this.account?.dispose?.()
-      this.manager?.dispose?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-    }
-  }
-
-  isConnected(): boolean {
-    return this.connected
-  }
-
   async getConnectionInfo(): Promise<ConnectionInfo> {
     this.assertConnected()
     const info: any = await this.account.getNodeInfo()
     return {
-      protocol: 'RGB',
+      protocol: 'RGB_LN',
       connected: this.connected,
       nodeId: info?.pubkey,
       network: this.network,
@@ -137,52 +144,26 @@ export class RlnWdkAdapter implements IProtocolAdapter {
 
   async listAssets(): Promise<UnifiedAsset[]> {
     this.assertConnected()
-    const out: UnifiedAsset[] = []
-
-    // BTC
     const { total } = await this.getBtcBalance()
-    out.push({
-      id: 'BTC',
-      name: 'Bitcoin',
-      ticker: 'BTC',
-      precision: 8,
-      protocol: 'RGB',
-      layer: 'BTC_L1',
-      balance: { total, available: total, pending: 0, totalDisplay: String(total), availableDisplay: String(total) },
-      capabilities: { canSend: true, canReceive: true, canSwap: true, supportsLightning: true, supportsOnchain: true },
-    })
+    const out: UnifiedAsset[] = [rgbBtcAsset(total, RLN_PROFILE)]
 
     // RGB assets (NIA — fungible: USDT/XAUT)
     const res: any = await this.account.listAssets(['Nia'])
     const nia: any[] = res?.nia ?? []
-    for (const a of nia) {
-      const bal = a?.balance ?? {}
-      const total = Number(bal.spendable ?? bal.settled ?? 0)
-      out.push({
-        id: a.asset_id,
-        name: a.name ?? a.ticker ?? a.asset_id,
-        ticker: a.ticker ?? a.asset_id?.slice(0, 6),
-        precision: Number(a.precision ?? 0),
-        protocol: 'RGB',
-        layer: 'RGB_LN',
-        balance: { total, available: total, pending: 0, totalDisplay: String(total), availableDisplay: String(total) },
-        capabilities: { canSend: true, canReceive: true, canSwap: true, supportsLightning: true, supportsOnchain: true },
-      })
-    }
+    for (const a of nia) out.push(rgbNiaAsset(a, RLN_PROFILE))
     return out
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
     this.assertConnected()
     const b: any = await this.account.getAssetBalance(assetId)
-    const total = Number(b?.spendable ?? b?.settled ?? 0)
-    return { total, available: total, pending: Number(b?.future ?? 0), totalDisplay: String(total), availableDisplay: String(total) }
+    return rgbAssetBalance(b)
   }
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
     const assets = await this.listAssets()
     const found = assets.find((a) => a.id === assetId)
-    if (!found) throw new ProtocolError(`Unknown asset ${assetId}`, 'RGB', 'NO_ASSET')
+    if (!found) throw new ProtocolError(`Unknown asset ${assetId}`, 'RGB_LN', 'NO_ASSET')
     return found
   }
 
@@ -221,8 +202,7 @@ export class RlnWdkAdapter implements IProtocolAdapter {
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
     this.assertConnected()
-    const isBolt11 = /^ln(bc|tb|bcrt)/i.test(invoice.trim())
-    const d: any = isBolt11
+    const d: any = isBolt11(invoice)
       ? await this.account.decodeLNInvoice(invoice)
       : await this.account.decodeRgbInvoice(invoice)
     return {
@@ -247,7 +227,7 @@ export class RlnWdkAdapter implements IProtocolAdapter {
       preimage: r?.payment_secret,
       amount: Number(request.amount ?? 0),
       fee: 0,
-      status: mapStatus(r?.status),
+      status: mapRgbStatus(r?.status),
       timestamp: Date.now(),
     }
   }
@@ -255,7 +235,7 @@ export class RlnWdkAdapter implements IProtocolAdapter {
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     this.assertConnected()
     const s: any = await this.account.getInvoiceStatus({ paymentHash })
-    return { paymentHash, status: mapStatus(s?.status), error: s?.error }
+    return { paymentHash, status: mapRgbStatus(s?.status), error: s?.error }
   }
 
   // --- Transactions / payments -------------------------------------------
@@ -278,7 +258,7 @@ export class RlnWdkAdapter implements IProtocolAdapter {
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
     const all = await this.listTransactions()
     const found = all.find((t) => t.id === txId)
-    if (!found) throw new ProtocolError(`Unknown tx ${txId}`, 'RGB', 'NO_TX')
+    if (!found) throw new ProtocolError(`Unknown tx ${txId}`, 'RGB_LN', 'NO_TX')
     return found
   }
 
@@ -335,25 +315,9 @@ export class RlnWdkAdapter implements IProtocolAdapter {
     return { ok: true }
   }
 
-  // --- Swaps --------------------------------------------------------------
-  supportsSwaps(): boolean {
-    return getCapabilities('RGB').supportsSwaps
-  }
-
-  /** Generic escape hatch for RLN-specific ops not on the core contract. */
+  // --- Escape hatch -------------------------------------------------------
+  /** Generic escape hatch for RLN-specific ops not on the core contract (allowlisted). */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
-    this.assertConnected()
-    const fn = (this.account as any)[operation]
-    if (typeof fn !== 'function') {
-      throw new ProtocolError(`Unknown RLN operation '${operation}'`, 'RGB', 'NO_OP')
-    }
-    return fn.call(this.account, params)
-  }
-
-  // --- helpers ------------------------------------------------------------
-  private assertConnected(): void {
-    if (!this.connected || !this.account) {
-      throw new ProtocolError('RlnWdkAdapter not connected', 'RGB', 'NOT_CONNECTED')
-    }
+    return this.runAllowlistedOp(RLN_ALLOWED_OPS, operation, params)
   }
 }
