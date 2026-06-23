@@ -28,20 +28,25 @@ import {
   ProtocolConfig,
   ProtocolAdapterRegistry,
 } from '../adapters/IProtocolAdapter'
+import { type Logger, getLogger } from '../ports'
 
 export interface ProtocolManagerConfig {
   defaultProtocol?: ProtocolType
   autoConnect?: boolean
   enabledProtocols?: ProtocolType[]
+  /** Logger override; defaults to the injected platform logger (or console). */
+  logger?: Logger
 }
 
 export class ProtocolManager {
   private registry: ProtocolAdapterRegistry
   private activeProtocol: ProtocolType | null = null
+  private log: Logger
 
   constructor(_config: ProtocolManagerConfig = {}) {
     this.registry = new ProtocolAdapterRegistry()
     this.activeProtocol = _config.defaultProtocol || null
+    this.log = _config.logger ?? getLogger()
   }
 
   // ========================================================================
@@ -50,7 +55,7 @@ export class ProtocolManager {
 
   registerAdapter(adapter: IProtocolAdapter): void {
     this.registry.register(adapter)
-    console.log(`[ProtocolManager] Registered ${adapter.protocolName} adapter`)
+    this.log.info(`[ProtocolManager] Registered ${adapter.protocolName} adapter`)
   }
 
   getSupportedProtocols(): ProtocolType[] {
@@ -76,7 +81,7 @@ export class ProtocolManager {
     }
 
     this.activeProtocol = protocol
-    console.log(`[ProtocolManager] Active protocol set to ${protocol}`)
+    this.log.info(`[ProtocolManager] Active protocol set to ${protocol}`)
   }
 
   getActiveProtocol(): ProtocolType | null {
@@ -122,7 +127,7 @@ export class ProtocolManager {
     }
 
     await adapter.connect(config)
-    console.log(`[ProtocolManager] Connected to ${protocol}`)
+    this.log.info(`[ProtocolManager] Connected to ${protocol}`)
 
     // Auto-set as active if no active protocol
     if (!this.activeProtocol) {
@@ -134,7 +139,7 @@ export class ProtocolManager {
     const adapter = this.registry.get(protocol)
     if (adapter) {
       await adapter.disconnect()
-      console.log(`[ProtocolManager] Disconnected from ${protocol}`)
+      this.log.info(`[ProtocolManager] Disconnected from ${protocol}`)
 
       if (this.activeProtocol === protocol) {
         this.activeProtocol = null
@@ -147,7 +152,7 @@ export class ProtocolManager {
       try {
         await adapter.disconnect()
       } catch (error) {
-        console.error(`[ProtocolManager] Error disconnecting ${adapter.protocolName}:`, error)
+        this.log.error(`[ProtocolManager] Error disconnecting ${adapter.protocolName}:`, error)
       }
     }
     this.activeProtocol = null
@@ -251,7 +256,7 @@ export class ProtocolManager {
           const assets = await adapter.listAssets()
           allAssets.push(...assets)
         } catch (error) {
-          console.error(`[ProtocolManager] Error listing assets for ${adapter.protocolName}:`, error)
+          this.log.error(`[ProtocolManager] Error listing assets for ${adapter.protocolName}:`, error)
         }
       }
     }
@@ -268,7 +273,7 @@ export class ProtocolManager {
           const transactions = await adapter.listTransactions(filter)
           allTransactions.push(...transactions)
         } catch (error) {
-          console.error(`[ProtocolManager] Error listing transactions for ${adapter.protocolName}:`, error)
+          this.log.error(`[ProtocolManager] Error listing transactions for ${adapter.protocolName}:`, error)
         }
       }
     }
