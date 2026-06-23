@@ -53,9 +53,11 @@ import {
   TransactionStatus,
 } from '../types/base'
 import { RgbConfig } from '../types/rgb'
+import { PROTOCOL_OPERATIONS } from '../capabilities/operations'
 
 export class RgbAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'RGB'
+  readonly capabilities = PROTOCOL_OPERATIONS.RGB
   readonly supportedLayers: Layer[] = ['RGB_L1', 'RGB_LN', 'BTC_L1', 'BTC_LN']
   readonly version = '1.0.0'
 

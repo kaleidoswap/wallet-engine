@@ -19,6 +19,16 @@ export type Layer =
   | 'ARKADE_ARKADE'   // Arkade protocol
   | 'LIQUID_ASSET'    // Liquid asset (e.g. USDt on Liquid — lite-mode "USD")
 
+// Node info returned by adapters. Each protocol returns its own SDK's shape;
+// these are the fields the manager/UI read in common.
+export interface NodeInfo {
+  pubkey?: string
+  local_balance_sat?: number
+  outbound_balance_msat?: number
+  num_channels?: number
+  [key: string]: unknown
+}
+
 // Asset interface - unified across all protocols
 export interface UnifiedAsset {
   id: string
@@ -150,6 +160,13 @@ export interface PaymentRequest {
   maxFeeSats?: number
 }
 
+export interface KeysendRequest {
+  pubkey: string
+  amount: number // In msat, matching NIP-47 pay_keysend
+  assetId?: string
+  assetAmount?: number
+}
+
 export interface PaymentResult {
   paymentHash: string
   txid?: string
@@ -248,13 +265,24 @@ export interface SwapResult {
   timestamp: number
 }
 
+// Error codes
+export const ErrorCode = {
+  CONNECTION_ERROR: 'CONNECTION_ERROR',
+  INSUFFICIENT_BALANCE: 'INSUFFICIENT_BALANCE',
+  NOT_SUPPORTED: 'NOT_SUPPORTED',
+  NOT_CONFIGURED: 'NOT_CONFIGURED',
+  VALIDATION_ERROR: 'VALIDATION_ERROR',
+} as const
+
+export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode]
+
 // Error types
 export class ProtocolError extends Error {
   constructor(
     message: string,
     public protocol: ProtocolType,
     public code?: string,
-    public details?: any
+    public details?: unknown
   ) {
     super(message)
     this.name = 'ProtocolError'
@@ -262,15 +290,36 @@ export class ProtocolError extends Error {
 }
 
 export class ConnectionError extends ProtocolError {
-  constructor(message: string, protocol: ProtocolType, details?: any) {
-    super(message, protocol, 'CONNECTION_ERROR', details)
+  constructor(message: string, protocol: ProtocolType, details?: unknown) {
+    super(message, protocol, ErrorCode.CONNECTION_ERROR, details)
     this.name = 'ConnectionError'
   }
 }
 
 export class InsufficientBalanceError extends ProtocolError {
   constructor(message: string, protocol: ProtocolType, required: number, available: number) {
-    super(message, protocol, 'INSUFFICIENT_BALANCE', { required, available })
+    super(message, protocol, ErrorCode.INSUFFICIENT_BALANCE, { required, available })
     this.name = 'InsufficientBalanceError'
+  }
+}
+
+export class CapabilityError extends ProtocolError {
+  constructor(message: string, protocol: ProtocolType, details?: unknown) {
+    super(message, protocol, ErrorCode.NOT_SUPPORTED, details)
+    this.name = 'CapabilityError'
+  }
+}
+
+export class ConfigurationError extends ProtocolError {
+  constructor(message: string, protocol: ProtocolType, details?: unknown) {
+    super(message, protocol, ErrorCode.NOT_CONFIGURED, details)
+    this.name = 'ConfigurationError'
+  }
+}
+
+export class ValidationError extends ProtocolError {
+  constructor(message: string, protocol: ProtocolType, details?: unknown) {
+    super(message, protocol, ErrorCode.VALIDATION_ERROR, details)
+    this.name = 'ValidationError'
   }
 }

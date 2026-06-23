@@ -28,11 +28,13 @@ import {
   ConnectionError,
   TransactionStatus,
 } from '../types/base'
+import { PROTOCOL_OPERATIONS } from '../capabilities/operations'
 
 const DEFAULT_MAX_FEE_SATS = 1000
 
 export class SparkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'SPARK'
+  readonly capabilities = PROTOCOL_OPERATIONS.SPARK
   readonly supportedLayers: Layer[] = ['SPARK_SPARK', 'BTC_LN']
   readonly version = '1.0.0'
 
