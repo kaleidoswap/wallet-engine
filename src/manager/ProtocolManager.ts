@@ -32,6 +32,8 @@ import {
   ProtocolAdapterRegistry,
 } from '../adapters/IProtocolAdapter'
 import type { ProtocolCapability } from '../protocol-capabilities'
+import type { PlatformContext } from '../ports'
+import { getPlatformContextOptional } from '../platform'
 
 /**
  * Minimal logger the manager routes its diagnostics through. Hosts inject
@@ -53,6 +55,11 @@ export interface ProtocolManagerConfig {
   enabledProtocols?: ProtocolType[]
   /** Inject a host logger; defaults to console. */
   logger?: ProtocolManagerLogger
+  /**
+   * Host platform context (storage/CSPRNG/clock). Falls back to the value
+   * installed via `initEngine(ctx)`, or undefined if neither is set.
+   */
+  platform?: PlatformContext
 }
 
 /** Per-protocol timeout for cross-protocol fan-out reads. */
@@ -62,11 +69,27 @@ export class ProtocolManager {
   private registry: ProtocolAdapterRegistry
   private activeProtocol: ProtocolType | null = null
   private log: ProtocolManagerLogger
+  private platform: PlatformContext | null
 
   constructor(_config: ProtocolManagerConfig = {}) {
     this.registry = new ProtocolAdapterRegistry()
     this.activeProtocol = _config.defaultProtocol || null
     this.log = _config.logger ?? defaultLogger
+    this.platform = _config.platform ?? getPlatformContextOptional()
+  }
+
+  /**
+   * The host platform context, if one was injected (via config or
+   * `initEngine`). Throws if neither was set — callers that require storage/
+   * RNG/clock should depend on this rather than touching globals.
+   */
+  getPlatform(): PlatformContext {
+    if (!this.platform) {
+      throw new Error(
+        'wallet-engine: no platform context — pass `platform` to ProtocolManager or call initEngine(ctx)'
+      )
+    }
+    return this.platform
   }
 
   // ========================================================================

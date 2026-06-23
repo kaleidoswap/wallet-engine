@@ -63,28 +63,34 @@ The router and UI read that manifest — they never special-case a protocol by n
 
 ## Install
 
-> **Heads-up:** during the `wallet-protocols → wallet-engine` rename, the package is
-> still published to npm as
-> [`@kaleidorg/wallet-protocols`](https://www.npmjs.com/package/@kaleidorg/wallet-protocols).
-> Until the `@kaleidorg/wallet-engine` name is published, install it under the current
-> name — or alias it to the future import path:
-
 ```bash
-# current published name
-pnpm add @kaleidorg/wallet-protocols
-# or alias it so your code can import '@kaleidorg/wallet-engine' today:
-pnpm add @kaleidorg/wallet-engine@npm:@kaleidorg/wallet-protocols
+pnpm add @kaleidorg/wallet-engine
 ```
 
-Heavy protocol SDKs are **optional dependencies** — install only the adapters you use:
+The root entry point (`@kaleidorg/wallet-engine`) is **adapter-free and
+dependency-light** — it ships the abstraction only (the `IProtocolAdapter`
+contract, `ProtocolManager`, router, unified receive, disclosure, capability
+manifests, platform ports) and imports no protocol SDK, WDK module, or
+`kaleido-sdk`. Hosts register their own adapters, or import the bundled ones
+from the opt-in sub-paths:
+
+```ts
+import { ProtocolManager } from '@kaleidorg/wallet-engine'            // abstraction
+import { RgbAdapter } from '@kaleidorg/wallet-engine/adapters/native' // native-SDK adapters
+import { createWdkRegistry } from '@kaleidorg/wallet-engine/adapters/wdk' // WDK-backed adapters
+```
+
+Heavy protocol SDKs (and `kaleido-sdk`) are **optional dependencies**, pulled in
+only when you import a sub-path that needs them — install just the adapters you use:
 
 ```bash
 # RGB/RLN + Liquid only, for example
 pnpm add @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-wallet-liquid
 ```
 
-The engine lazy-loads each WDK module inside its adapter's `connect()`, so importing
-`wallet-engine` does **not** pull every protocol SDK into your bundle.
+The engine lazy-loads each WDK module inside its adapter's `connect()`, so even
+importing the `adapters/wdk` sub-path does **not** eagerly pull every protocol
+SDK into your bundle.
 
 ---
 

@@ -1,15 +1,32 @@
 {
-  "name": "@kaleidorg/wallet-protocols",
+  "name": "@kaleidorg/wallet-engine",
   "version": "1.0.0-beta.8",
-  "description": "WDK-based multi-protocol wallet engine (Spark, RGB/RLN, Liquid, Arkade): IProtocolAdapter contract + WDK adapters, cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.",
+  "description": "Multi-protocol Bitcoin L2 wallet engine (Spark, RGB/RLN, Liquid, Arkade): IProtocolAdapter contract, cross-protocol router, BIP321 unified receive, and lite/advanced disclosure. Bundled adapters are opt-in sub-paths.",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./adapters/native": {
+      "types": "./dist/adapters/native.d.ts",
+      "import": "./dist/adapters/native.js"
+    },
+    "./adapters/wdk": {
+      "types": "./dist/adapters/wdk/index.d.ts",
+      "import": "./dist/adapters/wdk/index.js"
+    },
+    "./package.json": "./package.json"
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "typecheck:core": "tsc -p tsconfig.core.json --noEmit",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
   },
@@ -18,8 +35,7 @@
   ],
   "dependencies": {
     "@scure/bip32": "^1.5.0",
-    "@scure/bip39": "^1.4.0",
-    "kaleido-sdk": "^0.1.6"
+    "@scure/bip39": "^1.4.0"
   },
   "optionalDependencies": {
     "@arkade-os/sdk": "*",
@@ -28,12 +44,14 @@
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
-    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17"
+    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
+    "kaleido-sdk": "^0.1.6"
   },
   "devDependencies": {
     "@arkade-os/sdk": "^0.4.14",
     "@buildonspark/spark-sdk": "^0.7.10",
     "@flashnet/sdk": "^0.5.7",
+    "kaleido-sdk": "^0.1.6",
     "typescript": "~5.9.3",
     "vitest": "^2.1.9"
   },

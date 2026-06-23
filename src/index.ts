@@ -1,6 +1,15 @@
 /**
- * @kaleidorg/wallet-protocols
- * Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet.
+ * @kaleidorg/wallet-engine
+ *
+ * The headless multi-protocol wallet abstraction: the IProtocolAdapter
+ * contract, ProtocolManager, cross-protocol router, capability manifests,
+ * unified receive, lite/advanced disclosure, and platform ports.
+ *
+ * This root barrel is deliberately ADAPTER-FREE and dependency-light — it does
+ * not import any protocol SDK, WDK module, or `kaleido-sdk`. Hosts register
+ * their own adapters (or import the bundled ones from the opt-in sub-paths):
+ *   - `@kaleidorg/wallet-engine/adapters/native`  (native-SDK adapters)
+ *   - `@kaleidorg/wallet-engine/adapters/wdk`     (WDK-backed adapters + registry)
  */
 
 // Types
@@ -10,6 +19,9 @@ export type { SparkConfig, SparkTransfer, SparkLightningInvoice, SparkLightningS
 export type { ArkadeConfig, ArkadeVtxo, ArkadeBalance, ArkadeTransaction } from './types/arkade'
 export type { RgbConfig, RgbTransport, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, KaleidoswapQuote, RgbNodeInfo, TradingPair } from './types/rgb'
 export * from './types/flashnet'
+
+// Engine constants
+export { LIQUID_USDT_ASSET_ID } from './constants'
 
 // Adapter interface
 export { type IProtocolAdapter, type BaseProtocolConfig, type ProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
@@ -25,23 +37,9 @@ export {
   protocolSupports,
 } from './protocol-capabilities'
 
-// Platform ports (injected per host)
+// Platform ports (injected per host) + the injection seam
 export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'
-
-// Adapters (native — being migrated to WDK)
-export { SparkAdapter } from './adapters/SparkAdapter'
-export { ArkadeAdapter } from './adapters/ArkadeAdapter'
-export { RgbAdapter } from './adapters/RgbAdapter'
-
-// Adapters (WDK-backed)
-export { SparkWdkAdapter, type SparkAdapterConfig } from './adapters/wdk/SparkWdkAdapter'
-export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './adapters/wdk/LiquidWdkAdapter'
-export { RlnWdkAdapter, type RlnAdapterConfig } from './adapters/wdk/RlnWdkAdapter'
-export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './adapters/wdk/ArkadeWdkAdapter'
-export { createWdkRegistry, type WdkRegistryOptions } from './registry/createWdkRegistry'
-
-// WDK module loader (RN injects static require; other hosts use dynamic import)
-export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './adapters/wdk/moduleLoader'
+export { initEngine, getPlatformContext, getPlatformContextOptional } from './platform'
 
 // Cross-protocol router (chooses BETWEEN protocols)
 export {
@@ -55,14 +53,6 @@ export {
   type ClassifiedDestination,
   type DestinationKind,
 } from './router/destination'
-
-// Kaleidoswap RFQ swap wrapper
-export {
-  KaleidoswapSwap,
-  type KaleidoswapSwapConfig,
-  type SwapQuoteRequest,
-  type SwapExecuteRequest,
-} from './swap/KaleidoswapSwap'
 
 // Unified receive QR (single BIP21 with embedded LN/Ark/Spark/Liquid/RGB)
 export {
@@ -85,12 +75,6 @@ export {
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig, type ProtocolManagerLogger } from './manager/ProtocolManager'
-
-// Client managers
-export { sparkClientManager } from './lib/spark-client-manager'
-export { arkadeClientManager, type ArkadePlatformProviders } from './lib/arkade-client-manager'
-export { kaleidoClientManager, type KaleidoClientConfig } from './lib/kaleido-client-manager'
-export { flashnetClientManager } from './lib/flashnet-client-manager'
 
 // Utilities
 export { networkTypeToProtocol, protocolToNetworkType } from './utils'

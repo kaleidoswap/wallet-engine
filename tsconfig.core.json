@@ -1,0 +1,22 @@
+{
+  "//": "Guard config: type-checks the extension-facing CORE surface (everything reachable from the root barrel) WITHOUT the adapter layer, using a service-worker lib (no DOM). If this passes, the core has not picked up a `window`/`document`/`localStorage` dependency or an adapter/SDK import. Run via `npm run typecheck:core`.",
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "lib": ["ES2020", "WebWorker"],
+    "noEmit": true
+  },
+  "include": ["src"],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "src/adapters/SparkAdapter.ts",
+    "src/adapters/ArkadeAdapter.ts",
+    "src/adapters/RgbAdapter.ts",
+    "src/adapters/native.ts",
+    "src/adapters/wdk",
+    "src/registry",
+    "src/swap",
+    "src/lib"
+  ]
+}
