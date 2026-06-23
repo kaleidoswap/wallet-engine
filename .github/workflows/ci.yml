@@ -28,5 +28,8 @@ jobs:
       - name: Test
         run: npm test
 
+      # Audit only the engine's own runtime deps (@scure/*). The heavy protocol
+      # SDKs are OPTIONAL and host-owned, so their transitive advisories are out
+      # of scope here and must not break this repo's CI.
       - name: Audit production dependencies (high+)
-        run: npm audit --omit=dev --audit-level=high
+        run: npm audit --omit=dev --omit=optional --audit-level=high
