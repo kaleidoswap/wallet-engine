@@ -59,6 +59,7 @@ with `if (protocol === …)` smeared across every screen.
 | **BTC**    | on-chain | — | — | base on-chain only | (native) |
 | **SPARK**  | Spark, LN, on-chain | Spark tokens | — | zero-fee, static receive addr | `@tetherto/wdk-wallet-spark` |
 | **RGB/RLN**| RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
+| **RGB-L1** | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
 | **LIQUID** | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
 | **ARKADE** | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
 

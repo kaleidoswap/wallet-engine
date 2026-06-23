@@ -21,10 +21,10 @@ describe('classifyDestination', () => {
     expect(classifyDestination('lnurl1dp68gurn8ghj7').kind).toBe('LN_ADDRESS')
   })
 
-  it('classifies an RGB invoice', () => {
+  it('classifies an RGB invoice (payable by either RGB backing)', () => {
     const r = classifyDestination('rgb:utxob:abcdef')
     expect(r.kind).toBe('RGB_INVOICE')
-    expect(r.candidates).toEqual(['RGB'])
+    expect(r.candidates).toEqual(['RGB', 'RGB_L1'])
   })
 
   it('classifies a Spark address', () => {

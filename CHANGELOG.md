@@ -26,6 +26,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `@flashnet/sdk`) from floating `"*"` to caret ranges.
 
 ### Added
+- **RGB-L1 protocol** — a new `RGB_L1` protocol type and `RgbLibWdkAdapter`
+  backed by local rgb-lib (`@utexo/wdk-wallet-rgb`): on-chain BTC + RGB assets,
+  no Lightning/channels/swaps. Described once in the capability manifest; the
+  router, unified receive, and lite aggregation pick it up with no other changes.
+  Opt-in (not in `createWdkRegistry`'s default set; install `@utexo/wdk-wallet-rgb`
+  separately). The node-backed `RGB` (RGB-LN) path is unchanged.
 - `receiveMethodsOf(params)` — enumerate the payment methods present in a unified
   receive URI so consumers can surface a choice instead of auto-paying one.
 - Test safety net for the pure core (destination classifier, disclosure, bolt11,

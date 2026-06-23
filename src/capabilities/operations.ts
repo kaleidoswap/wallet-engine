@@ -58,6 +58,13 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
     'arkade-onboard',
     'arkade-offboard',
   ],
+  RGB_L1: [
+    'onchain-send',
+    'onchain-receive',
+    'asset-send',
+    'asset-receive',
+    'rgb-invoice',
+  ],
   LIQUID: ['onchain-send', 'onchain-receive', 'asset-send', 'asset-receive'],
   BTC: ['onchain-send', 'onchain-receive'],
 }

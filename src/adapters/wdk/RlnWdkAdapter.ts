@@ -39,7 +39,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { isBolt11 } from '../../lib/bolt11'
-import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance } from './RgbCore'
+import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB'
@@ -165,12 +165,12 @@ export class RlnWdkAdapter implements IProtocolAdapter {
   async listAssets(): Promise<UnifiedAsset[]> {
     this.assertConnected()
     const { total } = await this.getBtcBalance()
-    const out: UnifiedAsset[] = [rgbBtcAsset(total)]
+    const out: UnifiedAsset[] = [rgbBtcAsset(total, RLN_PROFILE)]
 
     // RGB assets (NIA — fungible: USDT/XAUT)
     const res: any = await this.account.listAssets(['Nia'])
     const nia: any[] = res?.nia ?? []
-    for (const a of nia) out.push(rgbNiaAsset(a))
+    for (const a of nia) out.push(rgbNiaAsset(a, RLN_PROFILE))
     return out
   }
 

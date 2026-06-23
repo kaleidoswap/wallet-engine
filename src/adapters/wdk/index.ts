@@ -9,6 +9,7 @@
 export { SparkWdkAdapter, type SparkAdapterConfig } from './SparkWdkAdapter'
 export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './LiquidWdkAdapter'
 export { RlnWdkAdapter, type RlnAdapterConfig } from './RlnWdkAdapter'
+export { RgbLibWdkAdapter, type RgbLibAdapterConfig } from './RgbLibWdkAdapter'
 export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './ArkadeWdkAdapter'
 export { createWdkRegistry, type WdkRegistryOptions } from '../../registry/createWdkRegistry'
 export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './moduleLoader'

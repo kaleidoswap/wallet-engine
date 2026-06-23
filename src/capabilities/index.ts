@@ -109,6 +109,21 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     wdkModule: '@kaleidorg/wdk-wallet-rln',
     maturity: 'beta',
   },
+  RGB_L1: {
+    protocol: 'RGB_L1',
+    layers: ['BTC_L1', 'RGB_L1'],
+    supportsOnchain: true,
+    supportsLightning: false, // rgb-lib is on-chain only — no channels
+    supportsAssets: true, // RGB assets (USDT, XAUT) on L1
+    supportsSwaps: false, // RGB-LN atomic swaps need the node-backed RGB path
+    zeroFee: false,
+    staticReceiveAddress: false,
+    boarding: false,
+    invoiceExpiry: true, // RGB invoices expire
+    needsChannelLiquidity: false,
+    wdkModule: '@utexo/wdk-wallet-rgb',
+    maturity: 'beta',
+  },
   LIQUID: {
     protocol: 'LIQUID',
     layers: ['BTC_LIQUID', 'LIQUID_ASSET'],
