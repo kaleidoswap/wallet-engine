@@ -24,3 +24,9 @@ jobs:
 
       - name: Type-check + build (tsc)
         run: npm run build
+
+      - name: Test
+        run: npm test
+
+      - name: Audit production dependencies (high+)
+        run: npm audit --omit=dev --audit-level=high
