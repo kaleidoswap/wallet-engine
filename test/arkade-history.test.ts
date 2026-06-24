@@ -37,6 +37,12 @@ describe('ArkadeWdkAdapter.listTransactions (issue #6)', () => {
     expect((await one([sentSettled])).status).toBe('confirmed')
   })
 
+  it('keeps an unsettled SENT row pending (async offboard, not falsely confirmed)', async () => {
+    // Deliberate divergence from the reference converter (which marks all SENT
+    // confirmed): an async BTC offboard is an unsettled SENT and must read pending.
+    expect((await one([sentUnsettled])).status).toBe('pending')
+  })
+
   it('marks a received off-chain (non-boarding) VTXO as confirmed, not pending', async () => {
     const tx = await one([receivedOffchainUnsettled])
     expect(tx.type).toBe('receive')
