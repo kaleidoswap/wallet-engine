@@ -42,6 +42,10 @@ rules keep it that way:
 See the "Extending: add a protocol" section of the README and the example in
 [`examples/minimal-adapter`](examples/minimal-adapter) for the adapter pattern.
 
+The WDK Spark/Arkade adapters track the `rate-extension` reference behavior;
+[`docs/wdk-parity.md`](docs/wdk-parity.md) records what matches and the
+intentional WDK-vs-extension differences (history status/direction, offboard).
+
 ## Security
 
 This engine moves real funds. Never weaken the destination classifier's
