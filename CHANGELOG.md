@@ -7,6 +7,26 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.14] - 2026-06-25
+
+### Added
+- **`RgbLibWasmAdapter` — node-less RGB-L1 via `@utexo/rgb-lib-wasm`.** A
+  browser/WASM backing for the `RGB_L1` protocol, sibling to the native
+  `RgbLibWdkAdapter`. Wraps the wasm-bindgen (web-target) `WasmWallet`
+  (IndexedDB-persisted) onto the same `IProtocolAdapter` contract, reusing
+  `RgbCore` so asset/balance shape cannot drift from the native/RLN backings.
+  Unlike the native `@utexo/wdk-wallet-rgb` (filesystem `dataDir` + Node/Bare
+  runtime), this loads in a browser / MV3 service worker — using only
+  fetch/crypto/WebAssembly + IndexedDB — making self-custodial RGB-L1 possible
+  without an rgb-lightning-node. Runtime-agnostic: the host injects an
+  already-wasm-initialized module via
+  `registerWdkModule('@utexo/rgb-lib-wasm', …)`; the adapter never touches
+  fetch/URLs. Implements the begin→`signPsbt`→end flow for
+  `sendAsset`/`sendBtcOnchain`/`createRgbUtxos`, `blindReceive` for RGB
+  invoices; Lightning operations report `NOT_SUPPORTED`.
+- `createWdkRegistry` gains `rgbL1Backing: 'native' | 'wasm'` (default
+  `'native'`, preserving existing behavior) to choose the RGB_L1 backing.
+
 ## [1.0.0-beta.13] - 2026-06-23
 
 ### Security
