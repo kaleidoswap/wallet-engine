@@ -69,8 +69,35 @@ describe('RgbLibWasmAdapter', () => {
     const inv = await adapter.createInvoice({ asset: 'rgb:USDT', assetAmount: 10 } as any)
     expect(inv.invoice).toBe('rgb:inv:rgb:USDT')
     expect(inv.paymentHash).toBe('rid')
-    expect(calls[0].assignment).toEqual({ Fungible: 10n })
+    expect(calls[0].assignment).toEqual({ Fungible: 10 })
     expect(calls[0].eps).toEqual(['rpc://proxy.example'])
+  })
+
+  it('createRgbInvoice converts the host assignment + honors witness vs blinded', async () => {
+    const blind: any[] = []
+    const witness: any[] = []
+    const adapter = connected({
+      blindReceive: async (assetId: any, assignment: any) => {
+        blind.push({ assetId, assignment })
+        return { invoice: 'blinded', recipient_id: 'b' }
+      },
+      witnessReceive: async (assetId: any, assignment: any) => {
+        witness.push({ assetId, assignment })
+        return { invoice: 'witness', recipient_id: 'w' }
+      },
+    })
+
+    // Blinded (default) with a host { type: 'Fungible', value } assignment.
+    await adapter.createRgbInvoice({ assetId: 'rgb:X', assignment: { type: 'Fungible', value: 5 } })
+    expect(blind[0]).toEqual({ assetId: 'rgb:X', assignment: { Fungible: 5 } })
+
+    // No amount → the unit "Any" assignment (NOT null).
+    await adapter.createRgbInvoice({ assetId: 'rgb:X' })
+    expect(blind[1].assignment).toBe('Any')
+
+    // witness:true routes to witnessReceive.
+    await adapter.createRgbInvoice({ assetId: 'rgb:X', witness: true })
+    expect(witness[0]).toEqual({ assetId: 'rgb:X', assignment: 'Any' })
   })
 
   it('sends an asset via begin → signPsbt → end with bigint coercion', async () => {
