@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.15] - 2026-06-26
+
+### Added
+- **Lean `./adapters/wdk/wasm-rgb` subpath export.** Exposes only
+  `RgbLibWasmAdapter` + `registerWdkModule`/`hasWdkModule`, with no static
+  reference to the other WDK adapters or `createWdkRegistry`. The full
+  `./adapters/wdk` barrel statically re-exports every adapter, transitively
+  pulling heavy/native deps (`lwk_wasm`, `sodium-native`,
+  `@utexo/wdk-wallet-rgb`, `@arkade-os/wdk`) that a browser / MV3 service-worker
+  host can't resolve. Importing from this lean entry lets such a host bundle
+  just the wasm RGB-L1 backing (+ the injected `@utexo/rgb-lib-wasm`).
+
 ## [1.0.0-beta.14] - 2026-06-25
 
 ### Added

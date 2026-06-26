@@ -1,6 +1,6 @@
 {
   "name": "@kaleidorg/wallet-engine",
-  "version": "1.0.0-beta.14",
+  "version": "1.0.0-beta.15",
   "description": "WDK-based multi-protocol wallet engine (Spark, RGB/RLN, Liquid, Arkade): IProtocolAdapter contract + WDK adapters, cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.",
   "type": "module",
   "main": "dist/index.js",
@@ -17,6 +17,10 @@
     "./adapters/wdk": {
       "types": "./dist/adapters/wdk/index.d.ts",
       "default": "./dist/adapters/wdk/index.js"
+    },
+    "./adapters/wdk/wasm-rgb": {
+      "types": "./dist/adapters/wdk/wasm-rgb.d.ts",
+      "default": "./dist/adapters/wdk/wasm-rgb.js"
     },
     "./swap": {
       "types": "./dist/swap/index.d.ts",
