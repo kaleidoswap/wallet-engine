@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.19] - 2026-06-26
+
+### Fixed
+- **RgbLibWasmAdapter: scope the IndexedDB store by rgb-lib network.** rgb-lib
+  panics (`RuntimeError: unreachable`) when a wallet store created under one
+  `BitcoinNetwork` is reopened under another — e.g. after the beta.18 Signet →
+  SignetCustom change. The `dataDir` now derives from the rgb-lib network
+  (`rgb-l1-signetcustom`, `rgb-l1-regtest`, …) instead of the host network
+  label, so each network gets its own store and the same network stays
+  persistent. Addresses are derivation-identical, so on-chain funds re-appear
+  after a sync.
+
 ## [1.0.0-beta.18] - 2026-06-26
 
 ### Fixed
