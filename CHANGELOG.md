@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.16] - 2026-06-26
+
+### Fixed
+- **`RgbLibWasmAdapter` RGB receive** — the blinded/witness receive built an
+  invalid `Assignment` ("invalid type expected enum Assignment"): it passed a
+  `BigInt` (rgb-lib-wasm wants a plain number) and `null` for no-amount (the enum
+  needs the unit string `"Any"`). Receive now sends `{ Fungible: <number> }` or
+  `"Any"`, and honors the `witness` flag (`witnessReceive` vs `blindReceive`) +
+  the host-supplied `{ type, value }` assignment from `createRgbInvoice`.
+
 ## [1.0.0-beta.15] - 2026-06-26
 
 ### Added

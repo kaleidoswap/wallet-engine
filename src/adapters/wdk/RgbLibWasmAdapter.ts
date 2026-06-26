@@ -158,7 +158,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   async getReceiveAddress(assetId?: string): Promise<Address> {
     this.assertConnected()
     if (assetId) {
-      const inv = await this.blindReceive(assetId)
+      const inv = await this.receiveRgb({ assetId })
       return { address: inv?.invoice ?? inv?.recipient_id ?? '', format: 'RGB_INVOICE', asset: assetId }
     }
     const address: string = this.account.getAddress()
@@ -219,7 +219,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     if (!request.asset || request.asset === 'BTC') {
       throw new ProtocolError('RGB-L1 has no Lightning invoices; use getReceiveAddress for BTC', 'RGB_L1', 'NOT_SUPPORTED')
     }
-    const inv: any = await this.blindReceive(request.asset, request.assetAmount, request.expirySeconds)
+    const inv: any = await this.receiveRgb({
+      assetId: request.asset,
+      amount: request.assetAmount,
+      durationSeconds: request.expirySeconds,
+    })
     return {
       invoice: inv?.invoice ?? '',
       paymentHash: inv?.recipientId ?? inv?.recipient_id ?? '',
@@ -293,26 +297,46 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     amount?: number
     durationSeconds?: number
     minConfirmations?: number
+    /** false ⇒ blinded receive (private, default); true ⇒ witness receive. */
+    witness?: boolean
+    /** Host-supplied assignment, e.g. { type: 'Fungible', value: 100 }. */
+    assignment?: { type?: string; value?: number } | null
   }): Promise<any> {
     this.assertConnected()
-    return this.blindReceive(params.assetId, params.amount, params.durationSeconds, params.minConfirmations)
+    return this.receiveRgb(params)
   }
 
-  /** Generate a blinded receive invoice (RGB UTXO-based receive). */
-  private async blindReceive(
-    assetId?: string | null,
-    amount?: number,
-    durationSeconds?: number,
-    minConfirmations = 1
-  ): Promise<any> {
-    const assignment = amount != null ? { Fungible: BigInt(amount) } : null
-    return this.account.blindReceive(
-      assetId ?? null,
+  /**
+   * Generate an RGB receive invoice. Defaults to a blinded receive (the
+   * recipient UTXO is hidden); `witness: true` uses a witness receive (the
+   * sender creates the UTXO). rgb-lib's `Assignment` enum is `{ Fungible: <num> }`
+   * for a specific amount or the unit string `"Any"` — NOT null, and NOT bigint.
+   */
+  private async receiveRgb(opts: {
+    assetId?: string | null
+    amount?: number
+    assignment?: { type?: string; value?: number } | null
+    durationSeconds?: number | null
+    minConfirmations?: number
+    witness?: boolean
+  }): Promise<any> {
+    const fungibleValue =
+      opts.amount != null
+        ? opts.amount
+        : opts.assignment?.type === 'Fungible' && opts.assignment.value != null
+          ? opts.assignment.value
+          : undefined
+    const assignment = fungibleValue != null ? { Fungible: Number(fungibleValue) } : 'Any'
+    const args = [
+      opts.assetId ?? null,
       assignment,
-      durationSeconds ?? null,
+      opts.durationSeconds ?? null,
       this.transportEndpoints,
-      minConfirmations
-    )
+      opts.minConfirmations ?? 1,
+    ] as const
+    return opts.witness
+      ? this.account.witnessReceive(...args)
+      : this.account.blindReceive(...args)
   }
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
