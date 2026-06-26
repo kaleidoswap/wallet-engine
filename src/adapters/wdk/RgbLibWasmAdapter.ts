@@ -136,7 +136,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
     const keys = mod.restoreKeys(rgbNetwork, cfg.mnemonic)
     const walletData = {
-      dataDir: cfg.dataDir ?? `rgb-l1-${this.network}`,
+      // Scope the IndexedDB store by the rgb-lib network, NOT the host network
+      // label: rgb-lib panics ("unreachable") if a store created under one
+      // BitcoinNetwork is reopened under another (e.g. Signet → SignetCustom).
+      // Distinct networks ⇒ distinct stores; same network ⇒ persistent.
+      dataDir: cfg.dataDir ?? `rgb-l1-${rgbNetwork.toLowerCase()}`,
       bitcoinNetwork: rgbNetwork,
       databaseType: 'Sqlite', // the enum value the wasm build accepts; IndexedDB is the actual backing
       maxAllocationsPerUtxo: cfg.maxAllocationsPerUtxo ?? 5,
