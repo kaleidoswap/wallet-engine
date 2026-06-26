@@ -89,8 +89,15 @@ function toRgbNetwork(network: string): string {
       return 'Mainnet'
     case 'testnet':
       return 'Testnet'
+    // KaleidoSwap's signet IS the custom signet (Mutinynet); its recipient IDs
+    // are network-tagged `SignetCustom` and won't validate against a standard
+    // `Signet` wallet (and vice-versa). Map both the explicit custom aliases and
+    // the plain `signet` we surface in the UI to rgb-lib's `SignetCustom`.
     case 'signet':
-      return 'Signet'
+    case 'signetcustom':
+    case 'customsignet':
+    case 'mutinynet':
+      return 'SignetCustom'
     case 'regtest':
       return 'Regtest'
     default:
