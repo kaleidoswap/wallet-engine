@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.18] - 2026-06-26
+
+### Fixed
+- **RgbLibWasmAdapter: map signet → `SignetCustom` (Mutinynet).** KaleidoSwap's
+  signet is the custom signet (Mutinynet); its recipient IDs are network-tagged
+  `SignetCustom` and won't validate against a standard `Signet` wallet (RLN
+  rejected sends with "recipient ID is for a different network"). `toRgbNetwork`
+  now maps `signet` (and the `signetcustom`/`customsignet`/`mutinynet` aliases)
+  to rgb-lib's `SignetCustom`.
+
 ## [1.0.0-beta.17] - 2026-06-26
 
 ### Fixed
