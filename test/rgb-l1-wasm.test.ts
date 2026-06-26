@@ -157,6 +157,39 @@ describe('RgbLibWasmAdapter', () => {
     expect(await adapter.getReceiveAddress()).toMatchObject({ address: 'bcrt1qbtc', format: 'BTC_ADDRESS' })
   })
 
+  it('returns the BTC on-chain address for the "BTC" asset id (not a blinded invoice)', async () => {
+    let blindCalled = false
+    const adapter = connected({
+      getAddress: () => 'bcrt1qbtc',
+      blindReceive: async () => {
+        blindCalled = true
+        return { invoice: 'rgb:should-not-happen' }
+      },
+    })
+    expect(await adapter.getReceiveAddress('BTC')).toMatchObject({
+      address: 'bcrt1qbtc',
+      format: 'BTC_ADDRESS',
+    })
+    expect(blindCalled).toBe(false)
+  })
+
+  it('normalizes the receive result to a structured-clone-safe object (no BigInt)', async () => {
+    const adapter = connected({
+      witnessReceive: async () => ({
+        invoice: 'witinv',
+        recipientId: 'wid',
+        // rgb-lib can hand back BigInt — must not leak to the message layer.
+        expirationTimestamp: 1700000000n as unknown as number,
+        batchTransferIdx: 3n as unknown as number,
+      }),
+    })
+    const inv: any = await adapter.createRgbInvoice({ assetId: 'rgb:X', witness: true })
+    expect(typeof inv.expirationTimestamp).toBe('number')
+    expect(typeof inv.batchTransferIdx).toBe('number')
+    expect(inv.recipient_id).toBe('wid')
+    expect(() => structuredClone(inv)).not.toThrow()
+  })
+
   it('clears the online handle on disconnect', async () => {
     const adapter = connected({ dispose: async () => {} })
     await adapter.disconnect()

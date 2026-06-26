@@ -157,7 +157,10 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   // --- Address / receive --------------------------------------------------
   async getReceiveAddress(assetId?: string): Promise<Address> {
     this.assertConnected()
-    if (assetId) {
+    // Only a real RGB asset id (rgb:…) yields a blinded invoice; BTC / "BTC" /
+    // empty must return the on-chain BTC address (otherwise the BTC tab shows an
+    // empty "bitcoin:" QR).
+    if (assetId && assetId.startsWith('rgb:')) {
       const inv = await this.receiveRgb({ assetId })
       return { address: inv?.invoice ?? inv?.recipient_id ?? '', format: 'RGB_INVOICE', asset: assetId }
     }
@@ -334,9 +337,21 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       this.transportEndpoints,
       opts.minConfirmations ?? 1,
     ] as const
-    return opts.witness
+    const res: any = await (opts.witness
       ? this.account.witnessReceive(...args)
-      : this.account.blindReceive(...args)
+      : this.account.blindReceive(...args))
+    // Normalize to a plain, structured-clone-safe object: the wasm result can
+    // carry BigInt / wasm-bound values that break chrome message passing
+    // ("could not serialize message"). Coerce the fields the host reads.
+    return {
+      invoice: res?.invoice ?? '',
+      recipientId: res?.recipientId ?? res?.recipient_id ?? '',
+      recipient_id: res?.recipientId ?? res?.recipient_id ?? '',
+      expirationTimestamp:
+        res?.expirationTimestamp != null ? Number(res.expirationTimestamp) : undefined,
+      batchTransferIdx:
+        res?.batchTransferIdx != null ? Number(res.batchTransferIdx) : undefined,
+    }
   }
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {

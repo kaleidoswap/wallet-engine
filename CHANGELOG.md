@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.17] - 2026-06-26
+
+### Fixed
+- **`RgbLibWasmAdapter.getReceiveAddress` returned an empty BTC address.** A
+  truthy `"BTC"` asset id was treated as RGB (blinded invoice) → empty
+  `BTC_ADDRESS` / "bitcoin:" QR. Only `rgb:…` ids now produce a blinded invoice;
+  `"BTC"`/empty return the on-chain `getAddress()`.
+- **RGB receive "could not serialize message".** The raw rgb-lib-wasm receive
+  result carried `BigInt`/wasm-bound values that break chrome structured-clone.
+  `receiveRgb` now returns a plain object with `invoice`/`recipient_id` and
+  `Number`-coerced `expirationTimestamp`/`batchTransferIdx` (witness + blinded).
+
 ## [1.0.0-beta.16] - 2026-06-26
 
 ### Fixed
