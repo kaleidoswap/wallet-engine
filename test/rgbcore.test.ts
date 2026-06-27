@@ -34,7 +34,20 @@ describe('RgbCore translation helpers', () => {
     expect(a.balance.total).toBe(3)
   })
 
-  it('maps a balance with future → pending', () => {
-    expect(rgbAssetBalance({ spendable: 10, future: 4 })).toMatchObject({ total: 10, pending: 4 })
+  it('shows a just-received asset (spendable 0) at its owned (future) balance', () => {
+    // A received, not-yet-spendable asset: settled 0, future 1000, spendable 0.
+    expect(rgbAssetBalance({ settled: 0, future: 1000, spendable: 0 })).toMatchObject({
+      total: 1000,
+      available: 0,
+      pending: 1000,
+    })
+  })
+
+  it('shows a settled asset at its full balance', () => {
+    expect(rgbAssetBalance({ settled: 1000, future: 1000, spendable: 1000 })).toMatchObject({
+      total: 1000,
+      available: 1000,
+      pending: 0,
+    })
   })
 })

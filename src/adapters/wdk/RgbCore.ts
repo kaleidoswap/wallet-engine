@@ -84,8 +84,6 @@ export function rgbNiaAsset(
   },
   profile: RgbProfile
 ): UnifiedAsset {
-  const bal = raw.balance ?? {}
-  const total = Number(bal.spendable ?? bal.settled ?? 0)
   return {
     id: raw.asset_id,
     name: raw.name ?? raw.ticker ?? raw.asset_id,
@@ -93,7 +91,7 @@ export function rgbNiaAsset(
     precision: Number(raw.precision ?? 0),
     protocol: profile.protocol,
     layer: profile.assetLayer,
-    balance: makeBalance(total),
+    balance: rgbAssetBalance(raw.balance),
     capabilities: {
       canSend: true,
       canReceive: true,
@@ -104,11 +102,26 @@ export function rgbNiaAsset(
   }
 }
 
-/** Map a raw RGB balance record → domain AssetBalance. */
+/**
+ * Map a raw rgb-lib Balance ({ settled, future, spendable }) → domain
+ * AssetBalance. `future` is the projected total (confirmed + incoming), so it's
+ * the "owned" amount; `spendable` is what can be sent right now. Uses `||` (not
+ * `??`) so a present-but-zero `spendable` doesn't hide a real `settled`/`future`
+ * — a just-received asset has spendable: 0 but a non-zero balance.
+ */
 export function rgbAssetBalance(raw?: { spendable?: number; settled?: number; future?: number }): AssetBalance {
   const b = raw ?? {}
-  const total = Number(b.spendable ?? b.settled ?? 0)
-  return { ...makeBalance(total), pending: Number(b.future ?? 0) }
+  const settled = Number(b.settled ?? 0)
+  const future = Number(b.future ?? 0)
+  const spendable = Number(b.spendable ?? settled)
+  const owned = future || settled || spendable || 0
+  return {
+    total: owned,
+    available: spendable,
+    pending: Math.max(0, future - settled),
+    totalDisplay: String(owned),
+    availableDisplay: String(spendable),
+  }
 }
 
 function makeBalance(total: number): AssetBalance {
