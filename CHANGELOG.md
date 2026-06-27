@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.21] - 2026-06-27
+
+### Fixed
+- **RgbCore: received RGB assets showed a 0 balance.** `rgbAssetBalance`/
+  `rgbNiaAsset` collapsed the balance with `spendable ?? settled`, which returns
+  0 when `spendable` is present-but-zero — exactly the case for a just-received
+  asset (it has a real `settled`/`future` balance but isn't spendable yet). Now
+  the owned total uses `future || settled || spendable` (skipping zeros),
+  `available` = spendable, `pending` = incoming.
+
 ## [1.0.0-beta.20] - 2026-06-27
 
 ### Fixed
