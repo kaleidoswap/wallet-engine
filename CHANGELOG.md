@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.20] - 2026-06-27
+
+### Fixed
+- **RgbLibWasmAdapter: serialize all wasm calls.** rgb-lib-wasm is
+  single-threaded and not reentrant — when a second op started while an async one
+  (refresh/sync/send/receive) was mid-flight (e.g. opening an asset detail that
+  fires balance + transfers + transactions at once), its thread-locals corrupted
+  and it panicked ("Lazy instance has previously been poisoned" → `RuntimeError:
+  unreachable`), after which every call traps. The wallet handle is now wrapped in
+  a queue so calls never overlap; all wallet methods are async and awaited.
+
 ## [1.0.0-beta.19] - 2026-06-26
 
 ### Fixed

@@ -105,6 +105,30 @@ function toRgbNetwork(network: string): string {
   }
 }
 
+/**
+ * Wrap a WasmWallet so every method call is queued and runs to completion before
+ * the next starts — rgb-lib-wasm is single-threaded and corrupts/panics on
+ * concurrent (interleaved-async) access. All methods become async; call sites
+ * await them.
+ */
+function serializeWasmAccount<T extends object>(account: T): T {
+  let chain: Promise<unknown> = Promise.resolve()
+  return new Proxy(account, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver)
+      if (typeof value !== 'function') return value
+      return (...args: unknown[]) => {
+        const run = chain.then(() => (value as (...a: unknown[]) => unknown).apply(target, args))
+        chain = run.then(
+          () => undefined,
+          () => undefined,
+        )
+        return run
+      }
+    },
+  }) as T
+}
+
 export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'RGB_L1'
   readonly capabilities = PROTOCOL_OPERATIONS.RGB_L1
@@ -153,9 +177,15 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     }
 
     const WasmWallet = mod.WasmWallet
-    this.account = WasmWallet.create
+    const rawWallet = WasmWallet.create
       ? await WasmWallet.create(JSON.stringify(walletData))
       : new WasmWallet(JSON.stringify(walletData))
+    // rgb-lib-wasm is single-threaded and NOT reentrant: if a second op starts
+    // while an async one (refresh/sync/send/…) is mid-flight, its thread-locals
+    // corrupt and it panics ("Lazy instance poisoned" → RuntimeError:
+    // unreachable). Serialize every wallet call through a queue so they never
+    // overlap. (Method results are awaited at each call site.)
+    this.account = serializeWasmAccount(rawWallet)
     this.online = await this.account.goOnline(false, cfg.indexerUrl)
     this.connected = true
   }
@@ -175,14 +205,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       const inv = await this.receiveRgb({ assetId })
       return { address: inv?.invoice ?? inv?.recipient_id ?? '', format: 'RGB_INVOICE', asset: assetId }
     }
-    const address: string = this.account.getAddress()
+    const address: string = await this.account.getAddress()
     return { address, format: 'BTC_ADDRESS' }
   }
 
   // --- Balance ------------------------------------------------------------
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
     this.assertConnected()
-    const v: any = this.account.getBtcBalance() ?? {}
+    const v: any = (await this.account.getBtcBalance()) ?? {}
     const vanilla = v.vanilla ?? v
     const settled = Number(vanilla.settled ?? 0)
     const spendable = Number(vanilla.spendable ?? settled)
@@ -204,7 +234,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.assertConnected()
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RGB_L1_PROFILE)]
-    const res: any = this.account.listAssets([])
+    const res: any = await this.account.listAssets([])
     const assets: any[] = Array.isArray(res) ? res : [...(res?.nia ?? []), ...(res?.ifa ?? [])]
     for (const a of assets) out.push(rgbNiaAsset(normalizeAsset(a), RGB_L1_PROFILE))
     return out
@@ -213,7 +243,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
     this.assertConnected()
     try {
-      const raw: any = this.account.getAssetBalance(assetId)
+      const raw: any = await this.account.getAssetBalance(assetId)
       return rgbAssetBalance(raw)
     } catch {
       const a = (await this.listAssets()).find((x) => x.id === assetId)
@@ -263,7 +293,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   // --- Transactions -------------------------------------------------------
   async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
-    const raw: any = this.account.listTransactions()
+    const raw: any = await this.account.listTransactions()
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
     return txs.map((t) => {
       const received = Number(t.received ?? 0)
@@ -367,7 +397,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
     this.assertConnected()
-    const signed: string = this.account.signPsbt(psbtHex)
+    const signed: string = await this.account.signPsbt(psbtHex)
     return { psbt: signed ?? psbtHex, unchanged: !signed || signed === psbtHex }
   }
 
@@ -382,7 +412,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       feeRate,
       false
     )
-    const signed = this.account.signPsbt(unsigned)
+    const signed = await this.account.signPsbt(unsigned)
     await this.account.createUtxosEnd(this.online, signed, false)
     return { success: true }
   }
@@ -414,7 +444,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       feeRate,
       params.minConfirmations ?? 1
     )
-    const signed = this.account.signPsbt(unsigned)
+    const signed = await this.account.signPsbt(unsigned)
     return this.account.sendEnd(this.online, signed, false)
   }
 
@@ -428,7 +458,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       feeRate,
       false
     )
-    const signed = this.account.signPsbt(unsigned)
+    const signed = await this.account.signPsbt(unsigned)
     const txid: string = await this.account.sendBtcEnd(this.online, signed, false)
     return { ok: true, txid }
   }
