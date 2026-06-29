@@ -307,7 +307,16 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
         asset: undefined as unknown as UnifiedAsset,
-        protocolData: t,
+        // Expose a normalized rgb-lib transaction type so hosts can tell an
+        // external deposit / plain BTC send (→ "User") from RGB machinery
+        // (asset send, UTXO creation), which is represented as a transfer
+        // instead. Defensive against the wasm serde's exact casing/shape: an
+        // unrecognized/missing value falls through to "User" so a real BTC
+        // movement is never dropped from a host's on-chain history view.
+        protocolData: {
+          ...t,
+          transactionType: normalizeRgbLibTxType(t.transactionType ?? t.transaction_type),
+        },
       }
     })
   }
@@ -424,17 +433,42 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     feeRate?: number
     minConfirmations?: number
     donation?: boolean
+    /**
+     * Transport endpoints the consignment is posted to. These come from the
+     * RECIPIENT's invoice — using the sender's own configured proxy instead
+     * (the previous behaviour) means the recipient can't fetch the consignment
+     * when the two wallets use different proxies. Falls back to the sender's
+     * configured endpoints when the invoice carried none.
+     */
+    transportEndpoints?: string[]
+    /**
+     * Witness-receive data. Present only when paying a witness invoice (the
+     * sender creates the recipient UTXO); absent ⇒ blinded receive. rgb-lib's
+     * `Recipient` is camelCase-serde, so `witnessData` / `amountSat` match.
+     */
+    witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number } | null
   }): Promise<any> {
     this.assertConnected()
     // recipient map: { [assetId]: [{ recipientId, witnessData?, amount, transportEndpoints }] }
+    const transportEndpoints =
+      Array.isArray(params.transportEndpoints) && params.transportEndpoints.length > 0
+        ? params.transportEndpoints
+        : this.transportEndpoints
+    const recipient: Record<string, unknown> = {
+      recipientId: params.recipient,
+      amount: BigInt(params.amount),
+      transportEndpoints,
+    }
+    const wd = params.witnessData
+    if (wd) {
+      const amountSat = wd.amountSat ?? wd.amount_sat
+      recipient.witnessData = {
+        amountSat: BigInt(Math.round(Number(amountSat ?? 0))),
+        ...(wd.blinding != null ? { blinding: BigInt(wd.blinding) } : {}),
+      }
+    }
     const recipientMap = {
-      [params.token]: [
-        {
-          recipientId: params.recipient,
-          amount: BigInt(params.amount),
-          transportEndpoints: this.transportEndpoints,
-        },
-      ],
+      [params.token]: [recipient],
     }
     const feeRate = BigInt(Math.round(params.feeRate ?? 1))
     const unsigned: string = await this.account.sendBegin(
@@ -473,6 +507,19 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.online = null
     await super.disconnect()
   }
+}
+
+/**
+ * Map rgb-lib's `TransactionType` to a stable string. Machinery txs (asset
+ * sends, UTXO creation) keep their identity so a host can hide them from a BTC
+ * on-chain history view; everything else — external deposits, plain BTC sends,
+ * drains, or an unrecognized/missing value from the wasm serde — becomes "User"
+ * so a real BTC movement is never silently dropped.
+ */
+function normalizeRgbLibTxType(raw: unknown): 'User' | 'RgbSend' | 'CreateUtxos' {
+  const v = String(raw ?? '')
+  if (v === 'RgbSend' || v === 'CreateUtxos') return v
+  return 'User'
 }
 
 /**
