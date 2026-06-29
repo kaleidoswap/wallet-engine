@@ -49,7 +49,12 @@ const RE = {
   lnurl: /^lnurl[0-9a-z]+$/i,
   lnAddress: /^[^@\s]+@[^@\s]+\.[^@\s]+$/i,
   rgb: /^(rgb:|utxob:)/i,
-  spark: /^(spark|sparkrt|sprt|spt)1[0-9a-z]{6,}$/i,
+  // Spark bech32m HRPs, per the @buildonspark/spark-sdk address encoder:
+  // `spark1` (mainnet), `sparkt1` (testnet), `sparkrt1` (regtest), `sparkl1`
+  // (local/signet), plus the legacy `spl1`/`sprt1` forms. `sp1` is deliberately
+  // NOT here — that HRP belongs to BIP352 Silent Payments, so matching it as
+  // Spark would be a fund-misrouting bug. Longest prefixes first.
+  spark: /^(sparkrt|sparkt|sparkl|spark|sprt|spl)1[0-9a-z]{6,}$/i,
   arkade: /^(ark|tark)1[0-9a-z]{6,}$/i,
   // Liquid bech32/blech32 only (confidential `lq1`, unconfidential `ex1`, +
   // testnet/regtest variants). Legacy base58 Liquid prefixes are intentionally

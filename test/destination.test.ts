@@ -31,6 +31,26 @@ describe('classifyDestination', () => {
     expect(classifyDestination('spark1qxyzexampleaddr').kind).toBe('SPARK')
   })
 
+  it('classifies every real Spark HRP (mainnet/testnet/regtest/local + legacy)', () => {
+    for (const addr of [
+      'spark1qxyzexampleaddr', // mainnet
+      'sparkt1qxyzexampleaddr', // testnet
+      'sparkrt1qxyzexampleaddr', // regtest
+      'sparkl1qxyzexampleaddr', // local/signet
+      'spl1qxyzexampleaddr', // legacy
+      'sprt1qxyzexampleaddr', // legacy
+    ]) {
+      expect(classifyDestination(addr).kind, `${addr} should be SPARK`).toBe('SPARK')
+    }
+  })
+
+  it('does NOT classify a Silent Payments (sp1…) address as Spark', () => {
+    // BIP352 Silent Payment addresses share the `sp1` HRP; misrouting one as a
+    // Spark transfer would lose funds. It must fail closed.
+    const r = classifyDestination('sp1qqw508d6qejxtdg4y5r3zarvary0c5xw7kexample')
+    expect(r.kind).not.toBe('SPARK')
+  })
+
   it('classifies an Arkade address', () => {
     expect(classifyDestination('ark1qxyzexampleaddr').kind).toBe('ARKADE')
   })

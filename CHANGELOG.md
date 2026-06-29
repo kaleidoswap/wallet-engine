@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.22] - 2026-06-29
+
+### Fixed
+- **Destination classifier missed several real Spark address HRPs.** The Spark
+  matcher only covered `spark`/`sparkrt`/`sprt`/`spt`, so testnet (`sparkt1`),
+  local/signet (`sparkl1`), and the legacy `spl1` forms fell through to
+  `UNKNOWN` — a misclassification that breaks Spark routing for those networks.
+  The set is now `spark`/`sparkt`/`sparkrt`/`sparkl`/`spl`/`sprt`, matching the
+  `@buildonspark/spark-sdk` address encoder. `sp1` remains excluded on purpose:
+  it is the BIP352 Silent Payments HRP, and matching it as Spark would misroute
+  funds. Added coverage for every HRP plus a Silent-Payments fail-closed test.
+
 ## [1.0.0-beta.21] - 2026-06-27
 
 ### Fixed
