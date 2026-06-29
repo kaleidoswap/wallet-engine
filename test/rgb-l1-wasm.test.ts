@@ -115,6 +115,68 @@ describe('RgbLibWasmAdapter', () => {
     expect(seen.online).toEqual({ _online: true })
     expect(seen.feeRate).toBe(3n)
     expect(seen.map['rgb:USDT'][0]).toMatchObject({ recipientId: 'utxob:x', amount: 42n })
+    // No transportEndpoints supplied ⇒ falls back to the wallet's configured ones.
+    expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://proxy.example'])
+    // Blinded send ⇒ no witnessData key.
+    expect(seen.map['rgb:USDT'][0].witnessData).toBeUndefined()
+  })
+
+  it('routes the consignment to the invoice transport endpoints (not the sender default)', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      sendBegin: async (_o: any, map: any) => {
+        seen.map = map
+        return 'unsigned'
+      },
+      signPsbt: (p: string) => `signed:${p}`,
+      sendEnd: async () => ({ txid: 'sent' }),
+    })
+    await adapter.sendAsset({
+      token: 'rgb:USDT',
+      recipient: 'utxob:x',
+      amount: 1,
+      transportEndpoints: ['rpc://recipient.proxy'],
+    })
+    expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://recipient.proxy'])
+  })
+
+  it('passes witnessData (camelCase, bigint amountSat) for a witness-invoice send', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      sendBegin: async (_o: any, map: any) => {
+        seen.map = map
+        return 'unsigned'
+      },
+      signPsbt: (p: string) => `signed:${p}`,
+      sendEnd: async () => ({ txid: 'sent' }),
+    })
+    await adapter.sendAsset({
+      token: 'rgb:USDT',
+      recipient: 'witness-rid',
+      amount: 7,
+      witnessData: { amount_sat: 1200 },
+    })
+    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200n })
+  })
+
+  it('normalizes the rgb-lib transaction type (deposit/send → User, machinery kept)', async () => {
+    const adapter = connected({
+      listTransactions: () => [
+        // External deposit — confirmed, received only.
+        { txid: 'dep', received: 53000, sent: 0, transactionType: 'User', confirmationTime: { timestamp: 100 } },
+        // Plain BTC send — unrecognized/odd casing must still surface as User.
+        { txid: 'wd', received: 0, sent: 21000, transactionType: 'whatever' },
+        // RGB machinery — keeps its identity so a host can hide it.
+        { txid: 'utxos', received: 0, sent: 600, transactionType: 'CreateUtxos' },
+      ],
+    })
+    const txs = await adapter.listTransactions()
+    const byId = Object.fromEntries(txs.map((t) => [t.id, t]))
+    expect((byId.dep.protocolData as any).transactionType).toBe('User')
+    expect(byId.dep.type).toBe('receive')
+    expect((byId.wd.protocolData as any).transactionType).toBe('User')
+    expect(byId.wd.type).toBe('send')
+    expect((byId.utxos.protocolData as any).transactionType).toBe('CreateUtxos')
   })
 
   it('sends BTC on-chain via sendBtcBegin → signPsbt → sendBtcEnd', async () => {

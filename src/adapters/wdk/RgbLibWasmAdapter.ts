@@ -307,7 +307,10 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
         asset: undefined as unknown as UnifiedAsset,
-        protocolData: t,
+        protocolData: {
+          ...t,
+          transactionType: normalizeRgbLibTxType(t.transactionType ?? t.transaction_type),
+        },
       }
     })
   }
@@ -424,17 +427,31 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     feeRate?: number
     minConfirmations?: number
     donation?: boolean
+    /** Transport endpoints from the recipient's invoice; falls back to the sender's. */
+    transportEndpoints?: string[]
+    /** Set only for witness invoices (blinded otherwise). */
+    witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number } | null
   }): Promise<any> {
     this.assertConnected()
-    // recipient map: { [assetId]: [{ recipientId, witnessData?, amount, transportEndpoints }] }
+    const transportEndpoints =
+      Array.isArray(params.transportEndpoints) && params.transportEndpoints.length > 0
+        ? params.transportEndpoints
+        : this.transportEndpoints
+    const recipient: Record<string, unknown> = {
+      recipientId: params.recipient,
+      amount: BigInt(params.amount),
+      transportEndpoints,
+    }
+    const wd = params.witnessData
+    if (wd) {
+      const amountSat = wd.amountSat ?? wd.amount_sat
+      recipient.witnessData = {
+        amountSat: BigInt(Math.round(Number(amountSat ?? 0))),
+        ...(wd.blinding != null ? { blinding: BigInt(wd.blinding) } : {}),
+      }
+    }
     const recipientMap = {
-      [params.token]: [
-        {
-          recipientId: params.recipient,
-          amount: BigInt(params.amount),
-          transportEndpoints: this.transportEndpoints,
-        },
-      ],
+      [params.token]: [recipient],
     }
     const feeRate = BigInt(Math.round(params.feeRate ?? 1))
     const unsigned: string = await this.account.sendBegin(
@@ -473,6 +490,13 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.online = null
     await super.disconnect()
   }
+}
+
+/** Map rgb-lib's `TransactionType` to a stable string; unknowns ⇒ "User". */
+function normalizeRgbLibTxType(raw: unknown): 'User' | 'RgbSend' | 'CreateUtxos' {
+  const v = String(raw ?? '')
+  if (v === 'RgbSend' || v === 'CreateUtxos') return v
+  return 'User'
 }
 
 /**
