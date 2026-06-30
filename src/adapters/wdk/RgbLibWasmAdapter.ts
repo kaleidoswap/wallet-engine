@@ -214,10 +214,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
     this.assertConnected()
     const v: any = (await this.account.getBtcBalance()) ?? {}
-    const vanilla = v.vanilla ?? v
-    const settled = toFiniteNumber(vanilla.settled ?? vanilla.confirmed ?? vanilla.total ?? 0)
-    const spendable = toFiniteNumber(vanilla.spendable ?? vanilla.available ?? settled)
-    const future = toFiniteNumber(vanilla.future ?? vanilla.unconfirmed ?? spendable)
+    const vanilla = readRgbLibBtcBalanceBucket(v.vanilla ?? v)
+    const colored = v.colored ? readRgbLibBtcBalanceBucket(v.colored) : { settled: 0, spendable: 0, future: 0 }
+    const settled = vanilla.settled + colored.settled
+    const spendable = vanilla.spendable + colored.spendable
+    const future = vanilla.future + colored.future
     return { confirmed: settled, unconfirmed: Math.max(0, future - settled), total: spendable }
   }
 
@@ -455,18 +456,27 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       Array.isArray(params.transportEndpoints) && params.transportEndpoints.length > 0
         ? params.transportEndpoints
         : this.transportEndpoints
+    const assignment = toRgbLibAssignment(params.assignment, amount)
     const recipient: Record<string, unknown> = {
+      // rgb-lib-wasm examples use camelCase, while the desktop rgb-lib client
+      // path sends snake_case. Keep both so this adapter survives either wasm
+      // serde casing without changing the host API.
       recipientId,
-      assignment: toRgbLibAssignment(params.assignment, amount),
+      recipient_id: recipientId,
+      assignment,
       transportEndpoints,
+      transport_endpoints: transportEndpoints,
     }
     const wd = params.witnessData ?? params.witness_data
     if (wd) {
       const amountSat = wd.amountSat ?? wd.amount_sat
-      recipient.witnessData = {
-        amountSat: BigInt(Math.round(Number(amountSat ?? 0))),
-        ...(wd.blinding != null ? { blinding: BigInt(wd.blinding) } : {}),
+      const witnessData = {
+        amountSat: Math.round(Number(amountSat ?? 0)),
+        amount_sat: Math.round(Number(amountSat ?? 0)),
+        ...(wd.blinding != null ? { blinding: Math.round(Number(wd.blinding)) } : {}),
       }
+      recipient.witnessData = witnessData
+      recipient.witness_data = witnessData
     }
     const recipientMap = {
       [token]: [recipient],
@@ -524,11 +534,18 @@ function normalizeRgbLibTimestamp(confTime: unknown): number {
 function toRgbLibAssignment(
   assignment: { type?: string; value?: number } | null | undefined,
   amount: number,
-): { Fungible: bigint } {
+): { Fungible: number } {
   if (assignment?.type && assignment.type !== 'Fungible') {
     throw new ProtocolError(`Unsupported RGB-L1 assignment type: ${assignment.type}`, 'RGB_L1', 'INVALID_REQUEST')
   }
-  return { Fungible: BigInt(Math.round(amount)) }
+  return { Fungible: Math.round(amount) }
+}
+
+function readRgbLibBtcBalanceBucket(bucket: any): { settled: number; spendable: number; future: number } {
+  const settled = toFiniteNumber(bucket?.settled ?? bucket?.confirmed ?? bucket?.total ?? 0)
+  const spendable = toFiniteNumber(bucket?.spendable ?? bucket?.available ?? settled)
+  const future = toFiniteNumber(bucket?.future ?? bucket?.unconfirmed ?? spendable)
+  return { settled, spendable, future }
 }
 
 /** Map rgb-lib's `TransactionType` to a stable string; unknowns ⇒ "User". */

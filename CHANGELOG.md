@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.28] - 2026-06-30
+
+### Fixed
+- **RGB-L1 withdraw routing and BTC balance parity with rgb-lib clients.** The
+  WASM adapter now sends RGB recipient maps using the same snake_case fields as
+  the desktop rgb-lib flow while keeping the wasm camelCase aliases, uses plain
+  numeric `{ Fungible: amount }` assignments for sends, and exposes the
+  spendable BTC total across both vanilla and colored on-chain buckets so
+  RGB-L1 wallets do not show a misleading zero when funds are held in colored
+  UTXOs.
+
 ## [1.0.0-beta.27] - 2026-06-30
 
 ### Fixed

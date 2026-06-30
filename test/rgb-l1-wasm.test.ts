@@ -51,6 +51,16 @@ describe('RgbLibWasmAdapter', () => {
     expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 2500, unconfirmed: 200, total: 2500 })
   })
 
+  it('adds colored BTC sats to the spendable on-chain total', async () => {
+    const adapter = connected({
+      getBtcBalance: () => ({
+        vanilla: { settled: 2500, spendable: 2400, future: 2700 },
+        colored: { settled: 800, spendable: 700, future: 900 },
+      }),
+    })
+    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 3300, unconfirmed: 300, total: 3100 })
+  })
+
   it('reads flat BTC balance aliases from rgb-lib', async () => {
     const adapter = connected({
       getBtcBalance: () => ({ confirmed: '12000', available: 11000n, unconfirmed: 12500 }),
@@ -107,7 +117,7 @@ describe('RgbLibWasmAdapter', () => {
     expect(witness[0]).toEqual({ assetId: 'rgb:X', assignment: 'Any' })
   })
 
-  it('sends an asset via begin → signPsbt → end with bigint coercion', async () => {
+  it('sends an asset via begin → signPsbt → end with rgb-lib recipient casing', async () => {
     const seen: any = {}
     const adapter = connected({
       sendBegin: async (online: any, map: any, donation: any, feeRate: any, minConf: any) => {
@@ -123,13 +133,16 @@ describe('RgbLibWasmAdapter', () => {
     expect(seen.feeRate).toBe(3n)
     expect(seen.map['rgb:USDT'][0]).toMatchObject({
       recipientId: 'utxob:x',
-      assignment: { Fungible: 42n },
+      recipient_id: 'utxob:x',
+      assignment: { Fungible: 42 },
     })
     expect(seen.map['rgb:USDT'][0].amount).toBeUndefined()
     // No transportEndpoints supplied ⇒ falls back to the wallet's configured ones.
     expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://proxy.example'])
+    expect(seen.map['rgb:USDT'][0].transport_endpoints).toEqual(['rpc://proxy.example'])
     // Blinded send ⇒ no witnessData key.
     expect(seen.map['rgb:USDT'][0].witnessData).toBeUndefined()
+    expect(seen.map['rgb:USDT'][0].witness_data).toBeUndefined()
   })
 
   it('routes the consignment to the invoice transport endpoints (not the sender default)', async () => {
@@ -150,9 +163,10 @@ describe('RgbLibWasmAdapter', () => {
       transportEndpoints: ['rpc://recipient.proxy'],
     } as any)
     expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://recipient.proxy'])
+    expect(seen.map['rgb:USDT'][0].transport_endpoints).toEqual(['rpc://recipient.proxy'])
   })
 
-  it('passes witnessData (camelCase, bigint amountSat) for a witness-invoice send', async () => {
+  it('passes witness data in both wasm and desktop-client casings', async () => {
     const seen: any = {}
     const adapter = connected({
       sendBegin: async (_o: any, map: any) => {
@@ -168,7 +182,8 @@ describe('RgbLibWasmAdapter', () => {
       amount: 7,
       witness_data: { amount_sat: 1200 },
     })
-    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200n })
+    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200, amount_sat: 1200 })
+    expect(seen.map['rgb:USDT'][0].witness_data).toEqual({ amountSat: 1200, amount_sat: 1200 })
   })
 
   it('normalizes the rgb-lib transaction type (deposit/send → User, machinery kept)', async () => {
