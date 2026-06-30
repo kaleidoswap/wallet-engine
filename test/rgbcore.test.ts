@@ -48,6 +48,20 @@ describe('RgbCore translation helpers', () => {
       total: 1000,
       available: 1000,
       pending: 0,
+      settled: 1000,
+      future: 1000,
+      spendable: 1000,
+    })
+  })
+
+  it('preserves owned balance when rgb-lib returns unified aliases', () => {
+    expect(rgbAssetBalance({ total: 2500n, available: 0n })).toMatchObject({
+      total: 2500,
+      available: 0,
+      pending: 0,
+      settled: 2500,
+      future: 2500,
+      spendable: 0,
     })
   })
 })

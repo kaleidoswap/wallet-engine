@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.26] - 2026-06-30
+
+### Fixed
+- **RGB-L1 balances and activity after unlock.** `rgbAssetBalance` now accepts
+  the raw rgb-lib/WASM balance aliases (`total`/`available`/`pending`) and
+  BigInt/string values, while preserving the detailed RGB fields
+  (`settled`/`future`/`spendable`) that the extension uses for expanded balance
+  views. The WASM adapter also normalizes asset records whose balance fields are
+  flattened onto the asset object, so RGB assets no longer collapse to 0 after a
+  detail balance refresh.
+
 ## [1.0.0-beta.22] - 2026-06-29
 
 ### Fixed

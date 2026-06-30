@@ -59,6 +59,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './RgbCore'
+import type { RgbBalanceLike } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
@@ -223,10 +224,15 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   async refreshBalances(): Promise<void> {
     this.assertConnected()
     try {
-      await this.account.refresh(this.online, null, [], false)
+      // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
+      // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
+      // synced again — two full indexer round-trips, ~2× the cold-sync wait.
       await this.account.sync(this.online)
-    } catch {
-      /* best-effort */
+      await this.account.refresh(this.online, null, [], true)
+    } catch (e) {
+      // best-effort, but surface the cause — a silent failure leaves the wallet
+      // showing 0 balance / no history.
+      console.error('[RGB-L1] refresh/sync failed:', e)
     }
   }
 
@@ -508,13 +514,24 @@ function normalizeAsset(a: any): {
   name?: string
   ticker?: string
   precision?: number | string
-  balance?: { spendable?: number; settled?: number; future?: number }
+  balance?: RgbBalanceLike
 } {
   return {
     asset_id: a?.assetId ?? a?.asset_id ?? a?.id ?? '',
     name: a?.name,
     ticker: a?.ticker,
     precision: a?.precision,
-    balance: a?.balance,
+    balance: normalizeAssetBalance(a?.balance ?? a),
+  }
+}
+
+function normalizeAssetBalance(a: any): RgbBalanceLike | undefined {
+  if (!a) return undefined
+  return {
+    settled: a.settled ?? a.total,
+    future: a.future ?? a.pending,
+    spendable: a.spendable ?? a.available,
+    offchain_outbound: a.offchain_outbound ?? a.offchainOutbound ?? a.locked,
+    offchain_inbound: a.offchain_inbound ?? a.offchainInbound,
   }
 }
