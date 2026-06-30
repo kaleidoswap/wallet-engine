@@ -215,9 +215,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.assertConnected()
     const v: any = (await this.account.getBtcBalance()) ?? {}
     const vanilla = v.vanilla ?? v
-    const settled = Number(vanilla.settled ?? 0)
-    const spendable = Number(vanilla.spendable ?? settled)
-    const future = Number(vanilla.future ?? spendable)
+    const settled = toFiniteNumber(vanilla.settled ?? vanilla.confirmed ?? vanilla.total ?? 0)
+    const spendable = toFiniteNumber(vanilla.spendable ?? vanilla.available ?? settled)
+    const future = toFiniteNumber(vanilla.future ?? vanilla.unconfirmed ?? spendable)
     return { confirmed: settled, unconfirmed: Math.max(0, future - settled), total: spendable }
   }
 
@@ -302,14 +302,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const raw: any = await this.account.listTransactions()
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
     return txs.map((t) => {
-      const received = Number(t.received ?? 0)
-      const sent = Number(t.sent ?? 0)
+      const { received, sent, type } = normalizeRgbLibTransactionAmounts(t)
       const confTime = t.confirmationTime ?? t.confirmation_time
+      const timestampSeconds = normalizeRgbLibTimestamp(confTime)
       return {
         id: t.txid ?? t.transactionId ?? t.transaction_id ?? '',
-        type: (received >= sent ? 'receive' : 'send') as UnifiedTransaction['type'],
-        status: (confTime ? 'confirmed' : 'pending') as TransactionStatus,
-        timestamp: Number(confTime?.timestamp ?? 0) * 1000,
+        type,
+        status: (timestampSeconds ? 'confirmed' : 'pending') as TransactionStatus,
+        timestamp: timestampSeconds * 1000,
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
         asset: undefined as unknown as UnifiedAsset,
@@ -427,9 +427,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   async sendAsset(params: {
+    assetId?: string
     token: string
+    recipientId?: string
     recipient: string
     amount: number
+    assignment?: { type?: string; value?: number } | null
     feeRate?: number
     minConfirmations?: number
     donation?: boolean
@@ -437,18 +440,27 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     transportEndpoints?: string[]
     /** Set only for witness invoices (blinded otherwise). */
     witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number } | null
+    witness_data?: { amountSat?: number; amount_sat?: number; blinding?: number } | null
   }): Promise<any> {
     this.assertConnected()
+    const token = params.token ?? params.assetId
+    const recipientId = params.recipient ?? params.recipientId
+    if (!token) throw new ProtocolError('RGB-L1 asset send requires an asset id', 'RGB_L1', 'INVALID_REQUEST')
+    if (!recipientId) throw new ProtocolError('RGB-L1 asset send requires a recipient id', 'RGB_L1', 'INVALID_REQUEST')
+    const amount = Number(params.amount ?? params.assignment?.value ?? 0)
+    if (!Number.isFinite(amount) || amount <= 0) {
+      throw new ProtocolError('RGB-L1 asset send requires a positive amount', 'RGB_L1', 'INVALID_REQUEST')
+    }
     const transportEndpoints =
       Array.isArray(params.transportEndpoints) && params.transportEndpoints.length > 0
         ? params.transportEndpoints
         : this.transportEndpoints
     const recipient: Record<string, unknown> = {
-      recipientId: params.recipient,
-      amount: BigInt(params.amount),
+      recipientId,
+      assignment: toRgbLibAssignment(params.assignment, amount),
       transportEndpoints,
     }
-    const wd = params.witnessData
+    const wd = params.witnessData ?? params.witness_data
     if (wd) {
       const amountSat = wd.amountSat ?? wd.amount_sat
       recipient.witnessData = {
@@ -457,7 +469,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       }
     }
     const recipientMap = {
-      [params.token]: [recipient],
+      [token]: [recipient],
     }
     const feeRate = BigInt(Math.round(params.feeRate ?? 1))
     const unsigned: string = await this.account.sendBegin(
@@ -498,11 +510,68 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 }
 
+function normalizeRgbLibTimestamp(confTime: unknown): number {
+  if (typeof confTime === 'number' || typeof confTime === 'string' || typeof confTime === 'bigint') {
+    return toFiniteNumber(confTime)
+  }
+  if (confTime && typeof confTime === 'object') {
+    const obj = confTime as Record<string, unknown>
+    return firstFiniteNumber(obj.timestamp, obj.blockTime, obj.block_time, obj.time) ?? 0
+  }
+  return 0
+}
+
+function toRgbLibAssignment(
+  assignment: { type?: string; value?: number } | null | undefined,
+  amount: number,
+): { Fungible: bigint } {
+  if (assignment?.type && assignment.type !== 'Fungible') {
+    throw new ProtocolError(`Unsupported RGB-L1 assignment type: ${assignment.type}`, 'RGB_L1', 'INVALID_REQUEST')
+  }
+  return { Fungible: BigInt(Math.round(amount)) }
+}
+
 /** Map rgb-lib's `TransactionType` to a stable string; unknowns ⇒ "User". */
 function normalizeRgbLibTxType(raw: unknown): 'User' | 'RgbSend' | 'CreateUtxos' {
   const v = String(raw ?? '')
   if (v === 'RgbSend' || v === 'CreateUtxos') return v
   return 'User'
+}
+
+function normalizeRgbLibTransactionAmounts(t: any): {
+  received: number
+  sent: number
+  type: Extract<UnifiedTransaction['type'], 'send' | 'receive'>
+} {
+  const explicitReceived = firstFiniteNumber(
+    t.received,
+    t.receivedSat,
+    t.received_sat,
+    t.incoming,
+    t.incomingSat,
+    t.incoming_sat,
+  )
+  const explicitSent = firstFiniteNumber(
+    t.sent,
+    t.sentSat,
+    t.sent_sat,
+    t.outgoing,
+    t.outgoingSat,
+    t.outgoing_sat,
+  )
+  if (explicitReceived !== null || explicitSent !== null) {
+    const received = explicitReceived ?? 0
+    const sent = explicitSent ?? 0
+    return { received, sent, type: received >= sent ? 'receive' : 'send' }
+  }
+
+  const rawDirection = String(t.type ?? t.direction ?? t.transactionDirection ?? '').toLowerCase()
+  const signedAmount = firstFiniteNumber(t.amount, t.amountSat, t.amount_sat, t.value, t.valueSat)
+  const amount = Math.abs(signedAmount ?? 0)
+  if (rawDirection.includes('send') || rawDirection.includes('out') || (signedAmount ?? 0) < 0) {
+    return { received: 0, sent: amount, type: 'send' }
+  }
+  return { received: amount, sent: 0, type: 'receive' }
 }
 
 /**
@@ -534,4 +603,19 @@ function normalizeAssetBalance(a: any): RgbBalanceLike | undefined {
     offchain_outbound: a.offchain_outbound ?? a.offchainOutbound ?? a.locked,
     offchain_inbound: a.offchain_inbound ?? a.offchainInbound,
   }
+}
+
+function toFiniteNumber(value: unknown): number {
+  if (typeof value === 'bigint') return Number(value)
+  const n = Number(value ?? 0)
+  return Number.isFinite(n) ? n : 0
+}
+
+function firstFiniteNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    if (value === null || value === undefined || value === '') continue
+    const n = typeof value === 'bigint' ? Number(value) : Number(value)
+    if (Number.isFinite(n)) return n
+  }
+  return null
 }

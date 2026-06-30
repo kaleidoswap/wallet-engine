@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.27] - 2026-06-30
+
+### Fixed
+- **RGB-L1 BTC balance, BTC history, and RGB sends.** The WASM adapter now reads
+  flat BTC balance aliases (`confirmed`/`available`/`unconfirmed`) in addition
+  to the `vanilla` split, normalizes BTC transaction amount aliases and signed
+  amounts for history, and builds rgb-lib recipient maps with the required
+  `assignment` field for RGB asset withdrawals.
+
 ## [1.0.0-beta.26] - 2026-06-30
 
 ### Fixed

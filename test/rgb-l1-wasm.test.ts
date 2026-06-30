@@ -51,6 +51,13 @@ describe('RgbLibWasmAdapter', () => {
     expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 2500, unconfirmed: 200, total: 2500 })
   })
 
+  it('reads flat BTC balance aliases from rgb-lib', async () => {
+    const adapter = connected({
+      getBtcBalance: () => ({ confirmed: '12000', available: 11000n, unconfirmed: 12500 }),
+    })
+    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 12000, unconfirmed: 500, total: 11000 })
+  })
+
   it('refuses BTC Lightning invoices, LN sends, and invoice decoding (on-chain only)', async () => {
     const adapter = connected({})
     await expect(adapter.createInvoice({ asset: 'BTC' } as any)).rejects.toThrow(/no Lightning/i)
@@ -114,7 +121,11 @@ describe('RgbLibWasmAdapter', () => {
     expect(res).toMatchObject({ txid: 'sent', signed: 'signed:unsigned-psbt' })
     expect(seen.online).toEqual({ _online: true })
     expect(seen.feeRate).toBe(3n)
-    expect(seen.map['rgb:USDT'][0]).toMatchObject({ recipientId: 'utxob:x', amount: 42n })
+    expect(seen.map['rgb:USDT'][0]).toMatchObject({
+      recipientId: 'utxob:x',
+      assignment: { Fungible: 42n },
+    })
+    expect(seen.map['rgb:USDT'][0].amount).toBeUndefined()
     // No transportEndpoints supplied ⇒ falls back to the wallet's configured ones.
     expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://proxy.example'])
     // Blinded send ⇒ no witnessData key.
@@ -132,11 +143,12 @@ describe('RgbLibWasmAdapter', () => {
       sendEnd: async () => ({ txid: 'sent' }),
     })
     await adapter.sendAsset({
-      token: 'rgb:USDT',
-      recipient: 'utxob:x',
+      assetId: 'rgb:USDT',
+      recipientId: 'utxob:x',
       amount: 1,
+      assignment: { type: 'Fungible', value: 1 },
       transportEndpoints: ['rpc://recipient.proxy'],
-    })
+    } as any)
     expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://recipient.proxy'])
   })
 
@@ -154,7 +166,7 @@ describe('RgbLibWasmAdapter', () => {
       token: 'rgb:USDT',
       recipient: 'witness-rid',
       amount: 7,
-      witnessData: { amount_sat: 1200 },
+      witness_data: { amount_sat: 1200 },
     })
     expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200n })
   })
@@ -177,6 +189,18 @@ describe('RgbLibWasmAdapter', () => {
     expect((byId.wd.protocolData as any).transactionType).toBe('User')
     expect(byId.wd.type).toBe('send')
     expect((byId.utxos.protocolData as any).transactionType).toBe('CreateUtxos')
+  })
+
+  it('normalizes BTC transaction amount aliases and signed amounts', async () => {
+    const adapter = connected({
+      listTransactions: () => [
+        { txid: 'dep', amountSat: 12000, direction: 'Incoming', confirmationTime: 101 },
+        { txid: 'wd', amount: -7000, confirmation_time: { timestamp: 102 } },
+      ],
+    })
+    const txs = await adapter.listTransactions()
+    expect(txs[0]).toMatchObject({ id: 'dep', type: 'receive', amount: 12000, timestamp: 101000 })
+    expect(txs[1]).toMatchObject({ id: 'wd', type: 'send', amount: 7000, timestamp: 102000 })
   })
 
   it('sends BTC on-chain via sendBtcBegin → signPsbt → sendBtcEnd', async () => {
