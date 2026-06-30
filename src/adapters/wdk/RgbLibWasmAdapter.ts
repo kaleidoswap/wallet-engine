@@ -211,15 +211,33 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   // --- Balance ------------------------------------------------------------
-  async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
+  /** Raw vanilla / colored BTC split as rgb-lib reports it (both in sats). */
+  private async detailedBtcBalance(): Promise<{
+    vanilla: { settled: number; future: number; spendable: number }
+    colored: { settled: number; future: number; spendable: number }
+  }> {
     this.assertConnected()
     const v: any = (await this.account.getBtcBalance()) ?? {}
-    const vanilla = readRgbLibBtcBalanceBucket(v.vanilla ?? v)
-    const colored = v.colored ? readRgbLibBtcBalanceBucket(v.colored) : { settled: 0, spendable: 0, future: 0 }
+    return {
+      vanilla: readRgbLibBtcBalanceBucket(v.vanilla ?? v),
+      colored: v.colored ? readRgbLibBtcBalanceBucket(v.colored) : { settled: 0, spendable: 0, future: 0 },
+    }
+  }
+
+  async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
+    const { vanilla, colored } = await this.detailedBtcBalance()
     const settled = vanilla.settled + colored.settled
     const spendable = vanilla.spendable + colored.spendable
     const future = vanilla.future + colored.future
     return { confirmed: settled, unconfirmed: Math.max(0, future - settled), total: spendable }
+  }
+
+  /** Detailed BTC balance with the vanilla / colored split (IProtocolAdapter hook). */
+  async getRgbDetailedBalance(): Promise<{
+    vanilla: { settled: number; future: number; spendable: number }
+    colored: { settled: number; future: number; spendable: number }
+  }> {
+    return this.detailedBtcBalance()
   }
 
   async refreshBalances(): Promise<void> {
@@ -230,6 +248,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       // synced again — two full indexer round-trips, ~2× the cold-sync wait.
       await this.account.sync(this.online)
       await this.account.refresh(this.online, null, [], true)
+      // Durably commit the refreshed state. In MV3 the service worker is killed
+      // aggressively; without a flush the settled-transfer promotion lives only
+      // in memory and is lost on the next cold start, which re-surfaces as stale
+      // balances / "insufficient assignments" on the following send.
+      await this.flushState()
     } catch (e) {
       // best-effort, but surface the cause — a silent failure leaves the wallet
       // showing 0 balance / no history.
@@ -391,6 +414,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const res: any = await (opts.witness
       ? this.account.witnessReceive(...args)
       : this.account.blindReceive(...args))
+    // Generating an invoice records a pending transfer in the wallet DB; flush so
+    // it survives a service-worker restart before the payer pays it.
+    await this.flushState()
     // Normalize to a plain, structured-clone-safe object: the wasm result can
     // carry BigInt / wasm-bound values that break chrome message passing
     // ("could not serialize message"). Coerce the fields the host reads.
@@ -413,6 +439,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }): Promise<{ success: boolean }> {
     this.assertConnected()
+    // Same rationale as sendAsset: createUtxosBegin selects from vanilla UTXOs
+    // tracked in the local DB; sync first so the indexer's current view is used.
+    await this.refreshBalances()
     const feeRate = BigInt(Math.round(params.feeRate ?? 1))
     const unsigned: string = await this.account.createUtxosBegin(
       this.online,
@@ -424,6 +453,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     )
     const signed = await this.account.signPsbt(unsigned)
     await this.account.createUtxosEnd(this.online, signed, false)
+    // Commit the new UTXO set before the caller relies on it (e.g. immediately
+    // issuing/receiving against the freshly-created colorable UTXOs).
+    await this.flushState()
     return { success: true }
   }
 
@@ -481,6 +513,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const recipientMap = {
       [token]: [recipient],
     }
+    // rgb-lib's `send` only spends *settled* allocations it knows about locally.
+    // Without a fresh sync+refresh right before sendBegin, a received transfer
+    // that hasn't been promoted to Settled in the local DB (e.g. after a SW
+    // restart or IndexedDB restore) is invisible to the spend, and sendBegin
+    // fails with "Insufficient total assignments" despite a non-zero UI balance.
+    await this.refreshBalances()
     const feeRate = BigInt(Math.round(params.feeRate ?? 1))
     const unsigned: string = await this.account.sendBegin(
       this.online,
@@ -490,7 +528,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       params.minConfirmations ?? 1
     )
     const signed = await this.account.signPsbt(unsigned)
-    return this.account.sendEnd(this.online, signed, false)
+    const result = await this.account.sendEnd(this.online, signed, false)
+    // The spend is broadcast; persist the consumed-allocation state so a SW kill
+    // can't leave the wallet thinking the inputs are still spendable (which would
+    // later fail as "insufficient assignments" or attempt a double-spend).
+    await this.flushState()
+    return result
   }
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
@@ -505,7 +548,134 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     )
     const signed = await this.account.signPsbt(unsigned)
     const txid: string = await this.account.sendBtcEnd(this.online, signed, false)
+    await this.flushState()
     return { ok: true, txid }
+  }
+
+  // --- UTXOs / fees / metadata / transfer maintenance ---------------------
+  /**
+   * List the wallet's unspent outputs and their RGB allocations
+   * (IProtocolAdapter hook). Normalizes rgb-lib's camel/snake casing and the
+   * `Outpoint` (object `{txid,vout}` or `"txid:vout"` string) into the flat shape
+   * the host consumes.
+   */
+  async listRgbUnspents(): Promise<{
+    unspents: Array<{
+      utxo: { outpoint: string; btc_amount: number; colorable: boolean }
+      rgb_allocations: Array<{ asset_id?: string | null; assignment: unknown; settled: boolean }>
+    }>
+  }> {
+    this.assertConnected()
+    const raw: any = await this.account.listUnspents(false)
+    const list: any[] = Array.isArray(raw) ? raw : raw?.unspents ?? []
+    return {
+      unspents: list.map((u) => {
+        const utxo = u?.utxo ?? u ?? {}
+        const allocations: any[] = u?.rgbAllocations ?? u?.rgb_allocations ?? []
+        return {
+          utxo: {
+            outpoint: formatOutpoint(utxo.outpoint),
+            btc_amount: toFiniteNumber(utxo.btcAmount ?? utxo.btc_amount ?? 0),
+            colorable: Boolean(utxo.colorable),
+          },
+          rgb_allocations: allocations.map((a) => ({
+            asset_id: a?.assetId ?? a?.asset_id ?? null,
+            assignment: a?.assignment ?? null,
+            settled: Boolean(a?.settled),
+          })),
+        }
+      }),
+    }
+  }
+
+  /** Estimate the on-chain fee rate (sat/vB) for a confirmation target (IProtocolAdapter hook). */
+  async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
+    this.assertConnected()
+    const target = Number.isFinite(blocks) && blocks > 0 ? Math.round(blocks) : 6
+    const rate = await this.account.getFeeEstimation(this.online, target)
+    return { fee_rate: toFiniteNumber(rate) }
+  }
+
+  /** Asset metadata (name, ticker, precision, supply). */
+  async getAssetMetadata(assetId: string): Promise<Record<string, unknown>> {
+    this.assertConnected()
+    const meta: any = await this.account.getAssetMetadata(assetId)
+    return {
+      asset_id: assetId,
+      asset_schema: meta?.assetSchema ?? meta?.asset_schema,
+      name: meta?.name,
+      ticker: meta?.ticker,
+      precision: meta?.precision,
+      initial_supply: toFiniteNumber(meta?.initialSupply ?? meta?.initial_supply ?? 0),
+      max_supply: meta?.maxSupply ?? meta?.max_supply,
+      known_circulating_supply: meta?.knownCirculatingSupply ?? meta?.known_circulating_supply,
+      timestamp: meta?.timestamp,
+    }
+  }
+
+  /**
+   * Status of a received invoice: matches the pending transfer by recipient id /
+   * invoice string and returns its rgb-lib status (WaitingCounterparty,
+   * WaitingConfirmations, Settled, Failed, …).
+   */
+  async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
+    this.assertConnected()
+    const needle = String(params.invoice ?? '')
+    const raw: any = await this.account.listTransfers(null)
+    const transfers: any[] = Array.isArray(raw) ? raw : raw?.transfers ?? []
+    const match = transfers.find((t) => {
+      const fields = [t?.recipientId, t?.recipient_id, t?.invoiceString, t?.invoice_string, t?.invoice]
+      return fields.some((f) => f && String(f) === needle)
+    })
+    return { status: match?.status ?? null, transfer: match ?? null }
+  }
+
+  /**
+   * Fail expired/stuck pending transfers (default: all). Stuck WaitingCounterparty
+   * transfers hold allocations and can block a later spend with "insufficient
+   * assignments"; failing then deleting them frees those allocations.
+   */
+  async failRgbTransfers(
+    params: { batchTransferIdx?: number | null; noAssetOnly?: boolean } = {},
+  ): Promise<{ changed: boolean }> {
+    this.assertConnected()
+    const changed: boolean = await this.account.failTransfers(
+      this.online,
+      params.batchTransferIdx ?? null,
+      params.noAssetOnly ?? false,
+      false,
+    )
+    await this.flushState()
+    return { changed: Boolean(changed) }
+  }
+
+  /** Delete already-failed transfers from the wallet DB. */
+  async deleteRgbTransfers(
+    params: { batchTransferIdx?: number | null; noAssetOnly?: boolean } = {},
+  ): Promise<{ changed: boolean }> {
+    this.assertConnected()
+    const changed: boolean = await this.account.deleteTransfers(
+      params.batchTransferIdx ?? null,
+      params.noAssetOnly ?? false,
+    )
+    await this.flushState()
+    return { changed: Boolean(changed) }
+  }
+
+  /**
+   * Durably commit wallet state to IndexedDB. Best-effort and version-guarded:
+   * `flush()` was added after `@utexo/rgb-lib-wasm@1.0.0-beta.2`, so on older
+   * builds this is a no-op (the wasm persists opportunistically). A failed flush
+   * leaves in-memory state intact and is safe to retry, so we log and continue.
+   */
+  private async flushState(): Promise<void> {
+    const fn = (this.account as { flush?: unknown } | null)?.flush
+    if (typeof fn !== 'function') return
+    try {
+      await (this.account as { flush: () => Promise<void> }).flush()
+    } catch (e) {
+      console.error('[RGB-L1] flush failed:', e)
+    }
   }
 
   /** Encrypted wallet backup bytes (rgb-lib's own format). */
@@ -529,6 +699,18 @@ function normalizeRgbLibTimestamp(confTime: unknown): number {
     return firstFiniteNumber(obj.timestamp, obj.blockTime, obj.block_time, obj.time) ?? 0
   }
   return 0
+}
+
+/** rgb-lib serializes an Outpoint as `{txid,vout}` or the `"txid:vout"` string. */
+function formatOutpoint(outpoint: unknown): string {
+  if (typeof outpoint === 'string') return outpoint
+  if (outpoint && typeof outpoint === 'object') {
+    const o = outpoint as Record<string, unknown>
+    const txid = o.txid ?? o.txId
+    const vout = o.vout ?? o.index
+    if (txid != null && vout != null) return `${txid}:${vout}`
+  }
+  return ''
 }
 
 function toRgbLibAssignment(

@@ -7,6 +7,30 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.29] - 2026-06-30
+
+### Fixed
+- **RGB-L1 sends failing with "Insufficient total assignments" despite a
+  non-zero balance.** The WASM adapter now runs a `sync` + `refresh` immediately
+  before `sendBegin` (and before `createUtxosBegin`). rgb-lib's `send` only
+  spends *settled* allocations it knows about locally; after a service-worker
+  restart or IndexedDB restore the received transfer had not been promoted to
+  settled, so the spend saw zero spendable allocations even though the balance
+  UI (which polls `refreshBalances`) showed funds.
+
+### Added
+- **Durable persistence via `flush()`.** Every state-mutating WASM operation
+  (`refresh`, `blindReceive`/`witnessReceive`, `createUtxos`, `sendAsset`,
+  `sendBtcOnchain`, transfer maintenance) now durably commits to IndexedDB
+  before returning. Version-guarded: a no-op on `@utexo/rgb-lib-wasm@1.0.0-beta.2`
+  (where `flush()` is absent), active once the bindings are bumped.
+- **Missing `IProtocolAdapter` RGB hooks now implemented on the WASM adapter:**
+  `listRgbUnspents()` (→ `listUnspents`), `estimateRgbFee(blocks)`
+  (→ `getFeeEstimation`), and `getRgbDetailedBalance()` (vanilla/colored split).
+- **Transfer maintenance + metadata helpers:** `getInvoiceStatus({ invoice })`,
+  `getAssetMetadata(assetId)`, `failRgbTransfers()` and `deleteRgbTransfers()`
+  to clear stuck pending transfers that hold allocations.
+
 ## [1.0.0-beta.28] - 2026-06-30
 
 ### Fixed
