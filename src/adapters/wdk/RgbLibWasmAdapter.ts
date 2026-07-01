@@ -189,6 +189,34 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.account = serializeWasmAccount(rawWallet)
     this.online = await this.account.goOnline(false, cfg.indexerUrl)
     this.connected = true
+    await this.recoverBtcStateIfThin()
+  }
+
+  /**
+   * One-time recovery for a wallet restored from a *thin* BDK snapshot (no
+   * revealed SPKs) — the state left behind when an MV3 service-worker teardown
+   * interrupts rgb-lib-wasm's async IndexedDB save. In that state an incremental
+   * `sync` can only re-query already-revealed SPKs, so it can't rediscover the
+   * on-chain BTC and the balance reads 0 even though funds exist.
+   *
+   * Strategy: after an incremental sync, if BTC still reads 0, run a `fullScan`
+   * (BIP44 stop-gap) to rebuild the UTXO set from the indexer, then `flush` so
+   * the recovered state durably persists (and normal incremental sync suffices
+   * from then on). Version-guarded — `fullScan` is absent on rgb-lib-wasm
+   * ≤ beta.2 — and best-effort so a scan failure never blocks connect.
+   */
+  private async recoverBtcStateIfThin(): Promise<void> {
+    const fullScan = (this.account as { fullScan?: unknown } | null)?.fullScan
+    if (typeof fullScan !== 'function') return
+    try {
+      await this.account.sync(this.online)
+      const { total } = await this.getBtcBalance()
+      if (total > 0) return // state already healthy — skip the costlier full scan
+      await (this.account as { fullScan: (online: unknown) => Promise<void> }).fullScan(this.online)
+      await this.flushState()
+    } catch (e) {
+      console.error('[RGB-L1] BTC state recovery scan failed:', e)
+    }
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {

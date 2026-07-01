@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.31] - 2026-07-01
+
+### Fixed
+- **RGB-L1 BTC on-chain balance reads 0 after unlock.** On restore from a *thin*
+  BDK snapshot (no revealed SPKs — the state left when an MV3 service-worker
+  teardown interrupts rgb-lib-wasm's async IndexedDB save), an incremental `sync`
+  can only re-query already-revealed SPKs and cannot rediscover on-chain BTC, so
+  the balance shows 0 despite real funds. `connect()` now runs a one-time
+  recovery: after an incremental sync, if BTC still reads 0 it runs `fullScan`
+  (BIP44 stop-gap) to rebuild the UTXO set from the indexer, then `flush()` so the
+  recovered state persists (normal incremental sync suffices thereafter). Both
+  calls are version-guarded (no-op on `@utexo/rgb-lib-wasm ≤ beta.2`, which lacks
+  `fullScan`/`flush`) and best-effort so a scan failure never blocks connect.
+  Requires `@utexo/rgb-lib-wasm ≥ 1.0.0-beta.3`.
+
 ## [1.0.0-beta.30] - 2026-07-01
 
 ### Added
