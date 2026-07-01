@@ -184,6 +184,37 @@ export interface IProtocolAdapter {
   verifyMessage?(message: string, signature: string): Promise<string>
 
   // ========================================================================
+  // Backup / VSS (Optional — RGB-L1 wasm)
+  //
+  // RGB is stateful: allocations/consignments cannot be reconstructed from the
+  // seed alone, so wallet state must be durably backed up after every settled
+  // transfer. `backup`/`restoreBackup` produce a local encrypted artifact;
+  // the `vss*` methods push/pull the same state to a versioned cloud store
+  // (rgb-lib encrypts client-side — the server only ever sees ciphertext).
+  // ========================================================================
+
+  /** Encrypted wallet backup bytes (rgb-lib's own format). */
+  backup?(password: string): Promise<Uint8Array>
+  /** Restore wallet state from encrypted backup bytes produced by `backup`. */
+  restoreBackup?(params: { backupBytes: Uint8Array; password: string }): Promise<void>
+  /** Whether local wallet state has changed since the last backup. */
+  backupInfo?(): Promise<{ required: boolean }>
+  /**
+   * Configure VSS (cloud) backup for this wallet: the server URL, a stable
+   * per-wallet store id, and the 32-byte signing key (hex). The signing key
+   * should be derived on a dedicated path — never a spend key.
+   */
+  configureVssBackup?(params: { serverUrl: string; storeId: string; signingKeyHex: string }): Promise<void>
+  /** Disable VSS (cloud) backup for this wallet. */
+  disableVssBackup?(): Promise<void>
+  /** Upload an encrypted backup to the configured VSS server. Returns the new server version. */
+  vssBackup?(): Promise<{ serverVersion: number | null }>
+  /** VSS backup status: whether a backup exists, the server version, and if a fresh backup is due. */
+  vssBackupInfo?(): Promise<{ backupExists: boolean; serverVersion: number | null; backupRequired: boolean }>
+  /** Download and restore wallet state from the configured VSS server. */
+  vssRestoreBackup?(): Promise<void>
+
+  // ========================================================================
   // Spark-Specific Operations (Optional)
   // ========================================================================
 

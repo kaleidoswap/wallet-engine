@@ -297,6 +297,93 @@ describe('RgbLibWasmAdapter', () => {
     expect((adapter as any).online).toBeNull()
     expect(adapter.isConnected()).toBe(false)
   })
+
+  // ---- Backup / VSS ------------------------------------------------------
+  it('backup returns the encrypted bytes from rgb-lib', async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const adapter = connected({ backup: (pw: string) => (pw === 'pw' ? bytes : new Uint8Array()) })
+    expect(await adapter.backup('pw')).toBe(bytes)
+  })
+
+  it('restoreBackup forwards bytes + password positionally', async () => {
+    const seen: any = {}
+    const bytes = new Uint8Array([9, 9])
+    const adapter = connected({
+      restoreBackup: (b: Uint8Array, pw: string) => {
+        seen.b = b
+        seen.pw = pw
+      },
+    })
+    await adapter.restoreBackup({ backupBytes: bytes, password: 'secret' })
+    expect(seen.b).toBe(bytes)
+    expect(seen.pw).toBe('secret')
+  })
+
+  it('backupInfo coerces the rgb-lib boolean to { required }', async () => {
+    const adapter = connected({ backupInfo: () => 1 as any })
+    expect(await adapter.backupInfo()).toEqual({ required: true })
+  })
+
+  it('configureVssBackup forwards (serverUrl, storeId, signingKeyHex) positionally', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      configureVssBackup: (url: string, store: string, key: string) => {
+        seen.url = url
+        seen.store = store
+        seen.key = key
+      },
+    })
+    await adapter.configureVssBackup({
+      serverUrl: 'https://vss.kaleidoswap.com/vss',
+      storeId: 'wallet-abc',
+      signingKeyHex: 'ab'.repeat(32),
+    })
+    expect(seen).toEqual({
+      url: 'https://vss.kaleidoswap.com/vss',
+      store: 'wallet-abc',
+      key: 'ab'.repeat(32),
+    })
+  })
+
+  it('vssBackup normalizes a BigInt server version to a plain number', async () => {
+    const adapter = connected({ vssBackup: async () => 7n })
+    expect(await adapter.vssBackup()).toEqual({ serverVersion: 7 })
+  })
+
+  it('vssBackupInfo maps snake_case + BigInt to camelCase, no BigInt', async () => {
+    const adapter = connected({
+      vssBackupInfo: async () => ({ backup_exists: true, server_version: 12n, backup_required: false }),
+    })
+    const info = await adapter.vssBackupInfo()
+    expect(info).toEqual({ backupExists: true, serverVersion: 12, backupRequired: false })
+    expect(typeof info.serverVersion).toBe('number')
+  })
+
+  it('vssBackupInfo tolerates a missing server_version (null)', async () => {
+    const adapter = connected({
+      vssBackupInfo: async () => ({ backup_exists: false, backup_required: true }),
+    })
+    expect(await adapter.vssBackupInfo()).toEqual({
+      backupExists: false,
+      serverVersion: null,
+      backupRequired: true,
+    })
+  })
+
+  it('vssRestoreBackup and disableVssBackup forward to the account', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      vssRestoreBackup: async () => {
+        seen.restored = true
+      },
+      disableVssBackup: () => {
+        seen.disabled = true
+      },
+    })
+    await adapter.vssRestoreBackup()
+    await adapter.disableVssBackup()
+    expect(seen).toEqual({ restored: true, disabled: true })
+  })
 })
 
 describe('createWdkRegistry rgbL1Backing', () => {

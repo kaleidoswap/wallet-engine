@@ -7,6 +7,24 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.30] - 2026-07-01
+
+### Added
+- **RGB wallet-state backup on the WASM (RGB-L1) adapter.** RGB is stateful —
+  allocations/consignments can't be rebuilt from the seed — so state must be
+  backed up after every settled transfer. Surfaced the rgb-lib backup/VSS
+  primitives on `RgbLibWasmAdapter` (and as optional `IProtocolAdapter` hooks):
+  - Local encrypted file: `backup(password)` (existing), `restoreBackup({ backupBytes, password })`,
+    `backupInfo()` (→ `{ required }`, "changed since last backup").
+  - Cloud (VSS): `configureVssBackup({ serverUrl, storeId, signingKeyHex })`,
+    `disableVssBackup()`, `vssBackup()` (→ `{ serverVersion }`),
+    `vssBackupInfo()` (→ `{ backupExists, serverVersion, backupRequired }`),
+    `vssRestoreBackup()`. rgb-lib encrypts client-side, so the VSS server only
+    stores ciphertext; the store is versioned (optimistic concurrency).
+  All calls route through the serialized account queue (rgb-lib-wasm is
+  single-threaded) and normalize BigInt → number so results survive the
+  extension's service-worker structured-clone boundary.
+
 ## [1.0.0-beta.29] - 2026-06-30
 
 ### Fixed

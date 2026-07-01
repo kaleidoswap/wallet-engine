@@ -678,10 +678,80 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     }
   }
 
+  // ==========================================================================
+  // Backup / VSS
+  //
+  // RGB state (allocations/consignments) can't be rebuilt from the seed, so it
+  // must be backed up after every settled transfer. rgb-lib encrypts the blob
+  // client-side before it ever leaves the wallet, so the VSS server only stores
+  // ciphertext. All calls route through the serialized account queue, so a
+  // backup can't interleave with a concurrent wallet mutation.
+  // ==========================================================================
+
   /** Encrypted wallet backup bytes (rgb-lib's own format). */
   async backup(password: string): Promise<Uint8Array> {
     this.assertConnected()
     return this.account.backup(password)
+  }
+
+  /** Restore wallet state from encrypted backup bytes produced by {@link backup}. */
+  async restoreBackup(params: { backupBytes: Uint8Array; password: string }): Promise<void> {
+    this.assertConnected()
+    await this.account.restoreBackup(params.backupBytes, params.password)
+    await this.flushState()
+  }
+
+  /** Whether local wallet state has changed since the last backup. */
+  async backupInfo(): Promise<{ required: boolean }> {
+    this.assertConnected()
+    return { required: Boolean(await this.account.backupInfo()) }
+  }
+
+  /** Configure VSS (cloud) backup: server URL, per-wallet store id, signing key (hex). */
+  async configureVssBackup(params: {
+    serverUrl: string
+    storeId: string
+    signingKeyHex: string
+  }): Promise<void> {
+    this.assertConnected()
+    await this.account.configureVssBackup(params.serverUrl, params.storeId, params.signingKeyHex)
+  }
+
+  /** Disable VSS (cloud) backup for this wallet. */
+  async disableVssBackup(): Promise<void> {
+    this.assertConnected()
+    await this.account.disableVssBackup()
+  }
+
+  /** Upload an encrypted backup to the configured VSS server. Returns the new server version. */
+  async vssBackup(): Promise<{ serverVersion: number | null }> {
+    this.assertConnected()
+    // rgb-lib returns the raw server version (may be a BigInt) — normalize so it
+    // survives structured-clone across the extension's SW message boundary.
+    const raw = await this.account.vssBackup()
+    return { serverVersion: raw != null ? toFiniteNumber(raw) : null }
+  }
+
+  /** VSS backup status: { backup_exists, server_version, backup_required } → camelCase, no BigInt. */
+  async vssBackupInfo(): Promise<{
+    backupExists: boolean
+    serverVersion: number | null
+    backupRequired: boolean
+  }> {
+    this.assertConnected()
+    const raw = (await this.account.vssBackupInfo()) as Record<string, unknown> | null
+    return {
+      backupExists: Boolean(raw?.backup_exists),
+      serverVersion: raw?.server_version != null ? toFiniteNumber(raw.server_version) : null,
+      backupRequired: Boolean(raw?.backup_required),
+    }
+  }
+
+  /** Download and restore wallet state from the configured VSS server. */
+  async vssRestoreBackup(): Promise<void> {
+    this.assertConnected()
+    await this.account.vssRestoreBackup()
+    await this.flushState()
   }
 
   override async disconnect(): Promise<void> {
