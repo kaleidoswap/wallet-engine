@@ -21,7 +21,11 @@ export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type Protoco
 export { PROTOCOL_OPERATIONS, getProtocolOperations, protocolSupportsOperation, type ProtocolCapability } from './capabilities/operations'
 
 // Platform ports (injected per host)
-export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'
+export type { IStorageProvider, IRuntimeProvider, PlatformContext, Logger } from './ports'
+// Platform injection — consumers call setPlatform() once at startup to supply
+// storage/runtime/logger (extension: chrome.storage-backed; RN: AsyncStorage-backed).
+// Engine modules that persist state (e.g. Spark sent-token records) read getPlatform().storage.
+export { setPlatform, getPlatform, getLogger, consoleLogger } from './ports'
 
 // Shared constants
 export { LIQUID_USDT_ASSET_ID } from './constants'
