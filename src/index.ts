@@ -75,6 +75,31 @@ export {
   type LiteBalances,
 } from './disclosure'
 
+// Arkade VTXO lifecycle + delegator management (platform-agnostic core).
+// @arkade-os/sdk is referenced by TYPE only here, so this is safe for the
+// SDK-free root barrel. The extension drives it from chrome.alarms; consumers
+// supply the VtxoManager/Wallet obtained via the native arkadeClientManager.
+export {
+  runArkadeVtxoLifecycle,
+  delegateSpendableVtxos,
+  getArkadeDelegateInfo,
+  resolveArkadeLifecycleSettings,
+  sanitizeDelegatorUrl,
+  sanitizeDelegationEnabled,
+  sanitizeVtxoThresholdSeconds,
+  ARKADE_DELEGATOR_URLS,
+  DEFAULT_DELEGATOR_URL,
+  DEFAULT_VTXO_THRESHOLD_SECONDS,
+  type ArkadeNetwork,
+  type ArkadeLifecycleSettings,
+  type ArkadeLifecycleRunConfig,
+  type ArkadeLifecycleCallbacks,
+  type ArkadeRecoverableBalance,
+  type ArkadeVtxoLifecycleResult,
+  type ArkadeDelegateResult,
+  type ArkadeDelegateInfo,
+} from './lib/arkade-vtxo-lifecycle'
+
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
 

@@ -12,5 +12,9 @@ export { RgbAdapter } from './RgbAdapter'
 
 export { sparkClientManager } from '../lib/spark-client-manager'
 export { arkadeClientManager, type ArkadePlatformProviders } from '../lib/arkade-client-manager'
+export {
+  arkadeSwapsClientManager,
+  type ArkadeSwapsInitOptions,
+} from '../lib/arkade-swaps-client-manager'
 export { kaleidoClientManager, type KaleidoClientConfig } from '../lib/kaleido-client-manager'
 export { flashnetClientManager } from '../lib/flashnet-client-manager'
