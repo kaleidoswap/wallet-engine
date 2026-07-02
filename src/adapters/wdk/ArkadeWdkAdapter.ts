@@ -100,14 +100,29 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
-    const cfg = config as ArkadeAdapterConfig
+    const cfg = config as ArkadeAdapterConfig & {
+      arkServerUrl?: string
+      esploraUrl?: string
+      swapProviderUrl?: string
+    }
     if (!cfg.mnemonic) throw new ProtocolError('ArkadeWdkAdapter requires a mnemonic', 'ARKADE', 'CONFIG')
     this.mnemonic = cfg.mnemonic
     this.network = cfg.network ?? 'mainnet'
+    // Accept either an explicit `arkadeConfig` passthrough OR the native adapter's
+    // flat fields (arkServerUrl/esploraUrl/swapProviderUrl) — so hosts can switch
+    // to this adapter without reshaping their connect config. The WDK manager
+    // spreads this straight into @arkade-os/sdk's Wallet.create.
+    const arkadeConfig =
+      cfg.arkadeConfig ??
+      ({
+        ...(cfg.arkServerUrl ? { arkServerUrl: cfg.arkServerUrl } : {}),
+        ...(cfg.esploraUrl ? { esploraUrl: cfg.esploraUrl } : {}),
+        ...(cfg.swapProviderUrl ? { swapProviderUrl: cfg.swapProviderUrl } : {}),
+      } as Record<string, any>)
     // @ts-ignore — external module, resolved at runtime in the consuming app.
     const mod = await loadWdkModule('@arkade-os/wdk', () => import('@arkade-os/wdk'))
     const WalletManagerArkade = mod.default ?? mod.WalletManagerArkade ?? mod
-    this.manager = new WalletManagerArkade(cfg.mnemonic, cfg.arkadeConfig ?? {})
+    this.manager = new WalletManagerArkade(cfg.mnemonic, arkadeConfig)
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     // Lazy-load the SDK for Ramps (onboard/offboard). Off the static import graph.
     // @ts-ignore — resolved at runtime; a transitive dep of the WDK Arkade module.
