@@ -60,6 +60,7 @@ import {
   type SentTokenTxRecord,
 } from '../../lib/spark-sent-token-records'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
+import { resolveWalletSeed } from '../../lib/wallet-seed'
 
 /** Default maximum fee for Lightning payments (sats) — mirrors the native adapter. */
 const DEFAULT_MAX_FEE_SATS = 1000
@@ -149,7 +150,9 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@tetherto/wdk-wallet-spark', () => import('@tetherto/wdk-wallet-spark'))
     const WalletManagerSpark = mod.default ?? mod
-    this.manager = new WalletManagerSpark(cfg.mnemonic, {
+    // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
+    // BIP-39 string validation (which throws "The seed phrase is invalid").
+    this.manager = new WalletManagerSpark(resolveWalletSeed(cfg.mnemonic), {
       network: SPARK_NETWORK_MAP[this.network] ?? 'MAINNET',
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)

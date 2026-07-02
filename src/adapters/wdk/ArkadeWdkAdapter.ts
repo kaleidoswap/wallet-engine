@@ -48,6 +48,7 @@ import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 import { normalizeVtxos, sortVtxosByExpiry, toNumber } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
+import { resolveWalletSeed } from '../../lib/wallet-seed'
 
 const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(value.trim())
 const isLightningInvoice = (value: string): boolean => {
@@ -122,7 +123,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // @ts-ignore — external module, resolved at runtime in the consuming app.
     const mod = await loadWdkModule('@arkade-os/wdk', () => import('@arkade-os/wdk'))
     const WalletManagerArkade = mod.default ?? mod.WalletManagerArkade ?? mod
-    this.manager = new WalletManagerArkade(cfg.mnemonic, arkadeConfig)
+    // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
+    // BIP-39 string validation (which throws "The seed phrase is invalid").
+    this.manager = new WalletManagerArkade(resolveWalletSeed(cfg.mnemonic), arkadeConfig)
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     // Lazy-load the SDK for Ramps (onboard/offboard). Off the static import graph.
     // @ts-ignore — resolved at runtime; a transitive dep of the WDK Arkade module.

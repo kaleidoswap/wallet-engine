@@ -45,6 +45,7 @@ import { isBolt11 } from '../../lib/bolt11'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { KaleidoswapSwap, type SwapQuoteRequest, type SwapExecuteRequest } from '../../swap/KaleidoswapSwap'
+import { resolveWalletSeed } from '../../lib/wallet-seed'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -112,7 +113,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-rln', () => import('@kaleidorg/wdk-wallet-rln'))
     const RlnWalletManager = mod.default ?? mod
-    this.manager = new RlnWalletManager(cfg.mnemonic, { nodeUrl: cfg.nodeUrl })
+    // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
+    // BIP-39 string validation (which throws "The seed phrase is invalid").
+    this.manager = new RlnWalletManager(resolveWalletSeed(cfg.mnemonic), { nodeUrl: cfg.nodeUrl })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
   }
