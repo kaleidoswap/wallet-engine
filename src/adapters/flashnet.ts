@@ -11,3 +11,6 @@
  */
 export { flashnetClientManager } from '../lib/flashnet-client-manager'
 export * from '../lib/orchestra-client'
+// Re-export the SDK error guard so consumers classify Flashnet errors through
+// the engine (no direct `@flashnet/sdk` dependency in the host).
+export { isFlashnetError } from '@flashnet/sdk'

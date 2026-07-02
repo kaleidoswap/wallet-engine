@@ -1,6 +1,6 @@
 {
   "name": "@kaleidorg/wallet-engine",
-  "version": "1.0.0-beta.38",
+  "version": "1.0.0-beta.39",
   "description": "WDK-based multi-protocol wallet engine (Spark, RGB/RLN, Liquid, Arkade): IProtocolAdapter contract + WDK adapters, cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.",
   "type": "module",
   "main": "dist/index.js",
@@ -42,6 +42,10 @@
       "types": "./dist/swap/index.d.ts",
       "default": "./dist/swap/index.js"
     },
+    "./format": {
+      "types": "./dist/format.d.ts",
+      "default": "./dist/format.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
@@ -56,31 +60,24 @@
     "dist"
   ],
   "dependencies": {
-    "@noble/curves": "^2.0.1",
-    "@noble/hashes": "^2.2.0",
-    "@scure/base": "^2.2.0",
-    "@scure/bip32": "^1.5.0",
-    "@scure/bip39": "^1.4.0",
-    "@scure/btc-signer": "^2.2.0"
-  },
-  "peerDependencies": {
-    "kaleido-sdk": "^0.1.6"
-  },
-  "peerDependenciesMeta": {
-    "kaleido-sdk": {
-      "optional": true
-    }
-  },
-  "optionalDependencies": {
     "@arkade-os/boltz-swap": "^0.3.22",
     "@arkade-os/sdk": "^0.4.19",
     "@arkade-os/wdk": "^0.1.4",
     "@buildonspark/spark-sdk": "^0.7.10",
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2",
-    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.2",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
-    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17"
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.2.0",
+    "@scure/base": "^2.2.0",
+    "@scure/bip32": "^1.5.0",
+    "@scure/bip39": "^1.4.0",
+    "@scure/btc-signer": "^2.2.0",
+    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
+    "kaleido-sdk": "^0.1.6"
+  },
+  "optionalDependencies": {
+    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.2"
   },
   "devDependencies": {
     "@arkade-os/boltz-swap": "^0.3.22",
