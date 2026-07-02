@@ -152,6 +152,21 @@ class SparkClientManager {
   }
 
   /**
+   * Adopt an externally-owned SparkWallet (e.g. the one the WDK Spark adapter
+   * holds) as this manager's wallet, WITHOUT initializing a second wallet. Lets
+   * hosts that drive Spark through the WDK adapter keep using the flashnet/bridge
+   * glue that reads the wallet via `getWallet()`/`getConfig()`. Idempotent per
+   * wallet instance. `mnemonic` is intentionally empty — adopted wallets never
+   * re-derive; only `network` is read downstream.
+   */
+  adoptExternalWallet(wallet: any, network: string): void {
+    if (!wallet || this.wallet === wallet) return
+    this.wallet = wallet
+    this.config = { protocol: 'SPARK', network: network as SparkConfig['network'], mnemonic: '' }
+    this.installTokenSendRecorder(this.wallet)
+  }
+
+  /**
    * Wrap `transferTokens` so every outgoing token transfer — regardless of
    * caller (SparkAdapter.sendAsset, Flashnet swaps / liquidity, or any future
    * path) — is persisted to the sent-token outbox.

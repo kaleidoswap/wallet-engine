@@ -165,6 +165,17 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     // out of the static import graph so this sub-path stays SDK-free until used.
     // @ts-ignore — resolved at runtime; a transitive dep of the WDK Spark module.
     this.sdk = await loadWdkModule('@buildonspark/spark-sdk', () => import('@buildonspark/spark-sdk'))
+    // Back the native sparkClientManager singleton with this adapter's underlying
+    // SparkWallet, so host glue that reads Spark through it (Flashnet AMM, the
+    // Orchestra bridge) keeps working under the WDK backend — no second wallet, no
+    // derivation drift. Lazy-imported so spark-client-manager (which statically
+    // imports spark-sdk) never enters this sub-path's static graph.
+    try {
+      const { sparkClientManager } = await import('../../lib/spark-client-manager')
+      sparkClientManager.adoptExternalWallet((this.account as any)?._wallet, this.network)
+    } catch {
+      /* flashnet/bridge glue is optional — never block connect on it */
+    }
     this.connected = true
   }
 
