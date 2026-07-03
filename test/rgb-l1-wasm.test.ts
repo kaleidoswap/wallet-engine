@@ -51,6 +51,23 @@ describe('RgbLibWasmAdapter', () => {
     expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 2500, unconfirmed: 200, total: 2500 })
   })
 
+  it('adds colored BTC sats to the spendable on-chain total', async () => {
+    const adapter = connected({
+      getBtcBalance: () => ({
+        vanilla: { settled: 2500, spendable: 2400, future: 2700 },
+        colored: { settled: 800, spendable: 700, future: 900 },
+      }),
+    })
+    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 3300, unconfirmed: 300, total: 3100 })
+  })
+
+  it('reads flat BTC balance aliases from rgb-lib', async () => {
+    const adapter = connected({
+      getBtcBalance: () => ({ confirmed: '12000', available: 11000n, unconfirmed: 12500 }),
+    })
+    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 12000, unconfirmed: 500, total: 11000 })
+  })
+
   it('refuses BTC Lightning invoices, LN sends, and invoice decoding (on-chain only)', async () => {
     const adapter = connected({})
     await expect(adapter.createInvoice({ asset: 'BTC' } as any)).rejects.toThrow(/no Lightning/i)
@@ -100,7 +117,7 @@ describe('RgbLibWasmAdapter', () => {
     expect(witness[0]).toEqual({ assetId: 'rgb:X', assignment: 'Any' })
   })
 
-  it('sends an asset via begin → signPsbt → end with bigint coercion', async () => {
+  it('sends an asset via begin → signPsbt → end with rgb-lib recipient casing', async () => {
     const seen: any = {}
     const adapter = connected({
       sendBegin: async (online: any, map: any, donation: any, feeRate: any, minConf: any) => {
@@ -114,11 +131,18 @@ describe('RgbLibWasmAdapter', () => {
     expect(res).toMatchObject({ txid: 'sent', signed: 'signed:unsigned-psbt' })
     expect(seen.online).toEqual({ _online: true })
     expect(seen.feeRate).toBe(3n)
-    expect(seen.map['rgb:USDT'][0]).toMatchObject({ recipientId: 'utxob:x', amount: 42n })
+    expect(seen.map['rgb:USDT'][0]).toMatchObject({
+      recipientId: 'utxob:x',
+      recipient_id: 'utxob:x',
+      assignment: { Fungible: 42 },
+    })
+    expect(seen.map['rgb:USDT'][0].amount).toBeUndefined()
     // No transportEndpoints supplied ⇒ falls back to the wallet's configured ones.
     expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://proxy.example'])
+    expect(seen.map['rgb:USDT'][0].transport_endpoints).toEqual(['rpc://proxy.example'])
     // Blinded send ⇒ no witnessData key.
     expect(seen.map['rgb:USDT'][0].witnessData).toBeUndefined()
+    expect(seen.map['rgb:USDT'][0].witness_data).toBeUndefined()
   })
 
   it('routes the consignment to the invoice transport endpoints (not the sender default)', async () => {
@@ -132,15 +156,17 @@ describe('RgbLibWasmAdapter', () => {
       sendEnd: async () => ({ txid: 'sent' }),
     })
     await adapter.sendAsset({
-      token: 'rgb:USDT',
-      recipient: 'utxob:x',
+      assetId: 'rgb:USDT',
+      recipientId: 'utxob:x',
       amount: 1,
+      assignment: { type: 'Fungible', value: 1 },
       transportEndpoints: ['rpc://recipient.proxy'],
-    })
+    } as any)
     expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://recipient.proxy'])
+    expect(seen.map['rgb:USDT'][0].transport_endpoints).toEqual(['rpc://recipient.proxy'])
   })
 
-  it('passes witnessData (camelCase, bigint amountSat) for a witness-invoice send', async () => {
+  it('passes witness data in both wasm and desktop-client casings', async () => {
     const seen: any = {}
     const adapter = connected({
       sendBegin: async (_o: any, map: any) => {
@@ -154,9 +180,10 @@ describe('RgbLibWasmAdapter', () => {
       token: 'rgb:USDT',
       recipient: 'witness-rid',
       amount: 7,
-      witnessData: { amount_sat: 1200 },
+      witness_data: { amount_sat: 1200 },
     })
-    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200n })
+    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200, amount_sat: 1200 })
+    expect(seen.map['rgb:USDT'][0].witness_data).toEqual({ amountSat: 1200, amount_sat: 1200 })
   })
 
   it('normalizes the rgb-lib transaction type (deposit/send → User, machinery kept)', async () => {
@@ -177,6 +204,18 @@ describe('RgbLibWasmAdapter', () => {
     expect((byId.wd.protocolData as any).transactionType).toBe('User')
     expect(byId.wd.type).toBe('send')
     expect((byId.utxos.protocolData as any).transactionType).toBe('CreateUtxos')
+  })
+
+  it('normalizes BTC transaction amount aliases and signed amounts', async () => {
+    const adapter = connected({
+      listTransactions: () => [
+        { txid: 'dep', amountSat: 12000, direction: 'Incoming', confirmationTime: 101 },
+        { txid: 'wd', amount: -7000, confirmation_time: { timestamp: 102 } },
+      ],
+    })
+    const txs = await adapter.listTransactions()
+    expect(txs[0]).toMatchObject({ id: 'dep', type: 'receive', amount: 12000, timestamp: 101000 })
+    expect(txs[1]).toMatchObject({ id: 'wd', type: 'send', amount: 7000, timestamp: 102000 })
   })
 
   it('sends BTC on-chain via sendBtcBegin → signPsbt → sendBtcEnd', async () => {
@@ -257,6 +296,93 @@ describe('RgbLibWasmAdapter', () => {
     await adapter.disconnect()
     expect((adapter as any).online).toBeNull()
     expect(adapter.isConnected()).toBe(false)
+  })
+
+  // ---- Backup / VSS ------------------------------------------------------
+  it('backup returns the encrypted bytes from rgb-lib', async () => {
+    const bytes = new Uint8Array([1, 2, 3])
+    const adapter = connected({ backup: (pw: string) => (pw === 'pw' ? bytes : new Uint8Array()) })
+    expect(await adapter.backup('pw')).toBe(bytes)
+  })
+
+  it('restoreBackup forwards bytes + password positionally', async () => {
+    const seen: any = {}
+    const bytes = new Uint8Array([9, 9])
+    const adapter = connected({
+      restoreBackup: (b: Uint8Array, pw: string) => {
+        seen.b = b
+        seen.pw = pw
+      },
+    })
+    await adapter.restoreBackup({ backupBytes: bytes, password: 'secret' })
+    expect(seen.b).toBe(bytes)
+    expect(seen.pw).toBe('secret')
+  })
+
+  it('backupInfo coerces the rgb-lib boolean to { required }', async () => {
+    const adapter = connected({ backupInfo: () => 1 as any })
+    expect(await adapter.backupInfo()).toEqual({ required: true })
+  })
+
+  it('configureVssBackup forwards (serverUrl, storeId, signingKeyHex) positionally', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      configureVssBackup: (url: string, store: string, key: string) => {
+        seen.url = url
+        seen.store = store
+        seen.key = key
+      },
+    })
+    await adapter.configureVssBackup({
+      serverUrl: 'https://vss.kaleidoswap.com/vss',
+      storeId: 'wallet-abc',
+      signingKeyHex: 'ab'.repeat(32),
+    })
+    expect(seen).toEqual({
+      url: 'https://vss.kaleidoswap.com/vss',
+      store: 'wallet-abc',
+      key: 'ab'.repeat(32),
+    })
+  })
+
+  it('vssBackup normalizes a BigInt server version to a plain number', async () => {
+    const adapter = connected({ vssBackup: async () => 7n })
+    expect(await adapter.vssBackup()).toEqual({ serverVersion: 7 })
+  })
+
+  it('vssBackupInfo maps snake_case + BigInt to camelCase, no BigInt', async () => {
+    const adapter = connected({
+      vssBackupInfo: async () => ({ backup_exists: true, server_version: 12n, backup_required: false }),
+    })
+    const info = await adapter.vssBackupInfo()
+    expect(info).toEqual({ backupExists: true, serverVersion: 12, backupRequired: false })
+    expect(typeof info.serverVersion).toBe('number')
+  })
+
+  it('vssBackupInfo tolerates a missing server_version (null)', async () => {
+    const adapter = connected({
+      vssBackupInfo: async () => ({ backup_exists: false, backup_required: true }),
+    })
+    expect(await adapter.vssBackupInfo()).toEqual({
+      backupExists: false,
+      serverVersion: null,
+      backupRequired: true,
+    })
+  })
+
+  it('vssRestoreBackup and disableVssBackup forward to the account', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      vssRestoreBackup: async () => {
+        seen.restored = true
+      },
+      disableVssBackup: () => {
+        seen.disabled = true
+      },
+    })
+    await adapter.vssRestoreBackup()
+    await adapter.disableVssBackup()
+    expect(seen).toEqual({ restored: true, disabled: true })
   })
 })
 

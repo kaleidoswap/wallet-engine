@@ -33,6 +33,9 @@ import {
   ConnectionInfo,
   TransactionFilter,
   TransactionStatus,
+  QuoteRequest,
+  Quote,
+  SwapResult,
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
@@ -41,6 +44,8 @@ import { loadWdkModule } from './moduleLoader'
 import { isBolt11 } from '../../lib/bolt11'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
+import { KaleidoswapSwap, type SwapQuoteRequest, type SwapExecuteRequest } from '../../swap/KaleidoswapSwap'
+import { resolveWalletSeed } from '../../lib/wallet-seed'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -48,6 +53,8 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   mnemonic: string
   /** Base URL of the RLN HTTP API (e.g. http://localhost:3001). */
   nodeUrl: string
+  /** KaleidoSwap maker API base URL (for cross-asset RFQ swaps). */
+  makerUrl?: string
   /** BIP-44 account index (default 0). */
   accountIndex?: number
 }
@@ -90,16 +97,25 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly capabilities = PROTOCOL_OPERATIONS.RGB_LN
   readonly supportedLayers: Layer[] = getCapabilities('RGB_LN').layers
 
+  /** KaleidoSwap maker base URL, for cross-asset RFQ swaps (Option C: swaps live in the adapter). */
+  private makerUrl = ''
+  /** Lazily-built maker swap client, bound to this connected account. */
+  private swap: KaleidoswapSwap | null = null
+
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
     const cfg = config as RlnAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB_LN', 'CONFIG')
     if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB_LN', 'CONFIG')
     this.network = cfg.network ?? 'mainnet'
+    this.makerUrl = cfg.makerUrl ?? ''
+    this.swap = null
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-rln', () => import('@kaleidorg/wdk-wallet-rln'))
     const RlnWalletManager = mod.default ?? mod
-    this.manager = new RlnWalletManager(cfg.mnemonic, { nodeUrl: cfg.nodeUrl })
+    // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
+    // BIP-39 string validation (which throws "The seed phrase is invalid").
+    this.manager = new RlnWalletManager(resolveWalletSeed(cfg.mnemonic), { nodeUrl: cfg.nodeUrl })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
   }
@@ -147,10 +163,20 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RLN_PROFILE)]
 
-    // RGB assets (NIA — fungible: USDT/XAUT)
-    const res: any = await this.account.listAssets(['Nia'])
-    const nia: any[] = res?.nia ?? []
-    for (const a of nia) out.push(rgbNiaAsset(a, RLN_PROFILE))
+    // All fungible RGB schemas: NIA (USDT/XAUT), CFA (collectible fungible),
+    // IFA (inflatable fungible). rgbNiaAsset is a generic fungible mapper
+    // (id/name/ticker/precision/balance), so it covers all three. Older RLN
+    // nodes' rgb-lib doesn't know the IFA schema and can reject it as a filter
+    // value, so fall back to the standard set; either way we map whatever
+    // fungible arrays the node returns.
+    let res: any
+    try {
+      res = await this.account.listAssets(['Nia', 'Cfa', 'Ifa'])
+    } catch {
+      res = await this.account.listAssets(['Nia', 'Cfa'])
+    }
+    const fungibles: any[] = [...(res?.nia ?? []), ...(res?.cfa ?? []), ...(res?.ifa ?? [])]
+    for (const a of fungibles) out.push(rgbNiaAsset(a, RLN_PROFILE))
     return out
   }
 
@@ -313,6 +339,52 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     await this.account.sendBtc(params)
     return { ok: true }
+  }
+
+  // --- Swaps (Option C: the adapter owns swaps, delegating to the WDK maker module) -------
+  /** Lazily bind the KaleidoSwap maker client to this connected account. */
+  private ensureSwap(): KaleidoswapSwap {
+    this.assertConnected()
+    if (!this.makerUrl) {
+      throw new ProtocolError('RLN swaps require a makerUrl in the adapter config', 'RGB_LN', 'CONFIG')
+    }
+    if (!this.swap) this.swap = new KaleidoswapSwap(this.account, { baseUrl: this.makerUrl })
+    return this.swap
+  }
+
+  /**
+   * Quote a cross-asset swap via the KaleidoSwap maker RFQ. The core `QuoteRequest`
+   * carries no layer hints, so callers pass `fromLayer`/`toLayer` as extra fields
+   * (the extension's swap-model does); they default to the RGB-LN layers.
+   */
+  async getSwapQuote(request: QuoteRequest): Promise<Quote> {
+    const req = request as SwapQuoteRequest
+    return this.ensureSwap().getQuote({
+      ...request,
+      fromLayer: req.fromLayer ?? 'RGB_LN',
+      toLayer: req.toLayer ?? 'RGB_LN',
+    })
+  }
+
+  /**
+   * Execute a previously-quoted swap. The maker needs the OUTPUT receiver
+   * address/format and the layer hints; callers carry them on the quote object.
+   */
+  async executeSwap(quote: Quote): Promise<SwapResult> {
+    const q = quote as Quote & Partial<SwapExecuteRequest>
+    return this.ensureSwap().executeSwap({
+      fromAsset: quote.fromAsset,
+      toAsset: quote.toAsset,
+      fromAmount: quote.fromAmount,
+      fromLayer: q.fromLayer ?? 'RGB_LN',
+      toLayer: q.toLayer ?? 'RGB_LN',
+      receiverAddress: q.receiverAddress ?? '',
+      receiverAddressFormat: q.receiverAddressFormat ?? 'RGB_INVOICE',
+    })
+  }
+
+  async getSwapStatus(swapId: string): Promise<SwapResult> {
+    return this.ensureSwap().getSwapStatus(swapId)
   }
 
   // --- Escape hatch -------------------------------------------------------

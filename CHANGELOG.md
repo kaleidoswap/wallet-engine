@@ -7,6 +7,94 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.31] - 2026-07-01
+
+### Fixed
+- **RGB-L1 BTC on-chain balance reads 0 after unlock.** On restore from a *thin*
+  BDK snapshot (no revealed SPKs — the state left when an MV3 service-worker
+  teardown interrupts rgb-lib-wasm's async IndexedDB save), an incremental `sync`
+  can only re-query already-revealed SPKs and cannot rediscover on-chain BTC, so
+  the balance shows 0 despite real funds. `connect()` now runs a one-time
+  recovery: after an incremental sync, if BTC still reads 0 it runs `fullScan`
+  (BIP44 stop-gap) to rebuild the UTXO set from the indexer, then `flush()` so the
+  recovered state persists (normal incremental sync suffices thereafter). Both
+  calls are version-guarded (no-op on `@utexo/rgb-lib-wasm ≤ beta.2`, which lacks
+  `fullScan`/`flush`) and best-effort so a scan failure never blocks connect.
+  Requires `@utexo/rgb-lib-wasm ≥ 1.0.0-beta.3`.
+
+## [1.0.0-beta.30] - 2026-07-01
+
+### Added
+- **RGB wallet-state backup on the WASM (RGB-L1) adapter.** RGB is stateful —
+  allocations/consignments can't be rebuilt from the seed — so state must be
+  backed up after every settled transfer. Surfaced the rgb-lib backup/VSS
+  primitives on `RgbLibWasmAdapter` (and as optional `IProtocolAdapter` hooks):
+  - Local encrypted file: `backup(password)` (existing), `restoreBackup({ backupBytes, password })`,
+    `backupInfo()` (→ `{ required }`, "changed since last backup").
+  - Cloud (VSS): `configureVssBackup({ serverUrl, storeId, signingKeyHex })`,
+    `disableVssBackup()`, `vssBackup()` (→ `{ serverVersion }`),
+    `vssBackupInfo()` (→ `{ backupExists, serverVersion, backupRequired }`),
+    `vssRestoreBackup()`. rgb-lib encrypts client-side, so the VSS server only
+    stores ciphertext; the store is versioned (optimistic concurrency).
+  All calls route through the serialized account queue (rgb-lib-wasm is
+  single-threaded) and normalize BigInt → number so results survive the
+  extension's service-worker structured-clone boundary.
+
+## [1.0.0-beta.29] - 2026-06-30
+
+### Fixed
+- **RGB-L1 sends failing with "Insufficient total assignments" despite a
+  non-zero balance.** The WASM adapter now runs a `sync` + `refresh` immediately
+  before `sendBegin` (and before `createUtxosBegin`). rgb-lib's `send` only
+  spends *settled* allocations it knows about locally; after a service-worker
+  restart or IndexedDB restore the received transfer had not been promoted to
+  settled, so the spend saw zero spendable allocations even though the balance
+  UI (which polls `refreshBalances`) showed funds.
+
+### Added
+- **Durable persistence via `flush()`.** Every state-mutating WASM operation
+  (`refresh`, `blindReceive`/`witnessReceive`, `createUtxos`, `sendAsset`,
+  `sendBtcOnchain`, transfer maintenance) now durably commits to IndexedDB
+  before returning. Version-guarded: a no-op on `@utexo/rgb-lib-wasm@1.0.0-beta.2`
+  (where `flush()` is absent), active once the bindings are bumped.
+- **Missing `IProtocolAdapter` RGB hooks now implemented on the WASM adapter:**
+  `listRgbUnspents()` (→ `listUnspents`), `estimateRgbFee(blocks)`
+  (→ `getFeeEstimation`), and `getRgbDetailedBalance()` (vanilla/colored split).
+- **Transfer maintenance + metadata helpers:** `getInvoiceStatus({ invoice })`,
+  `getAssetMetadata(assetId)`, `failRgbTransfers()` and `deleteRgbTransfers()`
+  to clear stuck pending transfers that hold allocations.
+
+## [1.0.0-beta.28] - 2026-06-30
+
+### Fixed
+- **RGB-L1 withdraw routing and BTC balance parity with rgb-lib clients.** The
+  WASM adapter now sends RGB recipient maps using the same snake_case fields as
+  the desktop rgb-lib flow while keeping the wasm camelCase aliases, uses plain
+  numeric `{ Fungible: amount }` assignments for sends, and exposes the
+  spendable BTC total across both vanilla and colored on-chain buckets so
+  RGB-L1 wallets do not show a misleading zero when funds are held in colored
+  UTXOs.
+
+## [1.0.0-beta.27] - 2026-06-30
+
+### Fixed
+- **RGB-L1 BTC balance, BTC history, and RGB sends.** The WASM adapter now reads
+  flat BTC balance aliases (`confirmed`/`available`/`unconfirmed`) in addition
+  to the `vanilla` split, normalizes BTC transaction amount aliases and signed
+  amounts for history, and builds rgb-lib recipient maps with the required
+  `assignment` field for RGB asset withdrawals.
+
+## [1.0.0-beta.26] - 2026-06-30
+
+### Fixed
+- **RGB-L1 balances and activity after unlock.** `rgbAssetBalance` now accepts
+  the raw rgb-lib/WASM balance aliases (`total`/`available`/`pending`) and
+  BigInt/string values, while preserving the detailed RGB fields
+  (`settled`/`future`/`spendable`) that the extension uses for expanded balance
+  views. The WASM adapter also normalizes asset records whose balance fields are
+  flattened onto the asset object, so RGB assets no longer collapse to 0 after a
+  detail balance refresh.
+
 ## [1.0.0-beta.22] - 2026-06-29
 
 ### Fixed

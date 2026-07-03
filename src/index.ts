@@ -21,7 +21,11 @@ export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type Protoco
 export { PROTOCOL_OPERATIONS, getProtocolOperations, protocolSupportsOperation, type ProtocolCapability } from './capabilities/operations'
 
 // Platform ports (injected per host)
-export type { IStorageProvider, IRuntimeProvider, PlatformContext } from './ports'
+export type { IStorageProvider, IRuntimeProvider, PlatformContext, Logger } from './ports'
+// Platform injection — consumers call setPlatform() once at startup to supply
+// storage/runtime/logger (extension: chrome.storage-backed; RN: AsyncStorage-backed).
+// Engine modules that persist state (e.g. Spark sent-token records) read getPlatform().storage.
+export { setPlatform, getPlatform, getLogger, consoleLogger } from './ports'
 
 // Shared constants
 export { LIQUID_USDT_ASSET_ID } from './constants'
@@ -74,6 +78,31 @@ export {
   type LiteBucket,
   type LiteBalances,
 } from './disclosure'
+
+// Arkade VTXO lifecycle + delegator management (platform-agnostic core).
+// @arkade-os/sdk is referenced by TYPE only here, so this is safe for the
+// SDK-free root barrel. The extension drives it from chrome.alarms; consumers
+// supply the VtxoManager/Wallet obtained via the native arkadeClientManager.
+export {
+  runArkadeVtxoLifecycle,
+  delegateSpendableVtxos,
+  getArkadeDelegateInfo,
+  resolveArkadeLifecycleSettings,
+  sanitizeDelegatorUrl,
+  sanitizeDelegationEnabled,
+  sanitizeVtxoThresholdSeconds,
+  ARKADE_DELEGATOR_URLS,
+  DEFAULT_DELEGATOR_URL,
+  DEFAULT_VTXO_THRESHOLD_SECONDS,
+  type ArkadeNetwork,
+  type ArkadeLifecycleSettings,
+  type ArkadeLifecycleRunConfig,
+  type ArkadeLifecycleCallbacks,
+  type ArkadeRecoverableBalance,
+  type ArkadeVtxoLifecycleResult,
+  type ArkadeDelegateResult,
+  type ArkadeDelegateInfo,
+} from './lib/arkade-vtxo-lifecycle'
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'

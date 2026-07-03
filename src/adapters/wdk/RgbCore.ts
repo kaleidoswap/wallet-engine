@@ -80,7 +80,7 @@ export function rgbNiaAsset(
     name?: string
     ticker?: string
     precision?: number | string
-    balance?: { spendable?: number; settled?: number; future?: number }
+    balance?: RgbBalanceLike
   },
   profile: RgbProfile
 ): UnifiedAsset {
@@ -109,19 +109,37 @@ export function rgbNiaAsset(
  * `??`) so a present-but-zero `spendable` doesn't hide a real `settled`/`future`
  * — a just-received asset has spendable: 0 but a non-zero balance.
  */
-export function rgbAssetBalance(raw?: { spendable?: number; settled?: number; future?: number }): AssetBalance {
+export type RgbBalanceLike = {
+  spendable?: number | string | bigint
+  settled?: number | string | bigint
+  future?: number | string | bigint
+  available?: number | string | bigint
+  total?: number | string | bigint
+  pending?: number | string | bigint
+  offchain_outbound?: number | string | bigint
+  offchain_inbound?: number | string | bigint
+  locked?: number | string | bigint
+}
+
+export function rgbAssetBalance(raw?: RgbBalanceLike): AssetBalance {
   const b = raw ?? {}
-  const settled = Number(b.settled ?? 0)
-  const future = Number(b.future ?? 0)
-  const spendable = Number(b.spendable ?? settled)
+  const settled = toFiniteNumber(b.settled ?? b.total ?? 0)
+  const future = toFiniteNumber(b.future ?? b.pending ?? settled)
+  const spendable = toFiniteNumber(b.spendable ?? b.available ?? settled)
   const owned = future || settled || spendable || 0
   return {
     total: owned,
     available: spendable,
     pending: Math.max(0, future - settled),
+    locked: toFiniteNumber(b.offchain_outbound ?? b.locked ?? 0),
+    settled,
+    future,
+    spendable,
+    offchain_outbound: toFiniteNumber(b.offchain_outbound ?? b.locked ?? 0),
+    offchain_inbound: toFiniteNumber(b.offchain_inbound ?? 0),
     totalDisplay: String(owned),
     availableDisplay: String(spendable),
-  }
+  } as AssetBalance
 }
 
 function makeBalance(total: number): AssetBalance {
@@ -132,4 +150,10 @@ function makeBalance(total: number): AssetBalance {
     totalDisplay: String(total),
     availableDisplay: String(total),
   }
+}
+
+function toFiniteNumber(value: number | string | bigint | null | undefined): number {
+  if (typeof value === 'bigint') return Number(value)
+  const n = Number(value ?? 0)
+  return Number.isFinite(n) ? n : 0
 }
