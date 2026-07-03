@@ -174,7 +174,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       accountXpubVanilla: keys.accountXpubVanilla ?? keys.account_xpub_vanilla,
       accountXpubColored: keys.accountXpubColored ?? keys.account_xpub_colored,
       vanillaKeychain: null,
-      supportedSchemas: ['Nia', 'Ifa'],
+      supportedSchemas: ['Nia', 'Cfa', 'Ifa'],
     }
 
     const WasmWallet = mod.WasmWallet
@@ -293,7 +293,10 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RGB_L1_PROFILE)]
     const res: any = await this.account.listAssets([])
-    const assets: any[] = Array.isArray(res) ? res : [...(res?.nia ?? []), ...(res?.ifa ?? [])]
+    // All fungible schemas: NIA + CFA + IFA (rgbNiaAsset maps any fungible).
+    const assets: any[] = Array.isArray(res)
+      ? res
+      : [...(res?.nia ?? []), ...(res?.cfa ?? []), ...(res?.ifa ?? [])]
     for (const a of assets) out.push(rgbNiaAsset(normalizeAsset(a), RGB_L1_PROFILE))
     return out
   }

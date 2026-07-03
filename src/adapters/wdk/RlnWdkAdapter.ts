@@ -163,10 +163,20 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RLN_PROFILE)]
 
-    // RGB assets (NIA — fungible: USDT/XAUT)
-    const res: any = await this.account.listAssets(['Nia'])
-    const nia: any[] = res?.nia ?? []
-    for (const a of nia) out.push(rgbNiaAsset(a, RLN_PROFILE))
+    // All fungible RGB schemas: NIA (USDT/XAUT), CFA (collectible fungible),
+    // IFA (inflatable fungible). rgbNiaAsset is a generic fungible mapper
+    // (id/name/ticker/precision/balance), so it covers all three. Older RLN
+    // nodes' rgb-lib doesn't know the IFA schema and can reject it as a filter
+    // value, so fall back to the standard set; either way we map whatever
+    // fungible arrays the node returns.
+    let res: any
+    try {
+      res = await this.account.listAssets(['Nia', 'Cfa', 'Ifa'])
+    } catch {
+      res = await this.account.listAssets(['Nia', 'Cfa'])
+    }
+    const fungibles: any[] = [...(res?.nia ?? []), ...(res?.cfa ?? []), ...(res?.ifa ?? [])]
+    for (const a of fungibles) out.push(rgbNiaAsset(a, RLN_PROFILE))
     return out
   }
 
