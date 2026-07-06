@@ -65,6 +65,8 @@ import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 /** Default maximum fee for Lightning payments (sats). */
 const DEFAULT_MAX_FEE_SATS = 1000;
 
+import { waitForLightningSendSettlement } from "../lib/spark-lightning-settlement";
+
 // Pure helpers — timeout wrapper, byte/hex/token utilities, expiry parsing,
 // isEmptyBalance — live in ./helpers.ts. Balance cache state +
 // getSparkBalanceCached / invalidateSparkBalanceCache live in
@@ -661,11 +663,12 @@ export class SparkAdapter implements IProtocolAdapter {
       const lower = destination.toLowerCase();
 
       if (lower.startsWith("ln")) {
-        // Lightning payment — payLightningInvoice is synchronous: when it
-        // returns without throwing the payment has been dispatched.  The
-        // result is a LightningSendRequest whose ID is *not* queryable via
-        // getTransfer, so we treat a successful return as 'confirmed' to
-        // avoid the polling path (which would fail with "Payment not found").
+        // Lightning payment — payLightningInvoice only DISPATCHES the payment
+        // to the SSP; settlement is asynchronous and can still fail (no route,
+        // fee cap, …). Reporting 'confirmed' on dispatch made WebLN/NWC
+        // callers believe zaps succeeded when they never settled, and denied
+        // them the preimage NIP-47 requires — so poll the send request until
+        // it reaches a terminal state.
         const extReq = request as PaymentRequest & { maxFee?: number };
         // For amountless ("0-sat") BOLT-11 invoices the Spark SDK requires
         // `amountSatsToSend` to be passed explicitly. We always forward
@@ -682,18 +685,25 @@ export class SparkAdapter implements IProtocolAdapter {
         const amountSats = Number(
           lnResult.amountSats ?? lnResult.totalValue ?? request.amount ?? 0,
         );
-        const feeSats = Number(lnResult.feeSats ?? 0);
-        const rawStatus = mapTransferStatus(lnResult.status as string);
+        const timestamp =
+          lnResult.createdTime instanceof Date ? lnResult.createdTime.getTime() : Date.now();
+
+        const settlement = await waitForLightningSendSettlement(wallet, id, lnResult);
+        if (settlement.status === "failed") {
+          throw new ProtocolError(
+            `Lightning payment failed (${settlement.rawStatus})`,
+            "SPARK",
+            "LIGHTNING_PAYMENT_FAILED",
+          );
+        }
 
         return {
           paymentHash: id,
+          preimage: settlement.preimage,
           amount: amountSats,
-          fee: feeSats,
-          // If the call returned without throwing, treat as confirmed
-          // (Lightning payments settle atomically).
-          status: rawStatus === "failed" ? "failed" : "confirmed",
-          timestamp:
-            lnResult.createdTime instanceof Date ? lnResult.createdTime.getTime() : Date.now(),
+          fee: settlement.feeSats,
+          status: settlement.status,
+          timestamp,
         };
       }
 
