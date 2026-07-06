@@ -42,6 +42,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
+import { waitForLightningSendSettlement } from '../../lib/spark-lightning-settlement'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import {
   formatAmount,
@@ -377,9 +378,10 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     const timestamp = Date.now()
 
     try {
-      // 1) Lightning send (WDK account). Settles atomically — a clean return
-      //    means dispatched; its id is not queryable via getTransfer, so we
-      //    treat a non-failed return as confirmed.
+      // 1) Lightning send (WDK account). payLightningInvoice only DISPATCHES
+      //    the payment — settlement is asynchronous on the SSP and can still
+      //    fail. Poll the send request (via the raw wallet) to a terminal
+      //    state so callers get the truth plus the preimage NIP-47 requires.
       if (isBolt11(destination)) {
         const maxFee = (request as any).maxFeeSats ?? (request as any).maxFee ?? DEFAULT_MAX_FEE_SATS
         const result: any = await this.account.payLightningInvoice({
@@ -388,12 +390,24 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
           // Amountless (0-sat) invoices require an explicit amount; omit otherwise.
           ...(request.amount && request.amount > 0 ? { amountSatsToSend: request.amount } : {}),
         })
-        const raw = mapTransferStatus(result?.status)
+        const id = String(result?.id ?? result?.paymentHash ?? '')
+        // Raw wallet access is best-effort: without it the poller degrades to
+        // 'pending' rather than failing a payment that was already dispatched.
+        const rawWallet = (this.account as any)?._wallet ?? {}
+        const settlement = await waitForLightningSendSettlement(rawWallet, id, result ?? {})
+        if (settlement.status === 'failed') {
+          throw new ProtocolError(
+            `Lightning payment failed (${settlement.rawStatus})`,
+            'SPARK',
+            'LIGHTNING_PAYMENT_FAILED',
+          )
+        }
         return {
           paymentHash: String(result?.paymentHash ?? result?.id ?? ''),
+          preimage: settlement.preimage,
           amount: Number(result?.amountSats ?? result?.totalValue ?? request.amount ?? 0),
-          fee: Number(result?.feeSats ?? 0),
-          status: raw === 'failed' ? 'failed' : 'confirmed',
+          fee: settlement.feeSats || Number(result?.feeSats ?? 0),
+          status: settlement.status,
           timestamp: result?.createdTime instanceof Date ? result.createdTime.getTime() : timestamp,
         }
       }
