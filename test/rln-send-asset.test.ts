@@ -1,12 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { RlnWdkAdapter } from '../src/adapters/wdk/RlnWdkAdapter'
 
-/**
- * sendAsset must translate the extension's flat, decoded-invoice params into the
- * node-shaped recipient_map the WDK account expects. Passing the flat params
- * straight through left recipientMap undefined and the RLN node rejected the
- * body with "Failed to deserialize the JSON body into the target type".
- */
 function connectedRln() {
   const calls: any[] = []
   const adapter = new RlnWdkAdapter()
