@@ -193,11 +193,47 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   // --- Invoices -----------------------------------------------------------
+  /**
+   * The raw kaleido-sdk RlnClient behind the WDK account. We build the node's
+   * exact request bodies here (asset_id/asset_amount for LN, witness +
+   * expiration_timestamp + Fungible assignment for on-chain) rather than route
+   * through the WDK wrapper's invoice/payment helpers, whose bodies the node
+   * rejects with "Failed to deserialize the JSON body into the target type"
+   * (fixed upstream in @kaleidorg/wdk-wallet-rln, but building them here keeps
+   * this adapter correct independent of the installed wrapper version).
+   */
+  private get node(): any {
+    const raw = (this.account as any)?._rln
+    if (!raw) throw new ProtocolError('RLN node client unavailable', 'RGB_LN', 'NOT_CONNECTED')
+    return raw
+  }
+
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
-    // RGB asset invoice (on-chain or LN) when an asset is specified.
-    if (request.asset && request.asset !== 'BTC') {
-      const inv: any = await this.account.createRgbInvoice({
+    const isAsset = !!request.asset && request.asset !== 'BTC'
+    const wantsOnchain = request.layer === 'RGB_L1' || request.layer === 'BTC_L1'
+
+    // RGB asset over Lightning: /lninvoice with asset_id + asset_amount. The
+    // node needs a BTC carrier amt_msat; default to 3000 sat like the desktop.
+    if (isAsset && !wantsOnchain) {
+      const inv: any = await this.node.createLNInvoice({
+        amt_msat: request.amount != null ? request.amount * 1000 : 3_000_000,
+        expiry_sec: request.expirySeconds ?? 3600,
+        asset_id: request.asset,
+        ...(request.assetAmount != null ? { asset_amount: request.assetAmount } : {}),
+      })
+      return {
+        invoice: inv?.invoice ?? '',
+        paymentHash: inv?.payment_hash ?? '',
+        amount: request.assetAmount,
+        expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
+        description: request.description,
+      }
+    }
+
+    // RGB asset on-chain (blinded/witness) invoice.
+    if (isAsset) {
+      const inv: any = await this.createRgbInvoice({
         assetId: request.asset,
         amount: request.assetAmount,
         durationSeconds: request.expirySeconds,
@@ -206,15 +242,17 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
         invoice: inv?.invoice ?? '',
         paymentHash: inv?.recipient_id ?? '',
         amount: request.assetAmount,
-        expiresAt: inv?.expiration_timestamp ? inv.expiration_timestamp * 1000 : Date.now() + (request.expirySeconds ?? 3600) * 1000,
+        expiresAt: inv?.expiration_timestamp
+          ? inv.expiration_timestamp * 1000
+          : Date.now() + (request.expirySeconds ?? 3600) * 1000,
         description: request.description,
       }
     }
+
     // BTC Lightning invoice.
-    const inv: any = await this.account.createLNInvoice({
-      amtMsat: request.amount != null ? request.amount * 1000 : undefined,
-      description: request.description,
-      expirySec: request.expirySeconds,
+    const inv: any = await this.node.createLNInvoice({
+      amt_msat: request.amount != null ? request.amount * 1000 : undefined,
+      expiry_sec: request.expirySeconds ?? 3600,
     })
     return {
       invoice: inv?.invoice ?? '',
@@ -232,8 +270,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       : await this.account.decodeRgbInvoice(invoice)
     return {
       paymentHash: d?.payment_hash ?? d?.recipient_id ?? '',
-      amount: d?.amount_msat != null ? Math.floor(d.amount_msat / 1000) : d?.amount,
-      amountMsat: d?.amount_msat,
+      // The node's DecodeLNInvoiceResponse uses `amt_msat` (not `amount_msat`);
+      // reading the wrong key dropped the BTC carrier amount entirely.
+      amount: d?.amt_msat != null ? Math.floor(d.amt_msat / 1000) : d?.amount,
+      amountMsat: d?.amt_msat,
       description: d?.description,
       expiresAt: d?.expiry_sec ? Date.now() + d.expiry_sec * 1000 : (d?.expiration_timestamp ?? 0) * 1000,
       destination: d?.payee_pubkey ?? d?.recipient_id ?? '',
@@ -245,8 +285,19 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   // --- Send ---------------------------------------------------------------
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
     this.assertConnected()
-    // Pays a BOLT11 or RGB-LN invoice through the node.
-    const r: any = await this.account.sendPayment({ invoice: request.invoice.trim() })
+    // Pays a BOLT11 or RGB-LN invoice through the node. Fixed-amount invoices
+    // need only `invoice`; a zero-amount BTC invoice needs amt_msat, and an
+    // open-amount RGB invoice needs asset_id + asset_amount (raw base units) —
+    // callers pass these as extra fields on the request.
+    const req = request as PaymentRequest & {
+      asset_id?: string
+      asset_amount?: number
+    }
+    const body: any = { invoice: request.invoice.trim() }
+    if (request.amount != null && request.amount > 0) body.amt_msat = request.amount * 1000
+    if (req.asset_id) body.asset_id = req.asset_id
+    if (req.asset_amount != null) body.asset_amount = req.asset_amount
+    const r: any = await this.node.sendPayment(body)
     return {
       paymentHash: r?.payment_hash ?? '',
       preimage: r?.payment_secret,
@@ -312,7 +363,22 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   // --- Optional protocol-specific hooks -----------------------------------
   async createRgbInvoice(params: any): Promise<any> {
     this.assertConnected()
-    return this.account.createRgbInvoice(params)
+    // Build the node's RgbInvoiceRequest: `witness` + `min_confirmations` are
+    // required, the expiry is an absolute `expiration_timestamp`, and the
+    // amount is a Fungible-typed `assignment` ({ type, value }).
+    const assetId = params?.assetId ?? params?.asset_id
+    const durationSeconds = params?.durationSeconds ?? params?.duration_seconds ?? 86400
+    const assignment =
+      params?.assignment ??
+      (params?.amount != null ? { type: 'Fungible', value: params.amount } : undefined)
+    const body: any = {
+      ...(assetId ? { asset_id: assetId } : {}),
+      expiration_timestamp: Math.floor(Date.now() / 1000) + durationSeconds,
+      min_confirmations: params?.minConfirmations ?? params?.min_confirmations ?? 1,
+      witness: params?.witness ?? true,
+      ...(assignment ? { assignment } : {}),
+    }
+    return this.node.createRgbInvoice(body)
   }
 
   async decodeRgbInvoice(params: any): Promise<any> {
