@@ -340,6 +340,54 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     return { ok: true }
   }
 
+  // --- RGB on-chain UTXO management ----------------------------------------
+  // The UTXO-management UI, blinded-receive colorable-UTXO count, and the
+  // create-UTXO modal's fee/balance hints are protocol-neutral (routed through
+  // `withRgbAdapter`). Forward them to the RLN node so the shared UI works on
+  // the RGB_LN path just like it does on RGB_L1 — otherwise it dead-ends with
+  // "listRgbUnspents not supported by RGB_LN".
+
+  async listRgbUnspents(): Promise<{
+    unspents: Array<{
+      utxo: { outpoint: string; btc_amount: number; colorable: boolean }
+      rgb_allocations: Array<{ asset_id?: string | null; assignment: unknown; settled: boolean }>
+    }>
+  }> {
+    this.assertConnected()
+    const res: any = await this.account.listUnspents()
+    return { unspents: res?.unspents ?? [] }
+  }
+
+  async createRgbUtxos(
+    params: { num?: number; size?: number; feeRate?: number; upTo?: boolean } = {},
+  ): Promise<{ success: boolean }> {
+    this.assertConnected()
+    await this.account.createUtxos({
+      up_to: params.upTo ?? false,
+      num: params.num ?? 3,
+      size: params.size ?? 3000,
+      fee_rate: params.feeRate ?? (await this.estimateRgbFee(6)).fee_rate,
+      skip_sync: false,
+    })
+    return { success: true }
+  }
+
+  async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
+    this.assertConnected()
+    const res: any = await this.account.estimateFee({ blocks })
+    return { fee_rate: res?.fee_rate ?? 1 }
+  }
+
+  async getRgbDetailedBalance(): Promise<{
+    vanilla: { settled: number; future: number; spendable: number }
+    colored: { settled: number; future: number; spendable: number }
+  }> {
+    this.assertConnected()
+    const balance: any = await this.account.getBtcBalance()
+    const empty = { settled: 0, future: 0, spendable: 0 }
+    return { vanilla: balance?.vanilla ?? empty, colored: balance?.colored ?? empty }
+  }
+
   // --- Swaps (Option C: the adapter owns swaps, delegating to the WDK maker module) -------
   /** Lazily bind the KaleidoSwap maker client to this connected account. */
   private ensureSwap(): KaleidoswapSwap {
