@@ -134,9 +134,8 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   // --- Address / receive --------------------------------------------------
   async getReceiveAddress(assetId?: string): Promise<Address> {
     this.assertConnected()
-    if (assetId) {
-      // RGB receive = an RGB invoice bound to the asset.
-      const inv: any = await this.account.createRgbInvoice({ assetId })
+    if (assetId && assetId.toLowerCase() !== 'btc') {
+      const inv: any = await this.createRgbInvoice({ assetId })
       return { address: inv?.invoice ?? '', format: 'RGB_INVOICE', asset: assetId }
     }
     const address: string = await this.account.getAddress()
@@ -366,10 +365,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async getInvoiceStatus(params: { invoice: string }): Promise<any> {
     this.assertConnected()
-    const d: any = await this.account.decodeLNInvoice(params.invoice).catch(() => null)
-    const paymentHash = d?.payment_hash
-    if (!paymentHash) return { status: 'unknown' }
-    return this.account.getInvoiceStatus({ paymentHash })
+    return this.node.getInvoiceStatus({ invoice: params.invoice })
   }
 
   async sendAsset(params: any): Promise<any> {
