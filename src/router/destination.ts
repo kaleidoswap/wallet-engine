@@ -10,7 +10,38 @@
  * WDK detects within a protocol; this chooses BETWEEN protocols.
  */
 
+import { base58check } from '@scure/base'
+import { sha256 } from '@noble/hashes/sha2.js'
+
 import { ProtocolType, Layer, AddressFormat } from '../types/base'
+
+// Checksum-verified base58 decoder (double-SHA256), reused across calls. Uses
+// the same vetted primitives the rest of the engine already depends on.
+const base58checkDecode = base58check(sha256).decode
+
+// Liquid "blinded" (confidential) base58 version bytes, per rust-elements
+// AddressParams: 12 = Liquid mainnet, 23 = Liquid testnet, 4 = Elements regtest.
+const LIQUID_CONFIDENTIAL_VERSIONS = new Set([12, 23, 4])
+
+/**
+ * True for a legacy base58 *confidential* Liquid address (`VJL…`/`VT…` on
+ * mainnet and the testnet/regtest equivalents). Unlike the UNCONFIDENTIAL
+ * base58 forms — which are indistinguishable from arbitrary text / BTC and so
+ * are deliberately NOT matched — a confidential address decodes to a fixed
+ * 55-byte payload (`[blinded_prefix][inner version][33-byte blinding pubkey]
+ * [20-byte hash]`) whose first byte is the network's blinded prefix. That, plus
+ * the verified base58check checksum, makes it unambiguous and safe to identify:
+ * it still fails CLOSED (→ false) on junk, BTC (21-byte payload), or a bad
+ * checksum. The bech32/blech32 `lq1…` forms are handled by the regex instead.
+ */
+function isLiquidConfidentialBase58(dest: string): boolean {
+  try {
+    const payload = base58checkDecode(dest)
+    return payload.length === 55 && LIQUID_CONFIDENTIAL_VERSIONS.has(payload[0])
+  } catch {
+    return false
+  }
+}
 
 export type DestinationKind =
   | 'BOLT11' // Lightning invoice
@@ -61,9 +92,11 @@ const RE = {
   // Spark would be a fund-misrouting bug. Longest prefixes first.
   spark: /^(sparkrt|sparkt|sparkl|spark|sprt|spl)1[0-9a-z]{6,}$/i,
   arkade: /^(ark|tark)1[0-9a-z]{6,}$/i,
-  // Liquid bech32/blech32 only (confidential `lq1`, unconfidential `ex1`, +
-  // testnet/regtest variants). Legacy base58 Liquid prefixes are intentionally
-  // dropped: `VT`/`H`/`Gq` are indistinguishable from arbitrary text.
+  // Liquid bech32/blech32 (confidential `lq1`, unconfidential `ex1`, + testnet/
+  // regtest variants). Legacy *confidential* base58 addresses (`VJL…`/`VT…`) are
+  // matched separately via isLiquidConfidentialBase58 (checksum + fixed payload).
+  // The UNCONFIDENTIAL base58 forms stay dropped: `Q`/`H`/`Gq` are
+  // indistinguishable from arbitrary text / BTC.
   liquid: /^(lq1|tlq1|ex1|tex1|el1|ert1)[0-9a-z]{6,}$/i,
   // BTC bech32 (charset excludes 1/b/i/o) or legacy base58 (charset excludes
   // 0/O/I/l), length-bounded so junk like `not-an-address` cannot match.
@@ -133,7 +166,7 @@ export function classifyDestination(raw: string): ClassifiedDestination {
     return { kind: 'ARKADE', layer: 'ARKADE_ARKADE', format: 'ARKADE_ADDRESS', candidates: ['ARKADE'], value: dest }
   }
 
-  if (RE.liquid.test(dest)) {
+  if (RE.liquid.test(dest) || isLiquidConfidentialBase58(dest)) {
     return { kind: 'LIQUID', layer: 'BTC_LIQUID', format: 'LIQUID_ADDRESS', candidates: ['LIQUID'], value: dest }
   }
 
