@@ -44,6 +44,12 @@ export type SparkBalanceSnapshot = Awaited<ReturnType<SparkWalletInstance['getBa
 
 let cachedBalance: { value: SparkBalanceSnapshot; fetchedAt: number } | null = null
 let inflightBalance: Promise<SparkBalanceSnapshot> | null = null
+// Bumped on every invalidation. An in-flight fetch captures the generation at
+// its start; if that changes before it settles (i.e. a send/receive invalidated
+// the cache mid-flight), the fetched snapshot predates the mutation and must NOT
+// be written back — otherwise the pre-send (higher) balance would be served for
+// the rest of the TTL window, showing spent sats as still available.
+let cacheGeneration = 0
 
 /**
  * Fetch `wallet.getBalance()` with same-tick dedupe + a small TTL cache.
@@ -69,10 +75,16 @@ export async function getSparkBalanceCached(
   }
   if (inflightBalance) return inflightBalance
 
+  const startedGeneration = cacheGeneration
   inflightBalance = (async () => {
     try {
       const value = await withTimeout(wallet.getBalance(), SPARK_RPC_TIMEOUT_MS, 'spark.getBalance')
-      cachedBalance = { value, fetchedAt: Date.now() }
+      // Only populate the cache if no invalidation happened while this fetch was
+      // in flight; a snapshot captured before an intervening send/receive is
+      // already stale and must not become the served value.
+      if (cacheGeneration === startedGeneration) {
+        cachedBalance = { value, fetchedAt: Date.now() }
+      }
       return value
     } finally {
       inflightBalance = null
@@ -85,6 +97,9 @@ export async function getSparkBalanceCached(
 /** Drop the in-adapter balance cache (call after a send/receive completes). */
 export function invalidateSparkBalanceCache(): void {
   cachedBalance = null
+  // Invalidate any in-flight fetch's result too (it may predate this mutation),
+  // while still letting it run so concurrent callers don't trigger a re-fetch.
+  cacheGeneration++
 }
 
 /**
@@ -96,4 +111,5 @@ export function invalidateSparkBalanceCache(): void {
 export function _resetSparkBalanceCacheForTests(): void {
   cachedBalance = null
   inflightBalance = null
+  cacheGeneration++
 }

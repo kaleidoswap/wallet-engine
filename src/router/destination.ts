@@ -44,7 +44,12 @@ export interface ClassifiedDestination {
 // Liquid `H`/`VT`/`Az` and the bare-letter BTC fallbacks) is a fund-misrouting
 // bug, not a convenience.
 const RE = {
-  bolt11: /^ln(bc|tb|bcrt|sb)[0-9]/i,
+  // BOLT11 currency prefixes: bc (mainnet), tb (testnet), tbs (signet — the
+  // project's active network via Mutinynet), bcrt (regtest). `tbs` MUST precede
+  // `tb` in the alternation, otherwise `tb` matches first and the required
+  // trailing `[0-9]` sees the `s` and fails — silently misrouting a signet
+  // invoice (`lntbs1…`) to UNKNOWN. Kept in sync with `lib/bolt11.ts`.
+  bolt11: /^ln(bcrt|tbs|bc|tb)[0-9]/i,
   bolt12: /^lno1[0-9a-z]+$/i,
   lnurl: /^lnurl[0-9a-z]+$/i,
   lnAddress: /^[^@\s]+@[^@\s]+\.[^@\s]+$/i,
@@ -78,6 +83,17 @@ export function classifyDestination(raw: string): ClassifiedDestination {
   if (RE.bip21.test(dest)) {
     const addr = dest.slice('bitcoin:'.length).split('?')[0]
     const lightningFallback = extractLightning(dest)
+    // BIP321 allows an address-less URI (`bitcoin:?lightning=…`). With no
+    // on-chain address there is nothing for the single-rail resolver to pay
+    // directly, so fail CLOSED (no candidates, no layer) rather than emit a
+    // `direct` on-chain route whose `value` is the empty string — that would
+    // let lite mode auto-select a send to an empty destination while silently
+    // dropping the embedded lightning=/asset rails. Callers that want those
+    // rails must go through `resolveUnifiedSend`. The `lightningFallback` is
+    // still surfaced so a caller can route it explicitly.
+    if (!addr) {
+      return { kind: 'BIP21', layer: null, format: null, candidates: [], lightningFallback, value: '' }
+    }
     return {
       kind: 'BIP21',
       layer: 'BTC_L1',

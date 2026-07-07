@@ -16,6 +16,14 @@ describe('classifyDestination', () => {
     expect(r.candidates).not.toContain('LIQUID')
   })
 
+  it('classifies signet/testnet/regtest BOLT11 invoices as Lightning', () => {
+    // `lntbs…` is the signet HRP (the project's active network); the `tbs`
+    // alternative must win over `tb` so the trailing digit check still passes.
+    for (const inv of ['lntbs1pexample', 'lntb1pexample', 'lnbcrt1pexample']) {
+      expect(classifyDestination(inv).kind, `${inv} should be BOLT11`).toBe('BOLT11')
+    }
+  })
+
   it('classifies a lightning address / LNURL', () => {
     expect(classifyDestination('alice@example.com').kind).toBe('LN_ADDRESS')
     expect(classifyDestination('lnurl1dp68gurn8ghj7').kind).toBe('LN_ADDRESS')
@@ -76,6 +84,18 @@ describe('classifyDestination', () => {
     expect(r.lightningFallback).toBe('lnbc1pxyz')
     // On-chain BTC: LIQUID must not appear (cannot pay a BTC L1 address).
     expect(r.candidates).not.toContain('LIQUID')
+  })
+
+  it('fails closed on an address-less BIP21 URI (no bogus empty-address route)', () => {
+    // `bitcoin:?lightning=…` carries no on-chain address; it must NOT yield a
+    // direct on-chain route whose payable value is the empty string.
+    const r = classifyDestination('bitcoin:?lightning=lnbc1pxyz&spark=spark1qxyz')
+    expect(r.kind).toBe('BIP21')
+    expect(r.value).toBe('')
+    expect(r.candidates).toEqual([])
+    expect(r.layer).toBeNull()
+    // The embedded lightning fallback is still surfaced for explicit routing.
+    expect(r.lightningFallback).toBe('lnbc1pxyz')
   })
 
   // --- Fail-closed / adversarial inputs (these guard against S1) ----------

@@ -14,16 +14,22 @@ import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 
 /**
  * Coerce an SDK money field to a number, failing CLOSED on values that would
- * silently corrupt: `NaN`/`Infinity` (a renamed/missing field), or magnitudes
- * past `Number.MAX_SAFE_INTEGER` where JS would lose integer precision. Money
- * must never flow through as a quietly-wrong number.
+ * silently corrupt: `NaN`/`Infinity` (a renamed/missing field), a negative
+ * value (a hostile/buggy maker returning a negative fee/amount/price that would
+ * poison downstream net-amount math), or magnitudes past `Number.MAX_SAFE_INTEGER`
+ * where JS would lose integer precision. Every field this coerces — amounts,
+ * fees, price, expiry timestamp — is non-negative by definition. Money must
+ * never flow through as a quietly-wrong number.
  */
 function toAmount(value: unknown, field: string): number {
   const n = Number(value)
   if (!Number.isFinite(n)) {
     throw new ProtocolError(`Swap response field '${field}' is not a finite number`, 'RGB_LN', 'BAD_AMOUNT')
   }
-  if (Math.abs(n) > Number.MAX_SAFE_INTEGER) {
+  if (n < 0) {
+    throw new ProtocolError(`Swap response field '${field}' is negative`, 'RGB_LN', 'BAD_AMOUNT')
+  }
+  if (n > Number.MAX_SAFE_INTEGER) {
     throw new ProtocolError(`Swap response field '${field}' exceeds safe integer precision`, 'RGB_LN', 'BAD_AMOUNT')
   }
   return n

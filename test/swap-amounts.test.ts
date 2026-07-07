@@ -55,6 +55,18 @@ describe('KaleidoswapSwap.getQuote amount guards', () => {
     await expect(swap.getQuote(REQ as any)).rejects.toThrow(/safe integer precision/i)
   })
 
+  it('throws when a money field is negative', async () => {
+    const swap = swapWithQuoteResponse({
+      rfqId: 'r1',
+      tokenInAmount: 100,
+      tokenOutAmount: 5000,
+      price: 50,
+      fee: -1, // a hostile/buggy maker returning a negative fee
+      expiresAt: 1700000000,
+    })
+    await expect(swap.getQuote(REQ as any)).rejects.toThrow(/negative/i)
+  })
+
   it('still requires fromAmount', async () => {
     const swap = swapWithQuoteResponse({})
     await expect(swap.getQuote({ ...REQ, fromAmount: undefined } as any)).rejects.toThrow(/fromAmount/i)
