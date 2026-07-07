@@ -31,6 +31,20 @@ describe('buildUnifiedReceiveURI', () => {
     expect(buildUnifiedReceiveURI({ btcAddress: 'bc1q', amountBtc: 1 })).toContain('amount=1')
     expect(buildUnifiedReceiveURI({ btcAddress: 'bc1q', amountBtc: 0.1 })).toContain('amount=0.1')
   })
+
+  it('never emits a zero, negative, non-finite, or sub-sat (rounds-to-0) amount', () => {
+    for (const amountBtc of [0, -0.001, Number.NaN, Number.POSITIVE_INFINITY, 0.000000001]) {
+      const uri = buildUnifiedReceiveURI({ btcAddress: 'bc1q', amountBtc })
+      expect(uri, `amountBtc=${amountBtc}`).not.toContain('amount=')
+    }
+  })
+
+  it('never emits a zero/negative asset amount', () => {
+    for (const assetAmount of [0, -5, Number.NaN]) {
+      const uri = buildUnifiedReceiveURI({ rgbInvoice: 'rgb:utxob:abc', assetId: 'rgb:x', assetAmount })
+      expect(uri, `assetAmount=${assetAmount}`).not.toContain('assetamount=')
+    }
+  })
 })
 
 describe('parseUnifiedReceiveURI round-trip', () => {

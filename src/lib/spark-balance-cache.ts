@@ -44,6 +44,19 @@ export type SparkBalanceSnapshot = Awaited<ReturnType<SparkWalletInstance['getBa
 
 let cachedBalance: { value: SparkBalanceSnapshot; fetchedAt: number } | null = null
 let inflightBalance: Promise<SparkBalanceSnapshot> | null = null
+// The wallet instance the cached value / in-flight fetch belongs to. The engine
+// holds a single active Spark wallet at a time, but this cache is a module-level
+// singleton shared by both Spark adapters — so if the active wallet is ever
+// swapped (account switch), serving the previous wallet's balance for the new
+// one would mislabel one account's funds as another's. A changed identity is
+// treated as a hard cache miss.
+let cachedWallet: SparkWalletInstance | null = null
+// Bumped on every invalidation. An in-flight fetch captures the generation at
+// its start; if that changes before it settles (i.e. a send/receive invalidated
+// the cache mid-flight), the fetched snapshot predates the mutation and must NOT
+// be written back — otherwise the pre-send (higher) balance would be served for
+// the rest of the TTL window, showing spent sats as still available.
+let cacheGeneration = 0
 
 /**
  * Fetch `wallet.getBalance()` with same-tick dedupe + a small TTL cache.
@@ -58,6 +71,14 @@ let inflightBalance: Promise<SparkBalanceSnapshot> | null = null
 export async function getSparkBalanceCached(
   wallet: SparkWalletInstance,
 ): Promise<SparkBalanceSnapshot> {
+  // A different wallet instance must never be served the prior wallet's balance.
+  if (wallet !== cachedWallet) {
+    cachedWallet = wallet
+    cachedBalance = null
+    inflightBalance = null
+    cacheGeneration++
+  }
+
   const now = Date.now()
   if (cachedBalance) {
     const ttl = isEmptyBalance(cachedBalance.value)
@@ -69,10 +90,16 @@ export async function getSparkBalanceCached(
   }
   if (inflightBalance) return inflightBalance
 
+  const startedGeneration = cacheGeneration
   inflightBalance = (async () => {
     try {
       const value = await withTimeout(wallet.getBalance(), SPARK_RPC_TIMEOUT_MS, 'spark.getBalance')
-      cachedBalance = { value, fetchedAt: Date.now() }
+      // Only populate the cache if no invalidation happened while this fetch was
+      // in flight; a snapshot captured before an intervening send/receive is
+      // already stale and must not become the served value.
+      if (cacheGeneration === startedGeneration) {
+        cachedBalance = { value, fetchedAt: Date.now() }
+      }
       return value
     } finally {
       inflightBalance = null
@@ -85,6 +112,9 @@ export async function getSparkBalanceCached(
 /** Drop the in-adapter balance cache (call after a send/receive completes). */
 export function invalidateSparkBalanceCache(): void {
   cachedBalance = null
+  // Invalidate any in-flight fetch's result too (it may predate this mutation),
+  // while still letting it run so concurrent callers don't trigger a re-fetch.
+  cacheGeneration++
 }
 
 /**
@@ -96,4 +126,6 @@ export function invalidateSparkBalanceCache(): void {
 export function _resetSparkBalanceCacheForTests(): void {
   cachedBalance = null
   inflightBalance = null
+  cachedWallet = null
+  cacheGeneration++
 }

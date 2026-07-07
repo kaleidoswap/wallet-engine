@@ -23,7 +23,8 @@
  */
 
 import { bech32 } from '@scure/base'
-import { mnemonicToSeedSync } from '@scure/bip39'
+import { mnemonicToSeedSync, validateMnemonic } from '@scure/bip39'
+import { wordlist } from '@scure/bip39/wordlists/english'
 import { hexToBytes } from '@noble/hashes/utils.js'
 
 /** Decode an `nsec1…` bech32 secret into its 32 raw key bytes, or null. */
@@ -32,6 +33,10 @@ function nsecToBytes(input: string): Uint8Array | null {
     const decoded = bech32.decode(input as `${string}1${string}`, 1023)
     if (decoded.prefix !== 'nsec') return null
     const data = bech32.fromWords(decoded.words)
+    // A Nostr secret key is exactly 32 bytes. A checksum-valid `nsec1…` encoding
+    // any other length is malformed — reject it rather than seed the wallet with
+    // wrong-length key material.
+    if (data.length !== 32) return null
     return Uint8Array.from(data)
   } catch {
     return null
@@ -40,18 +45,32 @@ function nsecToBytes(input: string): Uint8Array | null {
 
 /**
  * Resolve a wallet secret (nsec / hex private key / BIP-39 mnemonic) to the seed
- * bytes a WDK `WalletManager` consumes. Never throws on a non-BIP-39 string — it
- * falls through to the mnemonic seed derivation (the host validated the secret at
- * wallet creation).
+ * bytes a WDK `WalletManager` consumes.
+ *
+ * Throws (rather than silently deriving a wrong wallet) when the secret is none
+ * of the three supported forms. `mnemonicToSeedSync` does NO validation — it
+ * NFKD-normalizes and PBKDF2s *any* string — so without an explicit check a
+ * corrupted secret (a typo'd phrase, a hex key that lost a character, an nsec
+ * with a bad checksum) would resolve to a valid-but-different seed → a different,
+ * empty HD wallet, surfacing to the user as "my funds are gone" with no error.
+ * Failing loud here mirrors the WDK `WalletManager`'s own string-secret validation.
  */
 export function resolveWalletSeed(secret: string): Uint8Array {
   const trimmed = secret.trim()
   if (trimmed.startsWith('nsec1')) {
     const bytes = nsecToBytes(trimmed)
-    if (bytes) return bytes
+    if (!bytes) {
+      throw new Error('Invalid wallet secret: nsec1… failed to decode to a 32-byte key')
+    }
+    return bytes
   }
   if (/^[0-9a-fA-F]{64}$/.test(trimmed)) {
     return hexToBytes(trimmed.toLowerCase())
+  }
+  // Otherwise it must be a BIP-39 mnemonic — validate its checksum/wordlist
+  // before deriving, so an invalid phrase throws instead of seeding a wrong wallet.
+  if (!validateMnemonic(trimmed, wordlist)) {
+    throw new Error('Invalid wallet secret: not an nsec1… key, 64-char hex key, or valid BIP-39 mnemonic')
   }
   return mnemonicToSeedSync(trimmed)
 }

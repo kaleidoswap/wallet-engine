@@ -201,12 +201,17 @@ export class ProtocolManager {
   async getAllConnectionInfo(): Promise<Map<ProtocolType, ConnectionInfo>> {
     const info = new Map<ProtocolType, ConnectionInfo>()
 
-    for (const adapter of this.registry.getAll()) {
-      if (adapter.isConnected()) {
-        const connectionInfo = await adapter.getConnectionInfo()
-        info.set(adapter.protocolName, connectionInfo)
-      }
-    }
+    // Query connected adapters in parallel with the same per-protocol timeout as
+    // the other cross-protocol reads — awaiting each serially let one degraded
+    // backend hang the whole connection-info panel indefinitely.
+    const adapters = this.registry.getAll().filter((a) => a.isConnected())
+    const results = await Promise.allSettled(
+      adapters.map((a) => this.withTimeout(a.getConnectionInfo(), a.protocolName, 'getConnectionInfo'))
+    )
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') info.set(adapters[index].protocolName, result.value)
+      else this.log.error(`[ProtocolManager] Error getting connection info for ${adapters[index].protocolName}:`, result.reason)
+    })
 
     return info
   }
@@ -234,7 +239,14 @@ export class ProtocolManager {
    */
   async refreshBalances(): Promise<void> {
     const adapters = this.registry.getAll().filter((a) => a.isConnected())
-    await Promise.allSettled(adapters.map((a) => a.refreshBalances()))
+    const results = await Promise.allSettled(adapters.map((a) => a.refreshBalances()))
+    // Surface per-adapter failures (consistent with listAllAssets/listAllTransactions):
+    // a silently-swallowed invalidation leaves a stale balance with no diagnostic trail.
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.log.error(`[ProtocolManager] Error refreshing balances for ${adapters[index].protocolName}:`, result.reason)
+      }
+    })
   }
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
@@ -409,25 +421,29 @@ export class ProtocolManager {
     return null
   }
 
+  /**
+   * Asset counts across all connected protocols, in total and per protocol.
+   *
+   * Fiat/BTC-denominated VALUE is intentionally NOT reported here: the engine is
+   * dependency-free and carries no price oracle, so a `value` field could only
+   * ever be a hardcoded 0 — worse than absent, because callers would trust it.
+   * The host computes value from its own rate source over these counts/assets.
+   */
   async getPortfolioSummary(): Promise<{
     totalAssets: number
-    totalValue: number
-    protocolBreakdown: Map<ProtocolType, { assets: number; value: number }>
+    protocolBreakdown: Map<ProtocolType, { assets: number }>
   }> {
     const allAssets = await this.listAllAssets()
-    const breakdown = new Map<ProtocolType, { assets: number; value: number }>()
+    const breakdown = new Map<ProtocolType, { assets: number }>()
 
     for (const asset of allAssets) {
-      if (!breakdown.has(asset.protocol)) {
-        breakdown.set(asset.protocol, { assets: 0, value: 0 })
-      }
-      const entry = breakdown.get(asset.protocol)!
+      const entry = breakdown.get(asset.protocol) ?? { assets: 0 }
       entry.assets++
+      breakdown.set(asset.protocol, entry)
     }
 
     return {
       totalAssets: allAssets.length,
-      totalValue: 0,
       protocolBreakdown: breakdown,
     }
   }

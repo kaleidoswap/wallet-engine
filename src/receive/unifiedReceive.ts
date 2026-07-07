@@ -76,7 +76,14 @@ export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   }
 
   const params = new URLSearchParams()
-  if (p.amountBtc != null) params.set('amount', formatBtc(p.amountBtc))
+  // Only emit `amount` for a finite, strictly-positive value. A 0, negative, or
+  // non-finite input (or a dust amount that rounds to "0" at 8 decimals) would
+  // otherwise produce a meaningless `amount=0` / `amount=-0.001` in the QR that
+  // a payer's wallet reads literally. Mirrors the parse-side non-negative guard.
+  if (p.amountBtc != null && Number.isFinite(p.amountBtc) && p.amountBtc > 0) {
+    const amount = formatBtc(p.amountBtc)
+    if (amount !== '0') params.set('amount', amount)
+  }
   if (p.label) params.set('label', p.label)
   if (p.lightningInvoice) params.set(K.lightning, p.lightningInvoice)
   if (p.lightningOffer) params.set(K.lno, p.lightningOffer)
@@ -85,7 +92,10 @@ export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   if (p.liquidAddress) params.set(K.liquid, p.liquidAddress)
   if (p.rgbInvoice) params.set(K.rgb, p.rgbInvoice)
   if (p.assetId) params.set(K.assetId, p.assetId)
-  if (p.assetAmount != null) params.set(K.assetAmount, String(p.assetAmount))
+  // Same non-negative/finite guard as `amount`: never emit a junk asset amount.
+  if (p.assetAmount != null && Number.isFinite(p.assetAmount) && p.assetAmount > 0) {
+    params.set(K.assetAmount, String(p.assetAmount))
+  }
 
   const qs = params.toString()
   // BIP321: `bitcoin:` + optional address + optional `?params`.

@@ -57,7 +57,9 @@ export async function resolveRgbFeeRatePolicy(input: ResolveRgbFeeRateInput): Pr
   if (typeof provided === "number" && Number.isFinite(provided) && provided > 0) {
     return provided;
   }
-  const isMainnet = network === "mainnet";
+  // Case-insensitive so a `"Mainnet"`/`"MAINNET"` label can't slip past the
+  // floor and broadcast a real mainnet transaction at 1 sat/vB (stuck funds).
+  const isMainnet = network?.toLowerCase() === "mainnet";
   if (!isMainnet) {
     return 1;
   }
@@ -67,5 +69,7 @@ export async function resolveRgbFeeRatePolicy(input: ResolveRgbFeeRateInput): Pr
   if (estimate == null || !Number.isFinite(estimate) || estimate <= 0) {
     return floor;
   }
-  return Math.max(Math.floor(estimate), floor);
+  // Round the fractional estimate UP: rounding down (Math.floor) systematically
+  // underpays a fractional sat/vB rate, mildly slowing confirmation.
+  return Math.max(Math.ceil(estimate), floor);
 }
