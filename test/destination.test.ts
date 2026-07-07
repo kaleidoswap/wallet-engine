@@ -69,6 +69,32 @@ describe('classifyDestination', () => {
     expect(r.candidates).toEqual(['LIQUID'])
   })
 
+  it('classifies a legacy base58 CONFIDENTIAL Liquid address (VJL… mainnet)', () => {
+    // Real mainnet confidential P2SH address (version byte 12, 55-byte payload).
+    const r = classifyDestination(
+      'VJLAaiCkHJAKmwGEhN97gs4a2LPUBKapCbGuHxoQm2rxj8c7VTgoQPVdSYdm96ZGCBvtFFKtrA3mS3Rv',
+    )
+    expect(r.kind).toBe('LIQUID')
+    expect(r.candidates).toEqual(['LIQUID'])
+  })
+
+  it('does NOT classify an unconfidential base58 Liquid / BTC address as LIQUID', () => {
+    // A legacy base58 BTC address decodes to a 21-byte payload — it must not be
+    // mistaken for a confidential Liquid address (which is 55 bytes).
+    const r = classifyDestination('1BvBMSEYstWetqTFn5Au4m4GFg7xJaNVN2')
+    expect(r.kind).not.toBe('LIQUID')
+    expect(r.candidates).not.toContain('LIQUID')
+  })
+
+  it('fails closed on a VJL-prefixed string with a bad base58check checksum', () => {
+    // Same address with its last char mangled — checksum fails, so it must NOT
+    // be routed to Liquid.
+    const r = classifyDestination(
+      'VJLAaiCkHJAKmwGEhN97gs4a2LPUBKapCbGuHxoQm2rxj8c7VTgoQPVdSYdm96ZGCBvtFFKtrA3mS3Rx',
+    )
+    expect(r.kind).not.toBe('LIQUID')
+  })
+
   it('classifies a bare on-chain BTC address', () => {
     const r = classifyDestination('bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080')
     expect(r.kind).toBe('BTC_ONCHAIN')
