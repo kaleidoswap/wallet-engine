@@ -329,9 +329,41 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     return this.account.getInvoiceStatus({ paymentHash })
   }
 
-  async sendAsset(params: { recipientMap: Record<string, any[]>; feeRate?: number; donation?: boolean; minConfirmations?: number }): Promise<any> {
+  async sendAsset(params: any): Promise<any> {
     this.assertConnected()
-    return this.account.sendRgb(params)
+    // Callers (the extension's SEND_ASSET route) pass a flat, decoded-invoice
+    // shape — { assetId, recipientId, assignment, transportEndpoints, amount,
+    // witnessData, feeRate, donation, minConfirmations }. The WDK account's
+    // sendRgb expects a node-shaped recipient_map keyed by asset id, so build
+    // it here. Passing the flat params straight through left recipientMap
+    // undefined and the node rejected it with "Failed to deserialize the JSON
+    // body into the target type". A pre-built recipientMap is honored as-is.
+    if (params?.recipientMap) return this.account.sendRgb(params)
+
+    const assetId = params.assetId ?? params.asset_id
+    const recipientId = params.recipientId ?? params.recipient_id
+    const transportEndpoints = params.transportEndpoints ?? params.transport_endpoints ?? []
+    const witnessData = params.witnessData ?? params.witness_data
+    // The node always requires an assignment; derive it from amount when absent.
+    const amount = params.amount ?? params.assignment?.value
+    const assignment =
+      params.assignment ?? (amount != null ? { type: 'Fungible', value: amount } : undefined)
+
+    return this.account.sendRgb({
+      recipientMap: {
+        [assetId]: [
+          {
+            recipient_id: recipientId,
+            assignment,
+            transport_endpoints: transportEndpoints,
+            ...(witnessData ? { witness_data: witnessData } : {}),
+          },
+        ],
+      },
+      feeRate: params.feeRate ?? params.fee_rate,
+      donation: params.donation ?? false,
+      minConfirmations: params.minConfirmations ?? params.min_confirmations ?? 1,
+    })
   }
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
