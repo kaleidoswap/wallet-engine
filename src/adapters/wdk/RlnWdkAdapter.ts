@@ -193,15 +193,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   // --- Invoices -----------------------------------------------------------
-  /**
-   * The raw kaleido-sdk RlnClient behind the WDK account. We build the node's
-   * exact request bodies here (asset_id/asset_amount for LN, witness +
-   * expiration_timestamp + Fungible assignment for on-chain) rather than route
-   * through the WDK wrapper's invoice/payment helpers, whose bodies the node
-   * rejects with "Failed to deserialize the JSON body into the target type"
-   * (fixed upstream in @kaleidorg/wdk-wallet-rln, but building them here keeps
-   * this adapter correct independent of the installed wrapper version).
-   */
   private get node(): any {
     const raw = (this.account as any)?._rln
     if (!raw) throw new ProtocolError('RLN node client unavailable', 'RGB_LN', 'NOT_CONNECTED')
@@ -213,8 +204,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const isAsset = !!request.asset && request.asset !== 'BTC'
     const wantsOnchain = request.layer === 'RGB_L1' || request.layer === 'BTC_L1'
 
-    // RGB asset over Lightning: /lninvoice with asset_id + asset_amount. The
-    // node needs a BTC carrier amt_msat; default to 3000 sat like the desktop.
     if (isAsset && !wantsOnchain) {
       const inv: any = await this.node.createLNInvoice({
         amt_msat: request.amount != null ? request.amount * 1000 : 3_000_000,
@@ -231,7 +220,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       }
     }
 
-    // RGB asset on-chain (blinded/witness) invoice.
     if (isAsset) {
       const inv: any = await this.createRgbInvoice({
         assetId: request.asset,
@@ -249,7 +237,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       }
     }
 
-    // BTC Lightning invoice.
     const inv: any = await this.node.createLNInvoice({
       amt_msat: request.amount != null ? request.amount * 1000 : undefined,
       expiry_sec: request.expirySeconds ?? 3600,
@@ -270,8 +257,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       : await this.account.decodeRgbInvoice(invoice)
     return {
       paymentHash: d?.payment_hash ?? d?.recipient_id ?? '',
-      // The node's DecodeLNInvoiceResponse uses `amt_msat` (not `amount_msat`);
-      // reading the wrong key dropped the BTC carrier amount entirely.
       amount: d?.amt_msat != null ? Math.floor(d.amt_msat / 1000) : d?.amount,
       amountMsat: d?.amt_msat,
       description: d?.description,
@@ -285,10 +270,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   // --- Send ---------------------------------------------------------------
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
     this.assertConnected()
-    // Pays a BOLT11 or RGB-LN invoice through the node. Fixed-amount invoices
-    // need only `invoice`; a zero-amount BTC invoice needs amt_msat, and an
-    // open-amount RGB invoice needs asset_id + asset_amount (raw base units) —
-    // callers pass these as extra fields on the request.
     const req = request as PaymentRequest & {
       asset_id?: string
       asset_amount?: number
@@ -363,9 +344,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   // --- Optional protocol-specific hooks -----------------------------------
   async createRgbInvoice(params: any): Promise<any> {
     this.assertConnected()
-    // Build the node's RgbInvoiceRequest: `witness` + `min_confirmations` are
-    // required, the expiry is an absolute `expiration_timestamp`, and the
-    // amount is a Fungible-typed `assignment` ({ type, value }).
     const assetId = params?.assetId ?? params?.asset_id
     const durationSeconds = params?.durationSeconds ?? params?.duration_seconds ?? 86400
     const assignment =
@@ -388,7 +366,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async getInvoiceStatus(params: { invoice: string }): Promise<any> {
     this.assertConnected()
-    // Best-effort: decode to a payment hash, then query status.
     const d: any = await this.account.decodeLNInvoice(params.invoice).catch(() => null)
     const paymentHash = d?.payment_hash
     if (!paymentHash) return { status: 'unknown' }
@@ -397,20 +374,12 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async sendAsset(params: any): Promise<any> {
     this.assertConnected()
-    // Callers (the extension's SEND_ASSET route) pass a flat, decoded-invoice
-    // shape — { assetId, recipientId, assignment, transportEndpoints, amount,
-    // witnessData, feeRate, donation, minConfirmations }. The WDK account's
-    // sendRgb expects a node-shaped recipient_map keyed by asset id, so build
-    // it here. Passing the flat params straight through left recipientMap
-    // undefined and the node rejected it with "Failed to deserialize the JSON
-    // body into the target type". A pre-built recipientMap is honored as-is.
     if (params?.recipientMap) return this.account.sendRgb(params)
 
     const assetId = params.assetId ?? params.asset_id
     const recipientId = params.recipientId ?? params.recipient_id
     const transportEndpoints = params.transportEndpoints ?? params.transport_endpoints ?? []
     const witnessData = params.witnessData ?? params.witness_data
-    // The node always requires an assignment; derive it from amount when absent.
     const amount = params.amount ?? params.assignment?.value
     const assignment =
       params.assignment ?? (amount != null ? { type: 'Fungible', value: amount } : undefined)
@@ -439,12 +408,6 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   // --- RGB on-chain UTXO management ----------------------------------------
-  // The UTXO-management UI, blinded-receive colorable-UTXO count, and the
-  // create-UTXO modal's fee/balance hints are protocol-neutral (routed through
-  // `withRgbAdapter`). Forward them to the RLN node so the shared UI works on
-  // the RGB_LN path just like it does on RGB_L1 — otherwise it dead-ends with
-  // "listRgbUnspents not supported by RGB_LN".
-
   async listRgbUnspents(): Promise<{
     unspents: Array<{
       utxo: { outpoint: string; btc_amount: number; colorable: boolean }

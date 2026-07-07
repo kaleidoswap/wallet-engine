@@ -1,11 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { RlnWdkAdapter } from '../src/adapters/wdk/RlnWdkAdapter'
 
-/**
- * The adapter must build the RLN node's exact request bodies. Wrong shapes make
- * the node reject with "Failed to deserialize the JSON body into the target
- * type" (RGB invoices) or silently produce a BTC-only invoice (LN assets).
- */
 function connectedRln() {
   const calls: Record<string, any[]> = {}
   const record = (name: string) => async (body: any) => {
@@ -37,7 +32,7 @@ describe('RlnWdkAdapter invoice/payment bodies', () => {
     const body = calls.createLNInvoice[0]
     expect(body.asset_id).toBe('rgb:usdt')
     expect(body.asset_amount).toBe(42)
-    expect(body.amt_msat).toBe(3_000_000) // BTC carrier default
+    expect(body.amt_msat).toBe(3_000_000)
     expect(body.expiry_sec).toBe(900)
   })
 
