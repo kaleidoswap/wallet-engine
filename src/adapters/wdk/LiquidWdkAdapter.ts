@@ -56,6 +56,14 @@ export interface LiquidAdapterConfig extends BaseProtocolConfig {
   accountIndex?: number
   /** Optional Esplora base URL override. */
   esploraUrl?: string
+  /**
+   * Use the server-side "waterfalls" scan (one request) instead of a client-side gap-limit scan
+   * (~40 requests → ~10s cold). Requires `esploraUrl` to point at a waterfalls-capable server;
+   * public Blockstream Esplora is not one. Default: false.
+   */
+  waterfalls?: boolean
+  /** Optional waterfalls server recipient key; encrypts the descriptor before it is sent. */
+  waterfallsRecipient?: string
 }
 
 /** Local mirror of the lwk network union (kept here so WDK/lwk types never cross the contract). */
@@ -111,6 +119,8 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.manager = new LiquidWalletManager(cfg.mnemonic, {
       network: LIQUID_NETWORK_MAP[this.network] ?? 'mainnet',
       esploraUrl: cfg.esploraUrl,
+      waterfalls: cfg.waterfalls,
+      waterfallsRecipient: cfg.waterfallsRecipient,
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
