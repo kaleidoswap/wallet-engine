@@ -14,6 +14,7 @@ function connectedRln() {
   Object.assign(adapter as any, {
     connected: true,
     account: {
+      getAddress: async () => 'bcrt1qbtconchain',
       _rln: {
         createLNInvoice: record('createLNInvoice'),
         createRgbInvoice: record('createRgbInvoice'),
@@ -91,5 +92,14 @@ describe('RlnWdkAdapter invoice/payment bodies', () => {
     const { adapter, calls } = connectedRln()
     await adapter.getInvoiceStatus({ invoice: 'lnbc1abc...' })
     expect(calls.getInvoiceStatus[0]).toEqual({ invoice: 'lnbc1abc...' })
+  })
+
+  it('getReceiveAddress returns a BTC on-chain address for "BTC" (not an RGB invoice)', async () => {
+    const { adapter, calls } = connectedRln()
+    const btc = await adapter.getReceiveAddress('BTC')
+    expect(btc).toEqual({ address: 'bcrt1qbtconchain', format: 'BTC_ADDRESS' })
+    const none = await adapter.getReceiveAddress()
+    expect(none.format).toBe('BTC_ADDRESS')
+    expect(calls.createRgbInvoice).toBeUndefined()
   })
 })
