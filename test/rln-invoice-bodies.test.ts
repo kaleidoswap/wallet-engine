@@ -18,6 +18,7 @@ function connectedRln() {
         createLNInvoice: record('createLNInvoice'),
         createRgbInvoice: record('createRgbInvoice'),
         sendPayment: record('sendPayment'),
+        getInvoiceStatus: record('getInvoiceStatus'),
       },
     },
   })
@@ -84,5 +85,11 @@ describe('RlnWdkAdapter invoice/payment bodies', () => {
     expect(body.asset_id).toBe('rgb:usdt')
     expect(body.asset_amount).toBe(7)
     expect(body.amt_msat).toBeUndefined()
+  })
+
+  it('getInvoiceStatus queries the node with the bolt11 invoice, not a payment hash', async () => {
+    const { adapter, calls } = connectedRln()
+    await adapter.getInvoiceStatus({ invoice: 'lnbc1abc...' })
+    expect(calls.getInvoiceStatus[0]).toEqual({ invoice: 'lnbc1abc...' })
   })
 })
