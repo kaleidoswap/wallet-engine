@@ -112,11 +112,20 @@ export function signPsbt(psbtHex: string, mnemonic: string): PsbtSignResult {
       if (!child.privateKey) continue
 
       try {
+        // No `allowedSighash` argument is passed on purpose: @scure/btc-signer
+        // then restricts signing to each input's DEFAULT sighash (SIGHASH_ALL
+        // for legacy/segwit, SIGHASH_DEFAULT for taproot) and throws on anything
+        // else. So a dApp-supplied PSBT that sets SIGHASH_NONE/SINGLE/ANYONECANPAY
+        // on an owned input — which would let the counterparty rewrite outputs —
+        // is refused here (the throw is caught below and the input left unsigned)
+        // rather than blindly signed. Passing an explicit `[SigHash.ALL]` would be
+        // WRONG: it would reject legitimate taproot inputs (default = 0, not ALL).
         tx.signIdx(child.privateKey, idx)
         signedCount++
         break // one signature per input is enough
       } catch {
-        // Key didn't match this input — try the next derivation path.
+        // Key didn't match this input (or its sighash is disallowed) — try the
+        // next derivation path.
       }
     }
   }

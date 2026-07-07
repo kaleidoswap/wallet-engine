@@ -19,6 +19,15 @@ describe('decodeBolt11', () => {
     expect(decodeBolt11('lnbc1000000p1pexample').amountSat).toBe(100)
   })
 
+  it('exposes msat as the source-of-truth amount (sub-sat precision preserved)', () => {
+    // 1500n BTC = 150 sat = 150_000 msat
+    expect(decodeBolt11('lnbc1500n1pexample').amountMsat).toBe(150_000)
+    // 10p BTC = 1 msat — rounds to 0 sat for display but msat keeps the value.
+    const r = decodeBolt11('lnbc10p1pexample')
+    expect(r.amountMsat).toBe(1)
+    expect(r.amountSat).toBe(0)
+  })
+
   it('treats a bare digit amount with no multiplier as whole BTC', () => {
     // lnbc1<sep>... is amountless (the 1 is the bech32 separator), so use 2.
     expect(decodeBolt11('lnbc21pexample').amountSat).toBe(2 * 1e8)

@@ -10,7 +10,17 @@
 const MULTIPLIER: Record<string, number> = { m: 1e-3, u: 1e-6, n: 1e-9, p: 1e-12 }
 
 export interface Bolt11Summary {
-  /** Amount in satoshis, if the invoice encodes one (open invoices omit it). */
+  /**
+   * Amount in millisatoshis (the BOLT11 native precision — the `n`/`p`
+   * multipliers encode sub-satoshi values), if the invoice encodes one.
+   * This is the source-of-truth amount; use it for any payment/amount logic.
+   */
+  amountMsat?: number
+  /**
+   * Amount in satoshis, rounded from `amountMsat` for DISPLAY only. Sub-sat
+   * invoices (e.g. `10p` = 1 msat) round to 0 here — never use this to decide
+   * how much to pay.
+   */
   amountSat?: number
   /** Network token from the HRP: bc | tb | tbs | bcrt. */
   network: string
@@ -30,7 +40,10 @@ export function decodeBolt11(invoice: string): Bolt11Summary {
   if (!digits) return { network } // amountless / open invoice
   const base = Number(digits)
   const btc = mult ? base * MULTIPLIER[mult] : base
-  return { amountSat: Math.round(btc * 1e8), network }
+  // 1 BTC = 1e11 msat. Round to an integer msat (the smallest BOLT11 unit),
+  // then derive sats for display so the two fields can never disagree.
+  const amountMsat = Math.round(btc * 1e11)
+  return { amountMsat, amountSat: Math.round(amountMsat / 1000), network }
 }
 
 export function isBolt11(s: string): boolean {

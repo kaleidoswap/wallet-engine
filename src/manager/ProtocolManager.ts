@@ -421,25 +421,29 @@ export class ProtocolManager {
     return null
   }
 
+  /**
+   * Asset counts across all connected protocols, in total and per protocol.
+   *
+   * Fiat/BTC-denominated VALUE is intentionally NOT reported here: the engine is
+   * dependency-free and carries no price oracle, so a `value` field could only
+   * ever be a hardcoded 0 — worse than absent, because callers would trust it.
+   * The host computes value from its own rate source over these counts/assets.
+   */
   async getPortfolioSummary(): Promise<{
     totalAssets: number
-    totalValue: number
-    protocolBreakdown: Map<ProtocolType, { assets: number; value: number }>
+    protocolBreakdown: Map<ProtocolType, { assets: number }>
   }> {
     const allAssets = await this.listAllAssets()
-    const breakdown = new Map<ProtocolType, { assets: number; value: number }>()
+    const breakdown = new Map<ProtocolType, { assets: number }>()
 
     for (const asset of allAssets) {
-      if (!breakdown.has(asset.protocol)) {
-        breakdown.set(asset.protocol, { assets: 0, value: 0 })
-      }
-      const entry = breakdown.get(asset.protocol)!
+      const entry = breakdown.get(asset.protocol) ?? { assets: 0 }
       entry.assets++
+      breakdown.set(asset.protocol, entry)
     }
 
     return {
       totalAssets: allAssets.length,
-      totalValue: 0,
       protocolBreakdown: breakdown,
     }
   }

@@ -44,6 +44,13 @@ export type SparkBalanceSnapshot = Awaited<ReturnType<SparkWalletInstance['getBa
 
 let cachedBalance: { value: SparkBalanceSnapshot; fetchedAt: number } | null = null
 let inflightBalance: Promise<SparkBalanceSnapshot> | null = null
+// The wallet instance the cached value / in-flight fetch belongs to. The engine
+// holds a single active Spark wallet at a time, but this cache is a module-level
+// singleton shared by both Spark adapters — so if the active wallet is ever
+// swapped (account switch), serving the previous wallet's balance for the new
+// one would mislabel one account's funds as another's. A changed identity is
+// treated as a hard cache miss.
+let cachedWallet: SparkWalletInstance | null = null
 // Bumped on every invalidation. An in-flight fetch captures the generation at
 // its start; if that changes before it settles (i.e. a send/receive invalidated
 // the cache mid-flight), the fetched snapshot predates the mutation and must NOT
@@ -64,6 +71,14 @@ let cacheGeneration = 0
 export async function getSparkBalanceCached(
   wallet: SparkWalletInstance,
 ): Promise<SparkBalanceSnapshot> {
+  // A different wallet instance must never be served the prior wallet's balance.
+  if (wallet !== cachedWallet) {
+    cachedWallet = wallet
+    cachedBalance = null
+    inflightBalance = null
+    cacheGeneration++
+  }
+
   const now = Date.now()
   if (cachedBalance) {
     const ttl = isEmptyBalance(cachedBalance.value)
@@ -111,5 +126,6 @@ export function invalidateSparkBalanceCache(): void {
 export function _resetSparkBalanceCacheForTests(): void {
   cachedBalance = null
   inflightBalance = null
+  cachedWallet = null
   cacheGeneration++
 }
