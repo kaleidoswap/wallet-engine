@@ -48,6 +48,12 @@ funded assertions pass:
 - **RGB-L1 mutinynet** — send Mutinynet signet BTC to the wallet's on-chain
   address (rgb-lib needs vanilla sats to create colorable UTXOs).
 
+> **RGB-L1 install note:** the RGB-L1 suite loads `@utexo/wdk-wallet-rgb`
+> (an optional dependency), which is a **native** rgb-lib addon. Install with
+> build scripts enabled (a normal `pnpm install` / `npm install` — *not*
+> `--ignore-scripts`) and a C toolchain present, or the module resolves but
+> fails at runtime with `Cannot find module './build/Release/rgblib'`.
+
 Endpoints have public defaults for each test network; override any of them in
 `.env` if a public endpoint moves or you run your own (see `.env.example`).
 
