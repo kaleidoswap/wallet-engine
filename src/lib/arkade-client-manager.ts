@@ -21,7 +21,8 @@
 import type { ArkadeConfig } from "../types/arkade";
 import { DEFAULT_VTXO_THRESHOLD_SECONDS } from "./arkade-vtxo-lifecycle";
 import { log } from "./log";
-import { mnemonicToSeedSync } from "@scure/bip39";
+import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
+import { wordlist } from "@scure/bip39/wordlists/english";
 import { HDKey } from "@scure/bip32";
 import { bech32 } from "@scure/base";
 import { bytesToHex } from "@noble/hashes/utils.js";
@@ -78,16 +79,26 @@ function nsecToPrivateKeyHex(input: string): string | null {
  * needs. Accepts (in order): an `nsec1…` root secret, a 64-char hex private
  * key, or a BIP39 mnemonic (BIP86 Taproot `m/86'/{coinType}'/0'/0/0`).
  */
-function resolveArkadePrivateKeyHex(walletSecret: string, isMainnet: boolean): string {
+export function resolveArkadePrivateKeyHex(walletSecret: string, isMainnet: boolean): string {
   const trimmed = walletSecret.trim();
 
   if (trimmed.startsWith("nsec1")) {
     const hex = nsecToPrivateKeyHex(trimmed);
     if (hex) return hex;
+    // A string claiming to be an nsec but failing checksum/length must NOT
+    // fall through to the mnemonic branch — mnemonicToSeedSync PBKDF2s any
+    // string, so it would silently derive a valid-but-different empty wallet.
+    throw new Error("Invalid wallet secret: nsec1… failed to decode to a 32-byte key");
   }
 
   if (/^[0-9a-f]{64}$/i.test(trimmed)) {
     return trimmed.toLowerCase();
+  }
+
+  // Fail loud on an invalid phrase instead of seeding a wrong wallet
+  // (mnemonicToSeedSync itself performs no validation).
+  if (!validateMnemonic(trimmed, wordlist)) {
+    throw new Error("Invalid wallet secret: not an nsec1… key, 64-char hex key, or valid BIP39 mnemonic");
   }
 
   const seed = mnemonicToSeedSync(trimmed);
@@ -274,8 +285,13 @@ class ArkadeClientManager {
     return this.wallet !== null;
   }
 
+  /**
+   * Connected config with the mnemonic REDACTED — getConfig() is read for
+   * network/settings lookups, and returning the seed here would let one
+   * careless `log(getConfig())` in a host leak it.
+   */
   getConfig(): ArkadeConfig | null {
-    return this.config;
+    return this.config ? { ...this.config, mnemonic: "" } : null;
   }
 
   async disconnect(): Promise<void> {

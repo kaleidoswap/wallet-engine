@@ -123,8 +123,6 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   // rather than an explicit direction flag.
   private identityPubKeyHex: string | null = null
 
-  /** BIP-39 mnemonic — retained for message/PSBT signing (derives its own keys). */
-  private mnemonic: string | null = null
 
   /** Lazily-loaded `@buildonspark/spark-sdk` address helpers (kept off the static import graph). */
   private sdk: any = null
@@ -959,6 +957,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
 
   // --- Message / PSBT signing --------------------------------------------
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
+    this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'SPARK', 'NOT_CONNECTED')
     const { signPsbt: doSign } = await import('../../lib/psbt-signer')
     const result = doSign(psbtHex, this.mnemonic)
@@ -966,6 +965,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   }
 
   async signMessage(message: string): Promise<string> {
+    this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'SPARK', 'NOT_CONNECTED')
     const { mnemonicToSeedSync } = await import('@scure/bip39')
     const { HDKey } = await import('@scure/bip32')

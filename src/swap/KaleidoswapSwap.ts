@@ -51,7 +51,22 @@ export interface SwapExecuteRequest extends SwapQuoteRequest {
   receiverAddress: string
   /** Format of the receiver address (e.g. 'RGB_INVOICE', 'BOLT11', 'BTC_ADDRESS'). */
   receiverAddressFormat: string
+  /**
+   * The quote the user approved (from getQuote). The swap module always
+   * re-quotes internally and executes at THAT price — the maker is never bound
+   * to the approved quote. When this is set, executeSwap enforces it
+   * client-side: rejects before ordering if the approved quote has expired,
+   * and rejects the fill if the executed output degrades past
+   * `maxSlippageBps` vs the approved output (the order is left unfunded —
+   * funds only move when the deposit leg is paid).
+   */
+  approvedQuote?: Quote
+  /** Max acceptable output degradation vs approvedQuote.toAmount, in basis points. Default 100 (1%). */
+  maxSlippageBps?: number
 }
+
+/** Default slippage tolerance between the approved quote and the executed fill: 1%. */
+export const DEFAULT_MAX_SLIPPAGE_BPS = 100
 
 /**
  * Thin response shapes for the swap module's RFQ calls. These are NOT the
@@ -131,6 +146,10 @@ export class KaleidoswapSwap {
     if (req.fromAmount == null) {
       throw new ProtocolError('Swap requires fromAmount', 'RGB_LN', 'NO_AMOUNT')
     }
+    const approved = req.approvedQuote
+    if (approved && approved.expiresAt > 0 && Date.now() > approved.expiresAt) {
+      throw new ProtocolError('Approved quote has expired — request a fresh quote', 'RGB_LN', 'QUOTE_EXPIRED')
+    }
     const proto = await this.ensure()
     const r: RawSwap = await proto.swap({
       fromAssetId: req.fromAsset,
@@ -141,6 +160,20 @@ export class KaleidoswapSwap {
       receiverAddress: req.receiverAddress,
       receiverAddressFormat: req.receiverAddressFormat,
     })
+    const executedOut = toAmount(r.tokenOutAmount, 'tokenOutAmount')
+    if (approved && approved.toAmount > 0) {
+      const bps = req.maxSlippageBps ?? DEFAULT_MAX_SLIPPAGE_BPS
+      const minOut = approved.toAmount * (1 - bps / 10_000)
+      if (executedOut < minOut) {
+        // The order exists but is unfunded — funds only move when the deposit
+        // leg is paid, so refusing here abandons it safely (it expires).
+        throw new ProtocolError(
+          `Swap fill degraded past ${bps} bps: approved output ${approved.toAmount}, executed ${executedOut}`,
+          'RGB_LN',
+          'QUOTE_DEGRADED'
+        )
+      }
+    }
     return {
       swapId: r.orderId,
       status: 'pending',
@@ -149,7 +182,7 @@ export class KaleidoswapSwap {
         fromAsset: req.fromAsset,
         fromAmount: toAmount(r.tokenInAmount, 'tokenInAmount'),
         toAsset: req.toAsset,
-        toAmount: toAmount(r.tokenOutAmount, 'tokenOutAmount'),
+        toAmount: executedOut,
         // Carry the executed price through when the maker returns it (was dropped to 0).
         price: r.price != null ? toAmount(r.price, 'price') : 0,
         fee: { amount: toAmount(r.fee, 'fee'), asset: req.fromAsset },

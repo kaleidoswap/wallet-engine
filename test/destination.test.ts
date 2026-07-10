@@ -124,6 +124,14 @@ describe('classifyDestination', () => {
     expect(r.lightningFallback).toBe('lnbc1pxyz')
   })
 
+  it('does not throw on malformed percent-encoding in lightning= (hostile QR)', () => {
+    const r = classifyDestination('bitcoin:bc1qexample?lightning=%E0%A4%A')
+    expect(r.kind).toBe('BIP21')
+    expect(r.value).toBe('bc1qexample')
+    // undecodable parameter is treated as absent, not a crash
+    expect(r.lightningFallback).toBeUndefined()
+  })
+
   // --- Fail-closed / adversarial inputs (these guard against S1) ----------
 
   it('does NOT classify an arbitrary "H..." string as Liquid', () => {
