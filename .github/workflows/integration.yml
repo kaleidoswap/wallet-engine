@@ -1,0 +1,51 @@
+name: Integration
+
+# Live integration suite (test/integration/**): connects real WDK adapters to
+# real test networks with the pre-funded Alice & Bob wallets (repo secrets).
+# Runs nightly + on demand. Fund-moving send tests stay OFF unless the manual
+# dispatch opts in.
+on:
+  schedule:
+    # Nightly at 04:17 UTC (off-peak for the public endpoints we hit).
+    - cron: '17 4 * * *'
+  workflow_dispatch:
+    inputs:
+      run_send_tests:
+        description: 'Run fund-moving send/transfer tests (RUN_SEND_TESTS=1)'
+        type: boolean
+        default: false
+
+concurrency:
+  # The suites are stateful per wallet (rgb-lib data dirs, wallet balances) —
+  # never run two instances against Alice & Bob at once.
+  group: integration-alice-bob
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    name: Live integration (Node 22)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22, NOT 24: @utexo/rgb-lib's SWIG bindings use v8 APIs removed in
+      # Node 24 (FunctionCallbackInfo::Holder) and fail to compile there.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - run: npm install --ignore-scripts --no-audit --no-fund
+
+      # Only the RGB-L1 native bindings need lifecycle scripts (node-gyp build
+      # against the prebuilt librgblibcffi). Rebuild that one package instead
+      # of installing the whole tree with scripts enabled.
+      - name: Build rgb-lib native bindings
+        run: npm rebuild @utexo/rgb-lib-linux-x64
+
+      - name: Run integration suite
+        env:
+          ALICE_MNEMONIC: ${{ secrets.ALICE_MNEMONIC }}
+          BOB_MNEMONIC: ${{ secrets.BOB_MNEMONIC }}
+          RUN_SEND_TESTS: ${{ inputs.run_send_tests && '1' || '' }}
+        run: npm run test:integration
