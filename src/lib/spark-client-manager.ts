@@ -52,11 +52,14 @@ function nsecToPrivateKeyHex(input: string): string | null {
  * `nsec1…` root secret (resolved to hex), otherwise passes the input through
  * unchanged (the SDK handles BIP39 mnemonics and hex seeds itself).
  */
-function resolveSparkMnemonicOrSeed(walletSecret: string): string {
+export function resolveSparkMnemonicOrSeed(walletSecret: string): string {
   const trimmed = walletSecret.trim()
   if (trimmed.startsWith('nsec1')) {
     const hex = nsecToPrivateKeyHex(trimmed)
     if (hex) return hex
+    // Never let a malformed nsec fall through as if it were a mnemonic/seed —
+    // the SDK would derive a valid-but-different empty wallet from it.
+    throw new Error('Invalid wallet secret: nsec1… failed to decode to a 32-byte key')
   }
   return walletSecret
 }
@@ -219,8 +222,13 @@ class SparkClientManager {
     return this.wallet !== null
   }
 
+  /**
+   * Connected config with the mnemonic REDACTED — getConfig() is read for
+   * network/settings lookups, and returning the seed here would let one
+   * careless `log(getConfig())` in a host leak it.
+   */
   getConfig(): SparkConfig | null {
-    return this.config
+    return this.config ? { ...this.config, mnemonic: '' } : null
   }
 
   async getReadonlyClient(): Promise<SparkReadonlyClient> {

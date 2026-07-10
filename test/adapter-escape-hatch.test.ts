@@ -32,9 +32,37 @@ describe('RlnWdkAdapter.executeProtocolOperation allowlist', () => {
   })
 
   it('rejects a non-allowlisted method even if it exists on the account', async () => {
-    // `changePassword` IS on the RLN allowlist by design; use a clearly off-list name.
     const { adapter } = connectedRln()
     await expect(adapter.executeProtocolOperation('listAssetsRaw', {})).rejects.toThrow(/not allowed/i)
+  })
+
+  it('rejects wallet-lifecycle ops (changePassword/restore) even though the account exposes them', async () => {
+    const { adapter } = connectedRln()
+    await expect(adapter.executeProtocolOperation('changePassword', {})).rejects.toThrow(/not allowed/i)
+    await expect(adapter.executeProtocolOperation('restore', {})).rejects.toThrow(/not allowed/i)
+  })
+
+  it('refuses node-side signMessage over the LNURL-auth canonical phrase', async () => {
+    const adapter = new RlnWdkAdapter()
+    const signed: string[] = []
+    Object.assign(adapter as any, {
+      connected: true,
+      account: {
+        signMessage: async (p: any) => {
+          signed.push(typeof p === 'string' ? p : p.message)
+          return { signature: 'sig' }
+        },
+      },
+    })
+    const phrase =
+      'DO NOT EVER SIGN THIS TEXT WITH YOUR PRIVATE KEYS! IT IS ONLY USED FOR DERIVATION OF LNURL-AUTH HASHING-KEY, DISCLOSING ITS SIGNATURE WILL COMPROMISE YOUR LNURL-AUTH IDENTITY AND MAY LEAD TO LOSS OF FUNDS!'
+    await expect(adapter.executeProtocolOperation('signMessage', { message: phrase })).rejects.toThrow(
+      /refusing to sign/i,
+    )
+    await expect(adapter.executeProtocolOperation('signMessage', phrase)).rejects.toThrow(/refusing to sign/i)
+    // ordinary messages still go through
+    await adapter.executeProtocolOperation('signMessage', { message: 'hello' })
+    expect(signed).toEqual(['hello'])
   })
 
   it('rejects prototype/meta members', async () => {

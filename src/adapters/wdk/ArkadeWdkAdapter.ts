@@ -86,8 +86,6 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   readonly capabilities = PROTOCOL_OPERATIONS.ARKADE
   readonly supportedLayers: Layer[] = getCapabilities('ARKADE').layers
 
-  /** BIP-39 mnemonic — retained for message signing (derives its own key). */
-  private mnemonic: string | null = null
 
   /** Lazily-loaded `@arkade-os/sdk` (for Ramps onboard/offboard). Kept off the static import graph. */
   private arkSdk: any = null
@@ -504,6 +502,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   // --- Message signing ----------------------------------------------------
   async signMessage(message: string): Promise<string> {
+    this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'ARKADE', 'NOT_CONNECTED')
     const { mnemonicToSeedSync } = await import('@scure/bip39')
     const { HDKey } = await import('@scure/bip32')

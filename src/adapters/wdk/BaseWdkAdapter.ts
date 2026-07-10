@@ -26,6 +26,12 @@ export abstract class BaseWdkAdapter {
   protected account: any = null
   protected connected = false
   protected network: string = 'mainnet'
+  /**
+   * BIP-39 mnemonic, retained by adapters that sign messages/PSBTs locally.
+   * Held here so disconnect() reliably clears it — a locked wallet must not
+   * be able to keep signing.
+   */
+  protected mnemonic: string | null = null
 
   isConnected(): boolean {
     return this.connected
@@ -41,6 +47,7 @@ export abstract class BaseWdkAdapter {
       this.account = null
       this.manager = null
       this.connected = false
+      this.mnemonic = null
     }
   }
 

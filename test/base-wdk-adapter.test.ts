@@ -42,6 +42,13 @@ describe('BaseWdkAdapter', () => {
     expect(a.isConnected()).toBe(false)
   })
 
+  it('disconnect clears the retained mnemonic (a locked wallet must not keep signing)', async () => {
+    const a = new TestAdapter()
+    Object.assign(a as any, { connected: true, account: {}, mnemonic: 'abandon abandon ability' })
+    await a.disconnect()
+    expect((a as any).mnemonic).toBeNull()
+  })
+
   it('defaults version and exposes supportsSwaps from the manifest (RGB_L1 = false)', () => {
     const a = new TestAdapter()
     expect(a.version).toBe('0.1.0-wdk')

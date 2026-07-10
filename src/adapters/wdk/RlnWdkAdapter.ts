@@ -42,6 +42,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { isBolt11 } from '../../lib/bolt11'
+import { assertSafeToSign } from '../../lib/ln-message-sign'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { KaleidoswapSwap, type SwapQuoteRequest, type SwapExecuteRequest } from '../../swap/KaleidoswapSwap'
@@ -87,9 +88,11 @@ const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
   'makerInit',
   'makerExecute',
   'backup',
-  'restore',
-  'changePassword',
   'signMessage',
+  // 'restore' / 'changePassword' are deliberately NOT allowlisted: they are
+  // wallet-lifecycle operations, and `operation` may be influenced by callers
+  // (deep links, chat/MCP tool args). Hosts that need them must call the
+  // account directly behind their own gating UI.
 ])
 
 export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
@@ -484,6 +487,11 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       toLayer: q.toLayer ?? 'RGB_LN',
       receiverAddress: q.receiverAddress ?? '',
       receiverAddressFormat: q.receiverAddressFormat ?? 'RGB_INVOICE',
+      // Bind execution to the quote the user approved: enforce its expiry and
+      // reject a degraded fill (the maker re-quotes internally and is never
+      // bound to this quote server-side).
+      approvedQuote: quote,
+      maxSlippageBps: q.maxSlippageBps,
     })
   }
 
@@ -494,6 +502,13 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   // --- Escape hatch -------------------------------------------------------
   /** Generic escape hatch for RLN-specific ops not on the core contract (allowlisted). */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
+    // Node-side signMessage must honor the same LNURL-auth phishing guard as
+    // the local signers — a signature over the canonical phrase compromises
+    // the node's LNURL-auth identity.
+    if (operation === 'signMessage') {
+      const message = typeof params === 'string' ? params : params?.message
+      if (typeof message === 'string') assertSafeToSign(message)
+    }
     return this.runAllowlistedOp(RLN_ALLOWED_OPS, operation, params)
   }
 }
