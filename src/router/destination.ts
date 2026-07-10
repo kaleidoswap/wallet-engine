@@ -107,7 +107,14 @@ const RE = {
 /** Pull a `lightning=` parameter out of a BIP21 URI, if present. */
 function extractLightning(uri: string): string | undefined {
   const m = uri.match(/[?&]lightning=([^&]+)/i)
-  return m ? decodeURIComponent(m[1]) : undefined
+  if (!m) return undefined
+  // Malformed percent-encoding (hostile QR) must not throw out of the
+  // classifier — treat it as no usable lightning parameter.
+  try {
+    return decodeURIComponent(m[1])
+  } catch {
+    return undefined
+  }
 }
 
 export function classifyDestination(raw: string): ClassifiedDestination {
