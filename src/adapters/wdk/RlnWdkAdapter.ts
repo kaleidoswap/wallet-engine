@@ -487,6 +487,11 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       toLayer: q.toLayer ?? 'RGB_LN',
       receiverAddress: q.receiverAddress ?? '',
       receiverAddressFormat: q.receiverAddressFormat ?? 'RGB_INVOICE',
+      // Bind execution to the quote the user approved: enforce its expiry and
+      // reject a degraded fill (the maker re-quotes internally and is never
+      // bound to this quote server-side).
+      approvedQuote: quote,
+      maxSlippageBps: q.maxSlippageBps,
     })
   }
 
