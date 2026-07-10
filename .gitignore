@@ -4,3 +4,8 @@ package-lock.json
 .npmrc
 .DS_Store
 *.tgz
+
+# Integration-test secrets + local rgb-lib wallet state (never commit)
+.env
+test/integration/.env
+

@@ -1,0 +1,66 @@
+/**
+ * Liquid · testnet — live integration
+ * -----------------------------------
+ * Connects Alice and Bob to Liquid testnet (lwk + Esplora) and checks their
+ * pre-funded L-BTC balances, asset list, and receive addresses. Includes an
+ * opt-in Alice→Bob L-BTC send.
+ *
+ * NOTE: the lwk wasm is ~10 MB and the first scan hits Esplora, so timeouts are
+ * generous. Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
+ */
+
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { ALICE, BOB, LIQUID, RUN_SEND_TESTS } from './config'
+import { assertFunded, connectLiquid, safeDisconnect } from './helpers'
+import type { LiquidWdkAdapter } from '../../src/adapters/wdk/LiquidWdkAdapter'
+
+describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
+  let alice: LiquidWdkAdapter
+  let bob: LiquidWdkAdapter
+
+  beforeAll(async () => {
+    ;[alice, bob] = await Promise.all([connectLiquid(ALICE), connectLiquid(BOB)])
+  }, 180_000)
+
+  afterAll(async () => {
+    await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
+  })
+
+  it('connects both wallets on testnet', async () => {
+    expect(alice.isConnected()).toBe(true)
+    expect(bob.isConnected()).toBe(true)
+    const info = await alice.getConnectionInfo()
+    expect(info.protocol).toBe('LIQUID')
+    // lwk reports the network as 'testnet' for the Liquid testnet.
+    expect(info.network).toMatch(/testnet/i)
+  }, 120_000)
+
+  it('Alice is funded with L-BTC on testnet', async () => {
+    assertFunded('Alice/Liquid', await alice.getBtcBalance())
+  }, 120_000)
+
+  it('Bob is funded with L-BTC on testnet', async () => {
+    assertFunded('Bob/Liquid', await bob.getBtcBalance())
+  }, 120_000)
+
+  it('lists L-BTC first in the asset list', async () => {
+    const assets = await alice.listAssets()
+    expect(assets.length).toBeGreaterThan(0)
+    expect(assets[0].ticker).toBe('L-BTC')
+    expect(assets.every((a) => a.protocol === 'LIQUID')).toBe(true)
+  }, 120_000)
+
+  it('returns a confidential receive address for each wallet', async () => {
+    const [a, b] = await Promise.all([alice.getReceiveAddress(), bob.getReceiveAddress()])
+    expect(a.format).toBe('LIQUID_ADDRESS')
+    expect(b.format).toBe('LIQUID_ADDRESS')
+    expect(a.address.startsWith('tlq') || a.address.startsWith('lq')).toBe(true)
+  }, 120_000)
+
+  it.skipIf(!RUN_SEND_TESTS)('sends L-BTC Alice → Bob', async () => {
+    const to = await bob.getReceiveAddress()
+    const res = await alice.sendPayment({ invoice: to.address, amount: 1000 })
+    expect(res.paymentHash).toBeTruthy()
+    expect(res.status).toBe('pending')
+  }, 180_000)
+})
