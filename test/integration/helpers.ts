@@ -14,15 +14,50 @@ import { ArkadeWdkAdapter } from '../../src/adapters/wdk/ArkadeWdkAdapter'
 import { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
 import { ARKADE, LIQUID, RGB_L1, SPARK, rgbDataDir, type WalletFixture } from './config'
 
+/**
+ * Retry a flaky async factory a few times with backoff. The Spark regtest
+ * server intermittently drops its gRPC channel ("Channel has been shut down")
+ * during wallet init; a fresh attempt almost always succeeds. Kept generic so
+ * other public-endpoint suites can reuse it.
+ */
+async function withRetry<T>(
+  label: string,
+  factory: () => Promise<T>,
+  { attempts = 3, baseDelayMs = 2000 }: { attempts?: number; baseDelayMs?: number } = {},
+): Promise<T> {
+  let lastErr: unknown
+  for (let i = 0; i < attempts; i++) {
+    try {
+      return await factory()
+    } catch (err) {
+      lastErr = err
+      if (i < attempts - 1) {
+        // eslint-disable-next-line no-console
+        console.warn(`[integration] ${label} attempt ${i + 1}/${attempts} failed, retrying: ${String(err)}`)
+        await new Promise((r) => setTimeout(r, baseDelayMs * (i + 1)))
+      }
+    }
+  }
+  throw lastErr
+}
+
 /** Connect a Spark (regtest) adapter for the given wallet. */
 export async function connectSpark(wallet: WalletFixture): Promise<SparkWdkAdapter> {
-  const adapter = new SparkWdkAdapter()
-  await adapter.connect({
-    protocol: 'SPARK',
-    network: SPARK.network,
-    mnemonic: wallet.mnemonic!,
-  } as any)
-  return adapter
+  // Spark's gRPC channel is flaky on connect; rebuild the adapter per attempt.
+  return withRetry(`connectSpark(${wallet.name})`, async () => {
+    const adapter = new SparkWdkAdapter()
+    try {
+      await adapter.connect({
+        protocol: 'SPARK',
+        network: SPARK.network,
+        mnemonic: wallet.mnemonic!,
+      } as any)
+      return adapter
+    } catch (err) {
+      await safeDisconnect(adapter)
+      throw err
+    }
+  })
 }
 
 /** Connect a Liquid (testnet) adapter for the given wallet. */
