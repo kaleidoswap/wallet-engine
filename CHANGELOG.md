@@ -7,6 +7,53 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.54] - 2026-07-13
+
+First changelog entry since beta.31; covers the security, packaging, and
+release-tooling work landed across beta.32–beta.54.
+
+### Changed
+- **BREAKING: protocol SDKs are now optional `peerDependencies`.** Only
+  `@noble/*` and `@scure/*` remain hard dependencies. Every protocol SDK
+  (`@buildonspark/spark-sdk`, `@arkade-os/*`, `@flashnet/sdk`,
+  `@tetherto/wdk-wallet-spark`, `@kaleidorg/wdk-wallet-rln`,
+  `@kaleidorg/wdk-wallet-liquid`, `@kaleidorg/wdk-protocol-swap-kaleidoswap`,
+  `@utexo/wdk-wallet-rgb`, `@utexo/rgb-lib-wasm`, `kaleido-sdk`) is an optional
+  peer — install only the ones whose adapters you use. Importing the root barrel
+  pulls in no protocol SDK; each adapter lazy-loads its SDK in `connect()`.
+  **Migration:** add the SDKs for your adapters to your own `package.json` (see
+  the adapter→package table in the README). Also declares the previously
+  undeclared (phantom) `@utexo/rgb-lib-wasm`.
+
+### Security
+- **A locked wallet can no longer sign.** `BaseWdkAdapter.disconnect()` now
+  clears the retained mnemonic, and `signPsbt`/`signMessage` assert the adapter
+  is connected — previously, after `disconnectAll()` (the lock path) a held
+  adapter could still sign PSBTs/messages with the root key.
+- **Fail-loud secret resolution.** A bad-checksum `nsec` or invalid BIP-39 phrase
+  in the Spark/Arkade client managers no longer silently derives a valid-but-
+  different (empty) wallet — it throws.
+- **RLN escape-hatch hardening.** `changePassword`/`restore` removed from the
+  allowlist; node-side `signMessage` now honors the LNURL-auth phishing guard.
+- **Destination classifier** no longer throws on malformed percent-encoding in a
+  BIP21 `lightning=` parameter (a hostile QR classified, not a crash).
+- Spark/Arkade `getConfig()` now redacts the mnemonic.
+
+### Fixed
+- **Swap execution is bound to the approved quote.** `executeSwap` enforces the
+  approved quote's expiry before ordering and rejects a fill that degrades past a
+  slippage bound (`maxSlippageBps`, default 1%) — the maker re-quotes internally
+  and was never bound to the user-approved quote.
+
+### Dependencies
+- Pinned `kaleido-sdk` to `0.1.11` (0.1.12+ removed the swap-order API the legacy
+  `RgbAdapter` uses).
+
+### Tooling
+- Live integration suite (Spark/Liquid/Arkade/RGB-L1 on test networks) with real
+  Alice→Bob sends, triggered on adapter-touching PRs + manual dispatch.
+- Release pipeline now gated on `npm test` + a bare-Node package-import check.
+
 ## [1.0.0-beta.31] - 2026-07-01
 
 ### Fixed
