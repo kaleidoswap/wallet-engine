@@ -10,8 +10,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ALICE, BOB, LIQUID, RUN_SEND_TESTS } from './config'
-import { assertFunded, connectLiquid, safeDisconnect } from './helpers'
+import { ALICE, BOB, LIQUID } from './config'
+import { assertFunded, connectLiquid, safeDisconnect, spendableSend } from './helpers'
 import type { LiquidWdkAdapter } from '../../src/adapters/wdk/LiquidWdkAdapter'
 
 describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
@@ -57,9 +57,10 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
     expect(a.address.startsWith('tlq') || a.address.startsWith('lq')).toBe(true)
   }, 120_000)
 
-  it.skipIf(!RUN_SEND_TESTS)('sends L-BTC Alice → Bob', async () => {
+  it('sends L-BTC Alice → Bob', async () => {
     const to = await bob.getReceiveAddress()
-    const res = await alice.sendPayment({ invoice: to.address, amount: 1000 })
+    const amount = spendableSend((await alice.getBtcBalance()).total, 'Alice/Liquid')
+    const res = await alice.sendPayment({ invoice: to.address, amount })
     expect(res.paymentHash).toBeTruthy()
     expect(res.status).toBe('pending')
   }, 180_000)

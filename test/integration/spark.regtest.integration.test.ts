@@ -9,8 +9,8 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ALICE, BOB, RUN_SEND_TESTS, SPARK } from './config'
-import { assertFunded, connectSpark, safeDisconnect } from './helpers'
+import { ALICE, BOB, SPARK } from './config'
+import { assertFunded, connectSpark, safeDisconnect, spendableSend } from './helpers'
 import type { SparkWdkAdapter } from '../../src/adapters/wdk/SparkWdkAdapter'
 
 describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
@@ -51,10 +51,14 @@ describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
     expect(a.address).not.toBe(b.address) // distinct wallets
   })
 
-  it.skipIf(!RUN_SEND_TESTS)('sends a native Spark transfer Alice → Bob', async () => {
+  it('sends a native Spark transfer Alice → Bob', async () => {
     const to = await bob.getReceiveAddress('SPARK')
     const before = (await bob.getBtcBalance()).total
-    const res = await alice.sendPayment({ invoice: to.address, amount: 1000 })
+    // Size the send to Alice's actual balance so this validates the transfer
+    // MECHANISM without assuming a specific funded amount (these are shared,
+    // slowly-draining test wallets). Fails loudly if Alice is genuinely empty.
+    const amount = spendableSend((await alice.getBtcBalance()).total, 'Alice/Spark')
+    const res = await alice.sendPayment({ invoice: to.address, amount })
     expect(res.status).toMatch(/pending|confirmed/)
     // Spark transfers settle fast; poll Bob's balance briefly.
     let after = before

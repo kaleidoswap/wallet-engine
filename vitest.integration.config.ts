@@ -16,6 +16,7 @@ export default defineConfig(({ mode }) => {
   return {
     test: {
       environment: 'node',
+      setupFiles: ['test/integration/setup.ts'],
       include: ['test/integration/**/*.integration.test.ts'],
       // Live network calls are slow; give suites room and don't run them in parallel
       // (shared test-network state, rate limits, and rgb-lib SQLite dirs).

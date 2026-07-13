@@ -13,7 +13,7 @@
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
-import { ALICE, BOB, RGB_L1, RUN_SEND_TESTS } from './config'
+import { ALICE, BOB, RGB_L1 } from './config'
 import { assertFunded, connectRgbL1, safeDisconnect } from './helpers'
 import type { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
 
@@ -62,8 +62,15 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
     expect(addr.address.length).toBeGreaterThan(0)
   }, 120_000)
 
-  it.skipIf(!RUN_SEND_TESTS)('creates colorable UTXOs for receiving RGB', async () => {
-    const res = await alice.createRgbUtxos!({ num: 1, upTo: true })
-    expect(res.success).toBe(true)
+  it('ensures colorable UTXOs exist for receiving RGB', async () => {
+    // `upTo` = "make sure at least N colorable UTXOs exist". If the wallet
+    // already has them, rgb-lib throws AllocationsAlreadyAvailable — that's the
+    // postcondition already met, not a failure, so treat it as success.
+    try {
+      const res = await alice.createRgbUtxos!({ num: 1, upTo: true })
+      expect(res.success).toBe(true)
+    } catch (err) {
+      expect(String(err)).toMatch(/AllocationsAlreadyAvailable/)
+    }
   }, 180_000)
 })

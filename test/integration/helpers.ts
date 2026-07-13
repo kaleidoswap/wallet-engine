@@ -118,3 +118,18 @@ export function assertFunded(label: string, balance: { total: number }): void {
   expect(Number.isFinite(balance.total), `${label} balance should be a finite number`).toBe(true)
   expect(balance.total, `${label} should be funded (total > 0) on its test network`).toBeGreaterThan(0)
 }
+
+/**
+ * Pick a small, safe send amount from a wallet's spendable balance for the
+ * transfer tests. These run against shared, slowly-draining test wallets, so a
+ * hardcoded amount eventually exceeds the balance and fails for the wrong
+ * reason. Send a small fixed amount, but fail loudly (not skip) if the wallet
+ * lacks even that plus a fee buffer.
+ */
+export function spendableSend(total: number, label: string, target = 100, feeBuffer = 200): number {
+  expect(
+    total,
+    `${label}: needs > ${target + feeBuffer} sat spendable to exercise the send test (has ${total}) — top up the wallet`,
+  ).toBeGreaterThan(target + feeBuffer)
+  return target
+}
