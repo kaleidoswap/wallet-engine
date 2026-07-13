@@ -78,15 +78,32 @@ pnpm add @kaleidorg/wallet-engine
 > (renamed from the earlier `@kaleidorg/wallet-protocols`; versions ≤ 1.0.0-beta.11 were
 > published under the old name).
 
-Heavy protocol SDKs are **optional dependencies** — install only the adapters you use:
+The only hard dependencies are `@noble/*` and `@scure/*` (the pure-core crypto
+primitives). Every protocol SDK is an **optional `peerDependency`** — install only the
+ones whose adapters you use. Importing the root barrel pulls in **no** protocol SDK, and
+each adapter lazy-loads its SDK inside `connect()`, so a missing peer only errors when you
+actually load that adapter's subpath.
+
+| You import… | Also install |
+|---|---|
+| `@kaleidorg/wallet-engine/adapters/wdk` (Spark) | `@tetherto/wdk-wallet-spark` |
+| `…/adapters/wdk` (RGB/RLN) | `@kaleidorg/wdk-wallet-rln` |
+| `…/adapters/wdk/wasm-liquid` | `@kaleidorg/wdk-wallet-liquid` |
+| `…/adapters/wdk/wasm-rgb` | `@utexo/rgb-lib-wasm` |
+| `…/adapters/wdk` (Arkade) | `@arkade-os/wdk` |
+| `…/swap` | `@kaleidorg/wdk-protocol-swap-kaleidoswap` |
+| `…/format` | `kaleido-sdk` |
+| legacy `…/adapters/spark` \| `/arkade` \| `/rgb` \| `/flashnet` | `@buildonspark/spark-sdk` \| `@arkade-os/sdk` (+`@arkade-os/boltz-swap`) \| `kaleido-sdk` \| `@flashnet/sdk` |
 
 ```bash
 # RGB/RLN + Liquid only, for example
-pnpm add @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-wallet-liquid
+pnpm add @kaleidorg/wallet-engine @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-wallet-liquid
 ```
 
-The engine lazy-loads each WDK module inside its adapter's `connect()`, so importing
-`wallet-engine` does **not** pull every protocol SDK into your bundle.
+> **Migration (≤ beta.53 → beta.54):** protocol SDKs moved from `dependencies`/
+> `optionalDependencies` to optional `peerDependencies`. They are no longer installed
+> transitively — add the packages for the adapters you use (table above) to your own
+> `package.json`.
 
 ---
 
@@ -96,10 +113,11 @@ The engine lazy-loads each WDK module inside its adapter's `connect()`, so impor
 import {
   ProtocolManager,
   CrossProtocolRouter,
-  createWdkRegistry,
   buildUnifiedReceiveURI,
   aggregateForLite,
 } from '@kaleidorg/wallet-engine'
+// Adapters + registry live behind the SDK-bearing subpath, so the root stays SDK-free:
+import { createWdkRegistry } from '@kaleidorg/wallet-engine/adapters/wdk'
 
 // 1. Build a registry of WDK-backed adapters (pick the protocols you want).
 const registry = createWdkRegistry({ enabled: ['RGB_LN', 'LIQUID', 'SPARK'] })
@@ -222,11 +240,12 @@ flag, never a new method on the contract.
 
 ## Public API
 
-The package's surface is its barrel, [`src/index.ts`](src/index.ts): types, the
-`IProtocolAdapter` contract + registry, capability manifest, platform ports, all native
-and WDK adapters, `createWdkRegistry`, `CrossProtocolRouter` + destination classifier,
-`KaleidoswapSwap`, unified receive, the disclosure model, `ProtocolManager`, and the
-per-protocol client managers.
+The root barrel, [`src/index.ts`](src/index.ts), is deliberately **SDK-free**: types, the
+`IProtocolAdapter` contract + registry, capability manifest, platform ports,
+`CrossProtocolRouter` + destination classifier, unified receive, the disclosure model,
+`ProtocolManager`, and the Arkade VTXO-lifecycle helpers. Adapters, `createWdkRegistry`,
+`KaleidoswapSwap`, and the client managers live behind their own subpath exports (see
+[`package.json`](package.json) `exports`) so importing the root pulls in no protocol SDK.
 
 ---
 

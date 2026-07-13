@@ -66,31 +66,52 @@
     "dist"
   ],
   "dependencies": {
+    "@noble/curves": "^2.0.1",
+    "@noble/hashes": "^2.2.0",
+    "@scure/base": "^2.2.0",
+    "@scure/bip32": "^1.5.0",
+    "@scure/bip39": "^1.4.0",
+    "@scure/btc-signer": "^2.2.0"
+  },
+  "peerDependencies": {
     "@arkade-os/boltz-swap": "^0.3.22",
     "@arkade-os/sdk": "^0.4.19",
     "@arkade-os/wdk": "^0.1.4",
     "@buildonspark/spark-sdk": "^0.7.10",
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2",
+    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.4",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
-    "@noble/curves": "^2.0.1",
-    "@noble/hashes": "^2.2.0",
-    "@scure/base": "^2.2.0",
-    "@scure/bip32": "^1.5.0",
-    "@scure/bip39": "^1.4.0",
-    "@scure/btc-signer": "^2.2.0",
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
+    "@utexo/rgb-lib-wasm": "^0.3.0",
+    "@utexo/wdk-wallet-rgb": "^2.0.3",
     "kaleido-sdk": "0.1.11"
   },
-  "optionalDependencies": {
-    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.4",
-    "@utexo/wdk-wallet-rgb": "^2.0.3"
+  "peerDependenciesMeta": {
+    "@arkade-os/boltz-swap": { "optional": true },
+    "@arkade-os/sdk": { "optional": true },
+    "@arkade-os/wdk": { "optional": true },
+    "@buildonspark/spark-sdk": { "optional": true },
+    "@flashnet/sdk": { "optional": true },
+    "@kaleidorg/wdk-protocol-swap-kaleidoswap": { "optional": true },
+    "@kaleidorg/wdk-wallet-liquid": { "optional": true },
+    "@kaleidorg/wdk-wallet-rln": { "optional": true },
+    "@tetherto/wdk-wallet-spark": { "optional": true },
+    "@utexo/rgb-lib-wasm": { "optional": true },
+    "@utexo/wdk-wallet-rgb": { "optional": true },
+    "kaleido-sdk": { "optional": true }
   },
   "devDependencies": {
     "@arkade-os/boltz-swap": "^0.3.22",
     "@arkade-os/sdk": "^0.4.19",
+    "@arkade-os/wdk": "^0.1.4",
     "@buildonspark/spark-sdk": "^0.7.10",
     "@flashnet/sdk": "^0.5.7",
+    "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.2",
+    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.4",
+    "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
+    "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
+    "@utexo/wdk-wallet-rgb": "^2.0.3",
     "kaleido-sdk": "0.1.11",
     "typescript": "~5.9.3",
     "vitest": "^2.1.9"
