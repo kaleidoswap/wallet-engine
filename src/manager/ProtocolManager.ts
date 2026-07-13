@@ -31,6 +31,7 @@ import {
 } from '../adapters/IProtocolAdapter'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
+import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
 
 /** Per-protocol timeout for cross-protocol fan-out reads (assets/transactions). */
 const PER_PROTOCOL_TIMEOUT_MS = 8_000
@@ -48,6 +49,14 @@ export interface ProtocolManagerConfig {
    * `verifyMessage` throws NOT_SUPPORTED for adapters without native support.
    */
   verifyMessageFallback?: (message: string, signature: string) => Promise<string>
+  /**
+   * Optional signing/spend policy. When set, fund-moving + signing operations
+   * (sendPayment/payKeysend/executeSwap/signMessage) are gated through
+   * `evaluatePolicy` and throw `PolicyError` on denial. Omit for no enforcement
+   * (default, fully backward-compatible). The active grant is selected with
+   * `setActiveGrant()`.
+   */
+  policy?: SigningPolicy
 }
 
 export class ProtocolManager {
@@ -55,12 +64,38 @@ export class ProtocolManager {
   private activeProtocol: ProtocolType | null = null
   private log: Logger
   private verifyMessageFallback?: (message: string, signature: string) => Promise<string>
+  private policy?: SigningPolicy
+  private activeGrantId?: string
 
   constructor(_config: ProtocolManagerConfig = {}) {
     this.registry = new ProtocolAdapterRegistry()
     this.activeProtocol = _config.defaultProtocol || null
     this.log = _config.logger ?? getLogger()
     this.verifyMessageFallback = _config.verifyMessageFallback
+    this.policy = _config.policy
+  }
+
+  /**
+   * Set (or clear) the capability grant applied to subsequent gated operations
+   * — e.g. the app/dapp/deep-link currently driving the wallet. No-op unless a
+   * policy is configured.
+   */
+  setActiveGrant(grantId: string | null): void {
+    this.activeGrantId = grantId ?? undefined
+  }
+
+  /** Gate a fund-moving/signing op through the policy. No-op when no policy is set. */
+  private enforce(operation: PolicyOperation, opts: { amountSat?: number; destination?: string } = {}): void {
+    enforcePolicy(
+      {
+        operation,
+        protocol: this.activeProtocol ?? undefined,
+        grantId: this.activeGrantId,
+        amountSat: opts.amountSat,
+        destination: opts.destination,
+      },
+      this.policy,
+    )
   }
 
   // ========================================================================
@@ -266,10 +301,13 @@ export class ProtocolManager {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
+    this.enforce('send', { amountSat: request.amount, destination: request.invoice })
     return this.getActiveAdapter().sendPayment(request)
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
+    // keysend amount is in msat; policy limits are in sats.
+    this.enforce('keysend', { amountSat: Math.ceil(request.amount / 1000), destination: request.pubkey })
     const adapter = this.getActiveAdapter()
     if (!adapter.payKeysend) {
       throw new ProtocolError(
@@ -291,6 +329,7 @@ export class ProtocolManager {
    * callers fall back to their own mnemonic-derived signer.
    */
   async signMessage(message: string): Promise<string> {
+    this.enforce('signMessage')
     const adapter = this.getActiveAdapter()
     if (typeof adapter.signMessage !== 'function') {
       throw new ProtocolError(
@@ -339,6 +378,7 @@ export class ProtocolManager {
   }
 
   async executeSwap(quote: Quote): Promise<SwapResult> {
+    this.enforce('swap', { amountSat: quote.fromAmount })
     const adapter = this.getActiveAdapter()
     if (!adapter.supportsSwaps() || !adapter.executeSwap) {
       throw new ProtocolError(

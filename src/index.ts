@@ -106,6 +106,16 @@ export {
 
 // Manager
 export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
+export {
+  evaluatePolicy,
+  enforcePolicy,
+  PolicyError,
+  type SigningPolicy,
+  type CapabilityGrant,
+  type PolicyRequest,
+  type PolicyOperation,
+  type PolicyDecision,
+} from './policy'
 
 // Utilities
 export { networkTypeToProtocol, protocolToNetworkType } from './utils'
