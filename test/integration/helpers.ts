@@ -20,7 +20,7 @@ import { ARKADE, LIQUID, RGB_L1, SPARK, rgbDataDir, type WalletFixture } from '.
  * during wallet init; a fresh attempt almost always succeeds. Kept generic so
  * other public-endpoint suites can reuse it.
  */
-async function withRetry<T>(
+export async function withRetry<T>(
   label: string,
   factory: () => Promise<T>,
   { attempts = 3, baseDelayMs = 2000 }: { attempts?: number; baseDelayMs?: number } = {},
@@ -62,14 +62,26 @@ export async function connectSpark(wallet: WalletFixture): Promise<SparkWdkAdapt
 
 /** Connect a Liquid (testnet) adapter for the given wallet. */
 export async function connectLiquid(wallet: WalletFixture): Promise<LiquidWdkAdapter> {
-  const adapter = new LiquidWdkAdapter()
-  await adapter.connect({
-    protocol: 'LIQUID',
-    network: LIQUID.network,
-    mnemonic: wallet.mnemonic!,
-    esploraUrl: LIQUID.esploraUrl,
-  } as any)
-  return adapter
+  // The gap-limit scan against the public esplora is rate-limited, which trips
+  // lwk's browser-only backoff sleep under Node; retry so a transient
+  // rate-limit doesn't fail the whole suite. Set LIQUID_WATERFALLS=1 to avoid
+  // the multi-request scan entirely (needs a waterfalls-capable esplora).
+  return withRetry(`connectLiquid(${wallet.name})`, async () => {
+    const adapter = new LiquidWdkAdapter()
+    try {
+      await adapter.connect({
+        protocol: 'LIQUID',
+        network: LIQUID.network,
+        mnemonic: wallet.mnemonic!,
+        esploraUrl: LIQUID.esploraUrl,
+        waterfalls: LIQUID.waterfalls,
+      } as any)
+      return adapter
+    } catch (err) {
+      await safeDisconnect(adapter)
+      throw err
+    }
+  })
 }
 
 /** Connect an Arkade (mutinynet/signet) adapter for the given wallet. */
@@ -117,4 +129,19 @@ export async function safeDisconnect(adapter: IProtocolAdapter | undefined): Pro
 export function assertFunded(label: string, balance: { total: number }): void {
   expect(Number.isFinite(balance.total), `${label} balance should be a finite number`).toBe(true)
   expect(balance.total, `${label} should be funded (total > 0) on its test network`).toBeGreaterThan(0)
+}
+
+/**
+ * Pick a small, safe send amount from a wallet's spendable balance for the
+ * transfer tests. These run against shared, slowly-draining test wallets, so a
+ * hardcoded amount eventually exceeds the balance and fails for the wrong
+ * reason. Send a small fixed amount, but fail loudly (not skip) if the wallet
+ * lacks even that plus a fee buffer.
+ */
+export function spendableSend(total: number, label: string, target = 100, feeBuffer = 200): number {
+  expect(
+    total,
+    `${label}: needs > ${target + feeBuffer} sat spendable to exercise the send test (has ${total}) — top up the wallet`,
+  ).toBeGreaterThan(target + feeBuffer)
+  return target
 }
