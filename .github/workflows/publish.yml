@@ -31,6 +31,29 @@ jobs:
 
       - run: npm run build
 
+      # Gate the release on the unit suite — never publish an untested build.
+      - name: Test
+        run: npm test
+
+      # Verify the ACTUAL published artifact: pack the tarball, install it into a
+      # bare project with NO protocol SDKs, and import the root barrel in plain
+      # Node. Catches a broken/non-ESM dist and any regression to the SDK-free-root
+      # guarantee (a root that pulls in a protocol SDK would fail here).
+      - name: Verify package imports (bare Node, no peers)
+        run: |
+          set -euo pipefail
+          TGZ="$(npm pack --silent | tail -1)"
+          WORK="$(mktemp -d)"
+          mv "$TGZ" "$WORK/"
+          cd "$WORK"
+          npm init -y >/dev/null
+          npm install --no-audit --no-fund "./$TGZ"
+          node --input-type=module -e "
+            const m = await import('@kaleidorg/wallet-engine');
+            if (typeof m.classifyDestination !== 'function') { throw new Error('root barrel missing expected export'); }
+            console.log('OK: root barrel imports in bare Node with', Object.keys(m).length, 'exports');
+          "
+
       - name: Resolve dist-tag
         id: disttag
         env:
