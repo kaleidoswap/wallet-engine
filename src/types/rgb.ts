@@ -16,6 +16,12 @@ export type RgbTransport = 'http' | 'nwc'
 export interface RgbConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
   makerUrl: string // Kaleidoswap maker URL
+  /**
+   * Master mnemonic. Required by the WDK RLN adapter, which derives the wallet's
+   * signing seed locally on-device. Never transmitted to the node. Optional here
+   * so legacy/non-WDK call sites still type-check.
+   */
+  mnemonic?: string
   /** Node transport. Defaults to "http" when omitted. */
   transport?: RgbTransport
   nodeUrl?: string // RGB Lightning node URL (required for transport "http")

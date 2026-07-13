@@ -14,6 +14,12 @@ export interface ArkadeConfig extends Omit<BaseProtocolConfig, 'network'> {
   delegatorUrl?: string
   delegationEnabled?: boolean
   vtxoThresholdSeconds?: number
+  /**
+   * Receive-address model. 'static' (default) pins a single key at index 0;
+   * 'hd' rotates addresses across `…/0/N` and runs a gap-limit restore scan.
+   * HD requires a BIP39 mnemonic; nsec/hex secrets stay single-key.
+   */
+  walletMode?: 'static' | 'hd'
 }
 
 export interface ArkadeVtxo {
