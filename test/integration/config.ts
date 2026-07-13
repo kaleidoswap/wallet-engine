@@ -68,6 +68,14 @@ export const LIQUID = {
   network: 'testnet' as const,
   /** Liquid testnet Esplora. */
   esploraUrl: env('LIQUID_ESPLORA_URL', 'https://blockstream.info/liquidtestnet/api')!,
+  /**
+   * Server-side "waterfalls" scan (one request) instead of the ~40-request
+   * gap-limit scan. The gap-limit scan gets rate-limited by the public
+   * blockstream esplora, which triggers lwk's backoff sleep — and lwk's sleep
+   * reaches a browser-only API that throws under Node. Set LIQUID_WATERFALLS=1
+   * with a waterfalls-capable LIQUID_ESPLORA_URL to avoid the whole path.
+   */
+  waterfalls: flag('LIQUID_WATERFALLS'),
   enabled: HAVE_WALLETS && !flag('SKIP_LIQUID'),
 }
 

@@ -11,7 +11,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { ALICE, BOB, LIQUID } from './config'
-import { assertFunded, connectLiquid, safeDisconnect, spendableSend } from './helpers'
+import { assertFunded, connectLiquid, safeDisconnect, spendableSend, withRetry } from './helpers'
 import type { LiquidWdkAdapter } from '../../src/adapters/wdk/LiquidWdkAdapter'
 
 describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
@@ -19,7 +19,11 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
   let bob: LiquidWdkAdapter
 
   beforeAll(async () => {
-    ;[alice, bob] = await Promise.all([connectLiquid(ALICE), connectLiquid(BOB)])
+    // Connect serially, not in parallel: each connect does a gap-limit scan
+    // (~40 esplora requests), and firing both at once doubles the burst that
+    // trips the public esplora's rate limit (→ lwk's browser-only backoff sleep).
+    alice = await connectLiquid(ALICE)
+    bob = await connectLiquid(BOB)
   }, 180_000)
 
   afterAll(async () => {
@@ -36,15 +40,19 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
   }, 120_000)
 
   it('Alice is funded with L-BTC on testnet', async () => {
-    assertFunded('Alice/Liquid', await alice.getBtcBalance())
+    // getBtcBalance re-scans; retry so a transient esplora rate-limit (which
+    // trips lwk's browser-only sleep under Node) doesn't fail the read.
+    const bal = await withRetry('Alice/Liquid balance', () => alice.getBtcBalance())
+    assertFunded('Alice/Liquid', bal)
   }, 120_000)
 
   it('Bob is funded with L-BTC on testnet', async () => {
-    assertFunded('Bob/Liquid', await bob.getBtcBalance())
+    const bal = await withRetry('Bob/Liquid balance', () => bob.getBtcBalance())
+    assertFunded('Bob/Liquid', bal)
   }, 120_000)
 
   it('lists L-BTC first in the asset list', async () => {
-    const assets = await alice.listAssets()
+    const assets = await withRetry('Alice/Liquid listAssets', () => alice.listAssets())
     expect(assets.length).toBeGreaterThan(0)
     expect(assets[0].ticker).toBe('L-BTC')
     expect(assets.every((a) => a.protocol === 'LIQUID')).toBe(true)
@@ -59,7 +67,8 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
 
   it('sends L-BTC Alice → Bob', async () => {
     const to = await bob.getReceiveAddress()
-    const amount = spendableSend((await alice.getBtcBalance()).total, 'Alice/Liquid')
+    const bal = await withRetry('Alice/Liquid balance (send)', () => alice.getBtcBalance())
+    const amount = spendableSend(bal.total, 'Alice/Liquid')
     const res = await alice.sendPayment({ invoice: to.address, amount })
     expect(res.paymentHash).toBeTruthy()
     expect(res.status).toBe('pending')

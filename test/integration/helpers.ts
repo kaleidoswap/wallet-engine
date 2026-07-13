@@ -20,7 +20,7 @@ import { ARKADE, LIQUID, RGB_L1, SPARK, rgbDataDir, type WalletFixture } from '.
  * during wallet init; a fresh attempt almost always succeeds. Kept generic so
  * other public-endpoint suites can reuse it.
  */
-async function withRetry<T>(
+export async function withRetry<T>(
   label: string,
   factory: () => Promise<T>,
   { attempts = 3, baseDelayMs = 2000 }: { attempts?: number; baseDelayMs?: number } = {},
@@ -62,14 +62,26 @@ export async function connectSpark(wallet: WalletFixture): Promise<SparkWdkAdapt
 
 /** Connect a Liquid (testnet) adapter for the given wallet. */
 export async function connectLiquid(wallet: WalletFixture): Promise<LiquidWdkAdapter> {
-  const adapter = new LiquidWdkAdapter()
-  await adapter.connect({
-    protocol: 'LIQUID',
-    network: LIQUID.network,
-    mnemonic: wallet.mnemonic!,
-    esploraUrl: LIQUID.esploraUrl,
-  } as any)
-  return adapter
+  // The gap-limit scan against the public esplora is rate-limited, which trips
+  // lwk's browser-only backoff sleep under Node; retry so a transient
+  // rate-limit doesn't fail the whole suite. Set LIQUID_WATERFALLS=1 to avoid
+  // the multi-request scan entirely (needs a waterfalls-capable esplora).
+  return withRetry(`connectLiquid(${wallet.name})`, async () => {
+    const adapter = new LiquidWdkAdapter()
+    try {
+      await adapter.connect({
+        protocol: 'LIQUID',
+        network: LIQUID.network,
+        mnemonic: wallet.mnemonic!,
+        esploraUrl: LIQUID.esploraUrl,
+        waterfalls: LIQUID.waterfalls,
+      } as any)
+      return adapter
+    } catch (err) {
+      await safeDisconnect(adapter)
+      throw err
+    }
+  })
 }
 
 /** Connect an Arkade (mutinynet/signet) adapter for the given wallet. */
