@@ -29,6 +29,7 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   Wallet,
   SingleKey,
+  MnemonicIdentity,
   IndexedDBWalletRepository,
   IndexedDBContractRepository,
   VtxoManager,
@@ -111,6 +112,18 @@ export function resolveArkadePrivateKeyHex(walletSecret: string, isMainnet: bool
   return bytesToHex(child.privateKey);
 }
 
+/**
+ * True when the secret is a BIP39 mnemonic (i.e. not an `nsec1…` root secret or
+ * a raw 64-char hex private key). HD rotation requires a mnemonic-backed,
+ * HD-capable identity (`MnemonicIdentity`); nsec/hex secrets stay single-key.
+ */
+function isBip39Secret(walletSecret: string): boolean {
+  const trimmed = walletSecret.trim();
+  if (trimmed.startsWith("nsec1")) return false;
+  if (/^[0-9a-f]{64}$/i.test(trimmed)) return false;
+  return trimmed.split(/\s+/).length >= 12;
+}
+
 // ---------------------------------------------------------------------------
 // ArkadeClientManager
 // ---------------------------------------------------------------------------
@@ -146,6 +159,7 @@ class ArkadeClientManager {
       if (
         this._pendingConfig?.network !== config.network ||
         this._pendingConfig?.mnemonic !== config.mnemonic ||
+        this._pendingConfig?.walletMode !== config.walletMode ||
         this._pendingConfig?.arkServerUrl !== config.arkServerUrl ||
         this._pendingConfig?.delegatorUrl !== config.delegatorUrl ||
         this._pendingConfig?.delegationEnabled !== config.delegationEnabled ||
@@ -177,8 +191,16 @@ class ArkadeClientManager {
 
     try {
       const isMainnet = config.network === "mainnet";
-      const privKeyHex = resolveArkadePrivateKeyHex(config.mnemonic, isMainnet);
-      const identity = SingleKey.fromHex(privKeyHex);
+      // HD mode (rotating receive addresses) requires an HD-capable,
+      // mnemonic-backed identity so the SDK can walk `…/0/N` indices. It is the
+      // address model the reference arkade-os wallet uses in "rotate addresses"
+      // mode; the extension's historical default is a single static key
+      // (index 0). Only enable HD when explicitly requested AND the secret is a
+      // BIP39 mnemonic (nsec/hex secrets are single-key).
+      const hdMode = config.walletMode === "hd" && isBip39Secret(config.mnemonic);
+      const identity = hdMode
+        ? MnemonicIdentity.fromMnemonic(config.mnemonic.trim(), { isMainnet })
+        : SingleKey.fromHex(resolveArkadePrivateKeyHex(config.mnemonic, isMainnet));
       const dbName = await this.buildDbName(config, identity);
 
       const vtxoThreshold = config.vtxoThresholdSeconds ?? DEFAULT_VTXO_THRESHOLD_SECONDS;
@@ -204,6 +226,9 @@ class ArkadeClientManager {
         },
         settlementConfig,
       };
+      if (hdMode) {
+        (walletConfig as WalletConfig & { walletMode?: string }).walletMode = "hd";
+      }
 
       // Wire delegation provider if configured.
       if (config.delegatorUrl && config.delegationEnabled) {
@@ -215,6 +240,21 @@ class ArkadeClientManager {
 
       this.wallet = await Wallet.create(walletConfig);
 
+      // HD wallets hold funds across rotated `…/0/N` addresses. A fresh client
+      // (e.g. restore on a new device) knows none of them until it runs the
+      // gap-limit scan, so without this it would show a 0 balance even though
+      // the funds exist. `restore()` walks HD indices from 0 and discovers every
+      // used address; it is a no-op cost for static wallets so we only run it in
+      // HD mode. Best-effort: a scan failure must not block the wallet coming up.
+      if (hdMode) {
+        try {
+          await (this.wallet as Wallet & { restore?: () => Promise<void> }).restore?.();
+          log.info("[ArkadeClientManager] HD restore gap-scan complete");
+        } catch (err) {
+          log.warn("[ArkadeClientManager] HD restore gap-scan failed (continuing):", err);
+        }
+      }
+
       // Reuse the wallet's own VtxoManager rather than creating a second one.
       // Wallet.create() already initialises an internal VtxoManager with the
       // same settlementConfig; constructing another would register a duplicate
@@ -224,8 +264,9 @@ class ArkadeClientManager {
       await this.refreshVtxoState();
 
       log.info(
-        "[ArkadeClientManager] Arkade wallet initialized successfully (vtxoThreshold=%ds)",
+        "[ArkadeClientManager] Arkade wallet initialized successfully (vtxoThreshold=%ds, mode=%s)",
         vtxoThreshold,
+        hdMode ? "hd" : "static",
       );
     } catch (error: unknown) {
       this.wallet = null;
@@ -243,7 +284,12 @@ class ArkadeClientManager {
   ): Promise<string> {
     const pubKey = await identity.xOnlyPublicKey();
     const pubKeyHex = bytesToHex(pubKey);
-    return `arkade-wallet-${config.network}-${pubKeyHex.slice(0, 16)}`;
+    // HD and static wallets share the same index-0 pubkey but track a different
+    // address set, so they must not share an IndexedDB store — otherwise a mode
+    // switch would read the other mode's cached state. Static keeps the legacy
+    // (mode-less) name for backward compatibility.
+    const modeSuffix = config.walletMode === "hd" ? "-hd" : "";
+    return `arkade-wallet-${config.network}-${pubKeyHex.slice(0, 16)}${modeSuffix}`;
   }
 
   async refreshVtxoState(): Promise<void> {

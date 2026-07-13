@@ -293,8 +293,20 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     this.assertConnected()
-    const s: any = await this.account.getInvoiceStatus({ paymentHash })
-    return { paymentHash, status: mapRgbStatus(s?.status), error: s?.error }
+    // An RLN node exposes invoice-status only for INBOUND invoices (keyed by
+    // bolt11); the status of an OUTBOUND payment we sent lives in list_payments,
+    // keyed by payment_hash. Querying getInvoiceStatus({ paymentHash }) never
+    // resolves for a sent payment, so a withdraw poll would time out even after
+    // the payment settled. Look the payment up in list_payments instead.
+    try {
+      const r: any = await this.account.listPayments()
+      const list: any[] = (r && r.payments) ?? (Array.isArray(r) ? r : [])
+      const p = list.find((x) => (x?.payment_hash ?? x?.paymentHash) === paymentHash)
+      if (p) return { paymentHash, status: mapRgbStatus(p?.status), error: p?.error }
+    } catch {
+      /* fall through — treat as still pending */
+    }
+    return { paymentHash, status: 'pending' }
   }
 
   // --- Transactions / payments -------------------------------------------

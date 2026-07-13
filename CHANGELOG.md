@@ -7,6 +7,34 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.55] - 2026-07-13
+
+Upstreams fixes/features that were previously carried as a patch in the
+browser extension, so every consumer gets them.
+
+### Fixed
+- **RGB-L1 (wasm) wallet creation crashed on mainnet.** rgb-lib rejects the IFA
+  (inflatable) schema on mainnet (`CannotUseIfaOnMainnet`), so declaring it made
+  `WasmWallet.create` throw before the wallet could open. IFA is now gated to the
+  test networks; mainnet is NIA-only until rgb-lib whitelists IFA.
+- **Outbound RGB-LN payment status never resolved.** `getPaymentStatus` queried
+  the node's invoice-status endpoint, which only knows INBOUND invoices — so a
+  withdraw poll timed out even after the payment settled. It now reads the sent
+  payment from `list_payments` (keyed by `payment_hash`) and never throws
+  (unknown/failed lookup → `pending`).
+
+### Added
+- **Arkade HD-wallet mode** (`ArkadeConfig.walletMode: 'static' | 'hd'`). `'hd'`
+  uses an HD-capable `MnemonicIdentity`, rotates receive addresses across
+  `…/0/N`, runs a gap-limit `restore()` scan on connect, and uses a separate
+  IndexedDB store. Requires a BIP-39 mnemonic (nsec/hex secrets stay single-key).
+  Default remains `'static'` (backward-compatible, legacy store name).
+- `RgbConfig.mnemonic?` — the WDK RLN adapter derives its signing seed on-device.
+
+### Fixed (packaging)
+- Corrected the `@utexo/rgb-lib-wasm` peer-dependency range (`^1.0.0-beta.3`;
+  was mistakenly `^0.3.0` in beta.54).
+
 ## [1.0.0-beta.54] - 2026-07-13
 
 First changelog entry since beta.31; covers the security, packaging, and

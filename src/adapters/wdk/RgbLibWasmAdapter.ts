@@ -174,7 +174,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       accountXpubVanilla: keys.accountXpubVanilla ?? keys.account_xpub_vanilla,
       accountXpubColored: keys.accountXpubColored ?? keys.account_xpub_colored,
       vanillaKeychain: null,
-      supportedSchemas: ['Nia', 'Ifa'],
+      // rgb-lib rejects the IFA (inflatable) schema on mainnet
+      // (Error::CannotUseIfaOnMainnet in setup_rgb) — declaring it there makes
+      // WasmWallet.create throw before the wallet can even open. Gate IFA to the
+      // test networks; mainnet is NIA-only until rgb-lib whitelists IFA.
+      supportedSchemas: rgbNetwork === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa'],
     }
 
     const WasmWallet = mod.WasmWallet
