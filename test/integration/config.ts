@@ -66,16 +66,17 @@ export const SPARK = {
 
 export const LIQUID = {
   network: 'testnet' as const,
-  /** Liquid testnet Esplora. */
-  esploraUrl: env('LIQUID_ESPLORA_URL', 'https://blockstream.info/liquidtestnet/api')!,
   /**
-   * Server-side "waterfalls" scan (one request) instead of the ~40-request
-   * gap-limit scan. The gap-limit scan gets rate-limited by the public
-   * blockstream esplora, which triggers lwk's backoff sleep — and lwk's sleep
-   * reaches a browser-only API that throws under Node. Set LIQUID_WATERFALLS=1
-   * with a waterfalls-capable LIQUID_ESPLORA_URL to avoid the whole path.
+   * Waterfalls quick-sync by default — the same server the extension uses
+   * (rate-extension/src/lib/config.ts). The server-side waterfalls scan is ONE
+   * request; the alternative ~40-request gap-limit scan against the public
+   * blockstream esplora gets rate-limited, which triggers lwk_node's backoff
+   * sleep — a browser-only API that throws "Cannot access browser window" under
+   * Node. Override the endpoint with LIQUID_ESPLORA_URL; disable quick-sync
+   * with LIQUID_WATERFALLS=0 (then point LIQUID_ESPLORA_URL at a plain esplora).
    */
-  waterfalls: flag('LIQUID_WATERFALLS'),
+  esploraUrl: env('LIQUID_ESPLORA_URL', 'https://waterfalls.liquidwebwallet.org/liquidtestnet/api')!,
+  waterfalls: !/^(0|false|no)$/i.test(process.env.LIQUID_WATERFALLS?.trim() ?? ''),
   enabled: HAVE_WALLETS && !flag('SKIP_LIQUID'),
 }
 
