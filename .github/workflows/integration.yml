@@ -2,18 +2,34 @@ name: Integration
 
 # Live integration suite (test/integration/**): connects real WDK adapters to
 # real test networks with the pre-funded Alice & Bob wallets (repo secrets).
-# Runs nightly + on demand. Fund-moving send tests stay OFF unless the manual
-# dispatch opts in.
+#
+# Trigger model: this suite exists to catch wire-contract drift, which happens
+# when adapter code (or a dep) changes — so it runs on PRs / pushes that touch
+# the relevant paths, plus manual dispatch. No nightly cron: a blind nightly
+# mostly flakes and drains the send-test wallets with no code change behind it.
+#
+# Send tests move real (test-network) funds and run by DEFAULT here (nothing is
+# skipped); the manual dispatch can turn them off for a quick read-only check.
 on:
-  schedule:
-    # Nightly at 04:17 UTC (off-peak for the public endpoints we hit).
-    - cron: '17 4 * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'src/**'
+      - 'test/integration/**'
+      - 'package.json'
+      - '.github/workflows/integration.yml'
+  pull_request:
+    paths:
+      - 'src/**'
+      - 'test/integration/**'
+      - 'package.json'
+      - '.github/workflows/integration.yml'
   workflow_dispatch:
     inputs:
       run_send_tests:
-        description: 'Run fund-moving send/transfer tests (RUN_SEND_TESTS=1)'
+        description: 'Run fund-moving send/transfer tests'
         type: boolean
-        default: false
+        default: true
 
 concurrency:
   # The suites are stateful per wallet (rgb-lib data dirs, wallet balances) —
@@ -47,5 +63,6 @@ jobs:
         env:
           ALICE_MNEMONIC: ${{ secrets.ALICE_MNEMONIC }}
           BOB_MNEMONIC: ${{ secrets.BOB_MNEMONIC }}
-          RUN_SEND_TESTS: ${{ inputs.run_send_tests && '1' || '' }}
+          # Send tests run by default (push/PR); a dispatch can opt out via the input.
+          RUN_SEND_TESTS: ${{ github.event_name != 'workflow_dispatch' && '1' || (inputs.run_send_tests && '1' || '') }}
         run: npm run test:integration
