@@ -136,6 +136,7 @@
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.2",
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
     "@utexo/wdk-wallet-rgb": "^2.0.3",
+    "fast-check": "^4.9.0",
     "kaleido-sdk": "0.1.11",
     "typescript": "~5.9.3",
     "vitest": "^2.1.9"
