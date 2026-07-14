@@ -157,6 +157,15 @@ See [`src/adapters/IProtocolAdapter.ts`](src/adapters/IProtocolAdapter.ts). Two 
 ship: **native** adapters (direct SDK integrations) and **WDK-backed** adapters — both
 satisfy the same contract, so the app can't tell which is underneath.
 
+The contract is decomposed into a small required core (`ICoreProtocolAdapter`) plus
+optional capability groups (`IRgbOperations`, `ISparkOperations`, `IArkadeOperations`,
+`IBackupOperations`, `ISigningOperations`, `ISwapOperations`, …). `IProtocolAdapter` is
+their composition (`Core & Partial<each group>`), so the flat surface is unchanged. A new
+adapter can `implements ICoreProtocolAdapter & IRgbOperations` to opt into a group with
+required (not optional) methods, and callers can reach a group cleanly with the narrowing
+helpers — `asRgbOperations(adapter)`, `asSwapOperations(adapter)`, etc. Third-party
+protocols implement the core and connect with any `BaseProtocolConfig`-shaped config.
+
 ### Capability manifest — differences as data
 [`src/capabilities/index.ts`](src/capabilities/index.ts) is the single source of truth
 for what each protocol can do (layers, swaps, channel liquidity, zero-fee, static
