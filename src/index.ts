@@ -12,7 +12,31 @@ export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, 
 export * from './types/flashnet'
 
 // Adapter interface
-export { type IProtocolAdapter, type BaseProtocolConfig, type ProtocolConfig, type IProtocolAdapterFactory, ProtocolAdapterRegistry } from './adapters/IProtocolAdapter'
+export {
+  type IProtocolAdapter,
+  type ICoreProtocolAdapter,
+  type BaseProtocolConfig,
+  type ProtocolConfig,
+  type IProtocolAdapterFactory,
+  // Capability-group interfaces (compose into IProtocolAdapter; implement directly for stronger typing).
+  type IKeysendOperations,
+  type ISigningOperations,
+  type IOnchainOperations,
+  type IRgbOperations,
+  type IBackupOperations,
+  type ISparkOperations,
+  type IArkadeOperations,
+  type ISwapOperations,
+  type IExtensibleAdapter,
+  // Capability narrowing helpers.
+  asSwapOperations,
+  asRgbOperations,
+  asSigningOperations,
+  asBackupOperations,
+  asSparkOperations,
+  asArkadeOperations,
+  ProtocolAdapterRegistry,
+} from './adapters/IProtocolAdapter'
 
 // Capability manifest (differences-as-data backbone)
 export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type ProtocolCapabilities } from './capabilities'

@@ -7,6 +7,23 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+- **`IProtocolAdapter` decomposed into capability-group interfaces.** The flat
+  70-method contract is now `ICoreProtocolAdapter` (the ~24 universal members)
+  recomposed with `Partial<…>` of named groups — `IKeysendOperations`,
+  `ISigningOperations`, `IOnchainOperations`, `IRgbOperations`,
+  `IBackupOperations`, `ISparkOperations`, `IArkadeOperations`,
+  `ISwapOperations`, `IExtensibleAdapter`. Structurally identical to the old
+  interface (every group method stays optional on `IProtocolAdapter`), so all
+  existing `implements`/call sites are unaffected. A new adapter can now
+  `implements ICoreProtocolAdapter & IRgbOperations` for stronger typing, and
+  callers can narrow with `asRgbOperations(adapter)` / `asSwapOperations(…)` /
+  etc. instead of optional-chaining across the whole surface.
+- **`ProtocolConfig` opened for third-party protocols.** Now accepts any
+  `BaseProtocolConfig & Record<string, unknown>` in addition to the known
+  first-party configs, so a third-party adapter can define and pass its own
+  config without editing the engine's union.
+
 ## [1.0.0-beta.56] - 2026-07-14
 
 Security track: hardens the highest-severity input surface and adds a
