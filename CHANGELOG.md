@@ -7,6 +7,31 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.56] - 2026-07-14
+
+Security track: hardens the highest-severity input surface and adds a
+first-class, opt-in policy layer for fund-moving/signing operations.
+
+### Added
+- **Signing/spend policy engine** (`src/policy`): `evaluatePolicy`/`enforcePolicy`,
+  pure and I/O-free. Enforces per-transaction spend limits (global + per-grant),
+  destination allowlists (exact match or by classified destination kind), and
+  per-app capability grants. Default-allow (a policy only ever tightens);
+  `mode: 'deny'` requires an explicit matching grant. Wired into
+  `ProtocolManager` as opt-in (`config.policy` + `setActiveGrant()`) — gates
+  `sendPayment`/`payKeysend`/`executeSwap`/`signMessage` and throws
+  `PolicyError` on denial. No policy configured ⇒ unchanged behavior.
+  Exported from the root barrel.
+
+### Testing
+- Property-based fuzzing (`fast-check`) of `classifyDestination` — the
+  destination classifier is the highest-severity input surface, since a wrong
+  classification misroutes funds to the wrong chain. Verifies it never throws,
+  is deterministic, and never cross-classifies a valid Spark/Arkade/Liquid
+  address as a different protocol. Regression guards lock the documented
+  fund-misrouting hazards (`sp1…` Silent Payments vs Spark, `lntbs1…` signet
+  BOLT11, `lq1…` Liquid vs BTC on-chain).
+
 ## [1.0.0-beta.55] - 2026-07-13
 
 Upstreams fixes/features that were previously carried as a patch in the
