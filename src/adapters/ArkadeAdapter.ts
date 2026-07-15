@@ -18,6 +18,11 @@ import { mnemonicToSeedSync } from "@scure/bip39";
 import { HDKey } from "@scure/bip32";
 import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 import { log } from "../lib/log";
+import {
+  getArkadeBalanceCached,
+  getArkadeVtxosCached,
+  invalidateArkadeSnapshotCache,
+} from "../lib/arkade-snapshot-cache";
 import { arkadeClientManager } from "../lib/arkade-client-manager";
 import { arkadeSwapsClientManager } from "../lib/arkade-swaps-client-manager";
 import {
@@ -166,7 +171,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
     try {
       const wallet = arkadeClientManager.getWallet();
-      const rawBalance = await wallet.getBalance();
+      // Both reads go through the shared snapshot — the summary reuses the
+      // same getBalance() RPC instead of issuing a second one.
+      const rawBalance = await getArkadeBalanceCached(wallet);
       const balance = await this.getWalletBalanceSummary(wallet);
       const totalSats = balance.total;
       const preconfirmed = balance.preconfirmed;
@@ -487,6 +494,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
         amount: request.amount, // satoshis
         ...(selectedVtxos ? { selectedVtxos } : {}),
       });
+      invalidateArkadeSnapshotCache();
       return {
         paymentHash: txid,
         amount: request.amount,
@@ -645,7 +653,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
     try {
       const wallet = arkadeClientManager.getWallet();
-      const vtxos = await wallet.getVtxos();
+      const vtxos = await getArkadeVtxosCached(wallet);
       const sorted = sortVtxosByExpiry(vtxos);
       return normalizeVtxos(sorted).map((vtxo) => ({
         txid: vtxo.txid,
@@ -700,6 +708,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       // Get current fee info from server
       const info = await wallet.arkProvider.getInfo();
       const commitmentTxid: string = await new Ramps(wallet).onboard(info.fees);
+      invalidateArkadeSnapshotCache();
       return { txid: commitmentTxid };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -738,6 +747,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
         info.fees,
         amount !== undefined ? BigInt(amount) : undefined,
       );
+      invalidateArkadeSnapshotCache();
       return { txid: exitTxid };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -784,6 +794,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
         address: recipientId,
         assets: [{ assetId, amount }],
       });
+      invalidateArkadeSnapshotCache();
       return { txid };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -806,6 +817,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
         amount: params.amount,
         ...(selectedVtxos ? { selectedVtxos } : {}),
       });
+      invalidateArkadeSnapshotCache();
       return { txid };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -874,6 +886,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
   ): Promise<ExtendedVirtualCoin[] | undefined> {
     if (!Number.isFinite(targetSats) || targetSats <= 0) return undefined;
     try {
+      // Deliberately NOT the snapshot cache: coin selection from a stale
+      // VTXO list could double-select a just-spent VTXO. Always fresh here.
       const raw = await wallet.getVtxos();
       const list: ExtendedVirtualCoin[] = Array.isArray(raw)
         ? raw
@@ -909,7 +923,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     recoverable: number;
     total: number;
   }> {
-    const balance = await wallet.getBalance();
+    const balance = await getArkadeBalanceCached(wallet);
     const normalized = {
       boardingConfirmed: toNumber(balance?.boarding?.confirmed),
       boardingUnconfirmed: toNumber(balance?.boarding?.unconfirmed),
@@ -923,7 +937,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
 
     let normalizedVtxos: ReturnType<typeof normalizeVtxos> = [];
     try {
-      normalizedVtxos = normalizeVtxos(await wallet.getVtxos());
+      normalizedVtxos = normalizeVtxos(await getArkadeVtxosCached(wallet));
     } catch (error) {
       log.warn(
         "[ArkadeAdapter] Failed to derive balance from VTXOs, falling back to wallet.getBalance()",

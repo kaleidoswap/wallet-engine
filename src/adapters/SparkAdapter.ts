@@ -297,9 +297,10 @@ export class SparkAdapter implements IProtocolAdapter {
 
       // Fetch BTC transfers — best effort. A gateway/auth failure here must
       // not hide token activity, and especially not the offline send-record
-      // fallback below.
-      let btcTxs: UnifiedTransaction[] = [];
-      if (shouldFetchBtc) {
+      // fallback below. Runs CONCURRENTLY with the token block below — the
+      // two share nothing, and serializing them doubled activity latency.
+      const btcTxsPromise = (async (): Promise<UnifiedTransaction[]> => {
+        if (!shouldFetchBtc) return [];
         try {
           let btcTransfers: SparkTransfer[] = [];
           if (createdAfter || createdBefore) {
@@ -323,22 +324,35 @@ export class SparkAdapter implements IProtocolAdapter {
           } else {
             btcTransfers = (await wallet.getTransfers(limit, offset)).transfers as SparkTransfer[];
           }
-          btcTxs = btcTransfers.map((t) => convertTransferToTransaction(t));
+          return btcTransfers.map((t) => convertTransferToTransaction(t));
         } catch (err) {
           log.warn("[SparkAdapter] Failed to fetch BTC transfers:", err);
+          return [];
         }
-      }
+      })();
 
       // Fetch token transactions. Every Spark RPC below is best-effort and
       // isolated — a transport/auth failure must never hide locally-recorded
       // sends, which are the only reliable record of an outgoing token
       // transfer (a withdrawal with no change output is invisible to the
       // owner-filtered server query).
-      const tokenTxs: UnifiedTransaction[] = [];
-      try {
-        if (shouldFetchTokens) {
-          const sparkAddress = (await wallet.getSparkAddress()) as string;
-          const identityPubKey = await wallet.getIdentityPublicKey();
+      const tokenTxsPromise = (async (): Promise<UnifiedTransaction[]> => {
+        const tokenTxs: UnifiedTransaction[] = [];
+        try {
+          if (!shouldFetchTokens) return tokenTxs;
+          // Independent prep — address, pubkey, balances (through the shared
+          // 3s cache, so a concurrent dashboard render shares the RPC), and
+          // the local send outbox all fetch concurrently.
+          const [sparkAddress, identityPubKey, balanceSnapshot, allSentRecords] =
+            await Promise.all([
+              wallet.getSparkAddress() as Promise<string>,
+              wallet.getIdentityPublicKey(),
+              getSparkBalanceCached(wallet).catch((err) => {
+                log.warn("[SparkAdapter] Failed to load token balances for activity:", err);
+                return null;
+              }),
+              loadSentTokenRecords(),
+            ]);
           let networkType = "";
           try {
             networkType = getNetworkFromSparkAddress(sparkAddress);
@@ -357,33 +371,24 @@ export class SparkAdapter implements IProtocolAdapter {
             string,
             { id: string; meta: { name: string; ticker: string; decimals: number } }
           >();
-          try {
-            const { tokenBalances } = await wallet.getBalance();
-            if (tokenBalances) {
-              for (const [tokenId, info] of tokenBalances) {
-                const meta = {
-                  name: info.tokenMetadata.tokenName,
-                  ticker: info.tokenMetadata.tokenTicker,
-                  decimals: info.tokenMetadata.decimals,
-                };
-                tokenMetaMap.set(tokenId, meta);
+          if (balanceSnapshot?.tokenBalances) {
+            for (const [tokenId, info] of balanceSnapshot.tokenBalances) {
+              const meta = {
+                name: info.tokenMetadata.tokenName,
+                ticker: info.tokenMetadata.tokenTicker,
+                decimals: info.tokenMetadata.decimals,
+              };
+              tokenMetaMap.set(tokenId, meta);
 
-                const rawTokenIdentifier = (
-                  info.tokenMetadata as { rawTokenIdentifier?: Uint8Array }
-                ).rawTokenIdentifier;
-                const rawTokenId = rawTokenIdFromBytes(rawTokenIdentifier);
-                if (rawTokenId) {
-                  rawTokenMetaMap.set(rawTokenId, { id: tokenId, meta });
-                }
+              const rawTokenIdentifier = (
+                info.tokenMetadata as { rawTokenIdentifier?: Uint8Array }
+              ).rawTokenIdentifier;
+              const rawTokenId = rawTokenIdFromBytes(rawTokenIdentifier);
+              if (rawTokenId) {
+                rawTokenMetaMap.set(rawTokenId, { id: tokenId, meta });
               }
             }
-          } catch (err) {
-            log.warn("[SparkAdapter] Failed to load token balances for activity:", err);
           }
-
-          // Stored send records — written to chrome.storage at send time, so
-          // they are available even when the Spark gateway is unreachable.
-          const allSentRecords = await loadSentTokenRecords();
           const walletSentRecords = allSentRecords.filter(
             (record) => record.senderSparkAddress === sparkAddress,
           );
@@ -410,36 +415,42 @@ export class SparkAdapter implements IProtocolAdapter {
             status: number;
             tokenTransactionHash: Uint8Array;
           }> = [];
-          try {
-            const result = await wallet.queryTokenTransactions({
-              ownerPublicKeys: [identityPubKey],
-              tokenIdentifiers:
-                requestedAsset && requestedAsset !== "BTC" ? [requestedAsset] : undefined,
-              pageSize: limit,
-            });
-            txsWithStatus.push(...(result.tokenTransactionsWithStatus ?? []));
-          } catch (err) {
-            log.warn("[SparkAdapter] Failed to query token transactions:", err);
-          }
-
-          // Sends without a change output are invisible to the owner-filtered
-          // query above; fetch them explicitly by hash. Also best effort.
-          if (sentRecords.length > 0) {
-            try {
-              const sentResult = await wallet.queryTokenTransactionsByTxHashes(
-                sentRecords.map((r) => normalizeTxHash(r.hash)),
-              );
-              const existingHashes = new Set(
-                txsWithStatus.map((t) => txHashFromBytes(t.tokenTransactionHash)),
-              );
-              for (const sentTx of sentResult.tokenTransactionsWithStatus ?? []) {
-                const hash = txHashFromBytes(sentTx.tokenTransactionHash);
-                if (!existingHashes.has(hash)) {
-                  txsWithStatus.push(sentTx);
-                }
+          // The owner-keyed query and the by-hash query (sends without a
+          // change output are invisible to the owner filter) are independent
+          // server calls — fetch concurrently, dedup afterwards.
+          const [ownerResult, sentResult] = await Promise.all([
+            wallet
+              .queryTokenTransactions({
+                ownerPublicKeys: [identityPubKey],
+                tokenIdentifiers:
+                  requestedAsset && requestedAsset !== "BTC" ? [requestedAsset] : undefined,
+                pageSize: limit,
+              })
+              .catch((err: unknown) => {
+                log.warn("[SparkAdapter] Failed to query token transactions:", err);
+                return null;
+              }),
+            sentRecords.length > 0
+              ? wallet
+                  .queryTokenTransactionsByTxHashes(
+                    sentRecords.map((r) => normalizeTxHash(r.hash)),
+                  )
+                  .catch((err: unknown) => {
+                    log.warn("[SparkAdapter] Failed to fetch sent token transactions:", err);
+                    return null;
+                  })
+              : Promise.resolve(null),
+          ]);
+          txsWithStatus.push(...(ownerResult?.tokenTransactionsWithStatus ?? []));
+          if (sentResult) {
+            const existingHashes = new Set(
+              txsWithStatus.map((t) => txHashFromBytes(t.tokenTransactionHash)),
+            );
+            for (const sentTx of sentResult.tokenTransactionsWithStatus ?? []) {
+              const hash = txHashFromBytes(sentTx.tokenTransactionHash);
+              if (!existingHashes.has(hash)) {
+                txsWithStatus.push(sentTx);
               }
-            } catch (err) {
-              log.warn("[SparkAdapter] Failed to fetch sent token transactions:", err);
             }
           }
 
@@ -491,11 +502,13 @@ export class SparkAdapter implements IProtocolAdapter {
               `(${sentRecords.length} this wallet, ${renderedSendHashes.size} from gateway, ` +
               `${synthesizedCount} synthesized)`,
           );
+        } catch (err) {
+          log.warn("[SparkAdapter] Failed to fetch token transactions:", err);
         }
-      } catch (err) {
-        log.warn("[SparkAdapter] Failed to fetch token transactions:", err);
-      }
+        return tokenTxs;
+      })();
 
+      const [btcTxs, tokenTxs] = await Promise.all([btcTxsPromise, tokenTxsPromise]);
       const allTxs = [...btcTxs, ...tokenTxs].sort((a, b) => b.timestamp - a.timestamp);
 
       return allTxs.filter((tx) => {
