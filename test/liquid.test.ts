@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { LiquidWdkAdapter } from '../src/adapters/wdk/LiquidWdkAdapter'
+import {
+  LiquidWdkAdapter,
+  type LiquidSyncWarning,
+} from '../src/adapters/wdk/LiquidWdkAdapter'
+import type { LiquidSyncWarning as PublicLiquidSyncWarning } from '../src/adapters/wdk'
+import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { LIQUID_USDT_ASSET_ID } from '../src/constants'
 
 /**
@@ -30,6 +35,44 @@ describe('LiquidWdkAdapter', () => {
     expect(adapter.protocolName).toBe('LIQUID')
     expect(adapter.supportedLayers).toEqual(['BTC_LIQUID', 'LIQUID_ASSET'])
     expect(adapter.supportsSwaps()).toBe(false)
+  })
+
+  it('forwards recoverable Liquid sync warnings to the client callback', async () => {
+    let managerConfig: Record<string, unknown> | undefined
+    class FakeLiquidWalletManager {
+      constructor(_mnemonic: string, config: Record<string, unknown>) {
+        managerConfig = config
+      }
+      async getAccount() {
+        return {}
+      }
+    }
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => ({ default: FakeLiquidWalletManager }))
+
+    let receivedWarning: PublicLiquidSyncWarning | undefined
+    const adapter = new LiquidWdkAdapter()
+    await adapter.connect({
+      protocol: 'LIQUID',
+      mnemonic: 'test mnemonic',
+      network: 'testnet',
+      esploraUrl: 'https://waterfalls.example/liquidtestnet/api',
+      waterfalls: true,
+      allowDefaultEsploraFallback: true,
+      onWarning: (warning) => {
+        const code: 'LIQUID_WATERFALLS_FALLBACK' = warning.code
+        expect(code).toBe('LIQUID_WATERFALLS_FALLBACK')
+        receivedWarning = warning
+      },
+    })
+
+    expect(managerConfig?.allowDefaultEsploraFallback).toBe(true)
+    const forwarded = managerConfig?.onWarning as (warning: LiquidSyncWarning) => void
+    forwarded({
+      code: 'LIQUID_WATERFALLS_FALLBACK',
+      message: 'Liquid Waterfalls failed; using standard Esplora fallback.',
+      details: { reason: 'waterfalls_failed' },
+    })
+    expect(receivedWarning?.code).toBe('LIQUID_WATERFALLS_FALLBACK')
   })
 
   it('lists L-BTC (policy asset) first, then other Liquid assets with known metadata', async () => {

@@ -7,7 +7,12 @@
  * reference them.
  */
 export { SparkWdkAdapter, type SparkAdapterConfig } from './SparkWdkAdapter'
-export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './LiquidWdkAdapter'
+export {
+  LiquidWdkAdapter,
+  type LiquidAdapterConfig,
+  type LiquidSyncWarning,
+  LIQUID_USDT_ASSET_ID,
+} from './LiquidWdkAdapter'
 export { RlnWdkAdapter, type RlnAdapterConfig } from './RlnWdkAdapter'
 export { RgbLibWdkAdapter, type RgbLibAdapterConfig } from './RgbLibWdkAdapter'
 export { RgbLibWasmAdapter, type RgbLibWasmAdapterConfig } from './RgbLibWasmAdapter'
