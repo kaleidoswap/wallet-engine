@@ -32,6 +32,7 @@ import {
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
+import { decodeBolt11 } from '../lib/bolt11'
 
 /** Per-protocol timeout for cross-protocol fan-out reads (assets/transactions). */
 const PER_PROTOCOL_TIMEOUT_MS = 8_000
@@ -301,8 +302,19 @@ export class ProtocolManager {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    this.enforce('send', { amountSat: request.amount, destination: request.invoice })
+    this.enforce('send', { amountSat: this.resolveSendAmountSat(request), destination: request.invoice })
     return this.getActiveAdapter().sendPayment(request)
+  }
+
+  /**
+   * Sat amount a send will move, for policy evaluation: the caller's explicit
+   * amount, else the value encoded in the BOLT11. Undefined only for a truly
+   * amountless invoice with no explicit amount — which the policy engine treats
+   * as unknown and denies whenever a spend cap is set.
+   */
+  private resolveSendAmountSat(request: PaymentRequest): number | undefined {
+    if (request.amount != null) return request.amount
+    return decodeBolt11(request.invoice).amountSat
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {

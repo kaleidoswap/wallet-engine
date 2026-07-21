@@ -15,6 +15,23 @@ describe('evaluatePolicy — default-allow', () => {
     // signMessage carries no amount → never capped
     expect(evaluatePolicy({ operation: 'signMessage' }, p).allowed).toBe(true)
   })
+
+  it('fails CLOSED when a global cap is set but an amount-op amount is unknown', () => {
+    const p: SigningPolicy = { maxAmountSat: 1000 }
+    // amount-op with no amountSat (e.g. amountless BOLT11) → denied, not skipped
+    expect(evaluatePolicy({ operation: 'send' }, p)).toMatchObject({
+      allowed: false,
+      code: 'AMOUNT_UNKNOWN',
+    })
+    expect(evaluatePolicy({ operation: 'swap' }, p)).toMatchObject({ code: 'AMOUNT_UNKNOWN' })
+    // non-amount ops are unaffected by the cap
+    expect(evaluatePolicy({ operation: 'signMessage' }, p).allowed).toBe(true)
+  })
+
+  it('allows an unknown amount when NO cap is configured', () => {
+    expect(evaluatePolicy({ operation: 'send' }, {}).allowed).toBe(true)
+    expect(evaluatePolicy({ operation: 'send' }, { mode: 'allow' }).allowed).toBe(true)
+  })
 })
 
 describe('evaluatePolicy — default-deny', () => {
@@ -61,6 +78,12 @@ describe('evaluatePolicy — default-deny', () => {
     expect(
       evaluatePolicy({ operation: 'send', grantId: 'dapp-A', protocol: 'SPARK', amountSat: 5001 }, policy),
     ).toMatchObject({ code: 'AMOUNT_OVER_GRANT_LIMIT' })
+  })
+
+  it('fails CLOSED when a grant cap is set but the amount is unknown', () => {
+    expect(
+      evaluatePolicy({ operation: 'send', grantId: 'dapp-A', protocol: 'SPARK' }, policy),
+    ).toMatchObject({ allowed: false, code: 'AMOUNT_UNKNOWN' })
   })
 
   it('enforces the destination-kind allowlist', () => {
