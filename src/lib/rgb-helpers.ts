@@ -13,14 +13,8 @@
 
 import type { TransactionStatus, TransactionType } from "../types/base";
 
-/**
- * Render a raw integer amount in the asset's display precision.
- * Always emits `precision` fractional digits — the caller can trim trailing
- * zeros if it wants a tighter rendering.
- */
-export function formatAmount(amount: number, precision: number): string {
-  return (amount / Math.pow(10, precision)).toFixed(precision);
-}
+// Amount display formatting is centralized in ./amount (was duplicated here).
+export { formatAmount } from "./amount";
 
 /**
  * Map the SDK's transfer `kind` field to our unified TransactionType.
