@@ -14,6 +14,7 @@
  */
 
 import type { ProtocolType, Layer, UnifiedAsset, AssetBalance, TransactionStatus } from '../../types/base'
+import { formatAmount } from '../../lib/amount'
 
 /**
  * What differs between the two RGB backings: the node-backed `RGB` adapter has
@@ -62,7 +63,7 @@ export function rgbBtcAsset(total: number, profile: RgbProfile): UnifiedAsset {
     precision: 8,
     protocol: profile.protocol,
     layer: 'BTC_L1',
-    balance: makeBalance(total),
+    balance: makeBalance(total, 8),
     capabilities: {
       canSend: true,
       canReceive: true,
@@ -91,7 +92,7 @@ export function rgbNiaAsset(
     precision: Number(raw.precision ?? 0),
     protocol: profile.protocol,
     layer: profile.assetLayer,
-    balance: rgbAssetBalance(raw.balance),
+    balance: rgbAssetBalance(raw.balance, Number(raw.precision ?? 0)),
     capabilities: {
       canSend: true,
       canReceive: true,
@@ -121,7 +122,7 @@ export type RgbBalanceLike = {
   locked?: number | string | bigint
 }
 
-export function rgbAssetBalance(raw?: RgbBalanceLike): AssetBalance {
+export function rgbAssetBalance(raw?: RgbBalanceLike, precision = 0): AssetBalance {
   const b = raw ?? {}
   const settled = toFiniteNumber(b.settled ?? b.total ?? 0)
   const future = toFiniteNumber(b.future ?? b.pending ?? settled)
@@ -137,18 +138,18 @@ export function rgbAssetBalance(raw?: RgbBalanceLike): AssetBalance {
     spendable,
     offchain_outbound: toFiniteNumber(b.offchain_outbound ?? b.locked ?? 0),
     offchain_inbound: toFiniteNumber(b.offchain_inbound ?? 0),
-    totalDisplay: String(owned),
-    availableDisplay: String(spendable),
+    totalDisplay: formatAmount(owned, precision),
+    availableDisplay: formatAmount(spendable, precision),
   } as AssetBalance
 }
 
-function makeBalance(total: number): AssetBalance {
+function makeBalance(total: number, precision: number): AssetBalance {
   return {
     total,
     available: total,
     pending: 0,
-    totalDisplay: String(total),
-    availableDisplay: String(total),
+    totalDisplay: formatAmount(total, precision),
+    availableDisplay: formatAmount(total, precision),
   }
 }
 

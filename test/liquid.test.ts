@@ -171,10 +171,11 @@ describe('LiquidWdkAdapter', () => {
 
     expect(txs[1]).toMatchObject({ id: 'tx-btc', type: 'send', amount: 1100 }) // 1120 − 20 fee
     expect(txs[1].asset).toMatchObject({ ticker: 'L-BTC' })
+    expect(txs[1].amountDisplay).toBe('0.00001100') // formatted at precision 8, not raw "1100"
 
     expect(txs[2]).toMatchObject({ id: 'tx-usdt', type: 'send', amount: 250 }) // asset delta, not the fee
     expect(txs[2].asset).toMatchObject({ ticker: 'USDt', layer: 'LIQUID_ASSET' })
-    expect(txs[2].amountDisplay).toBe('250')
+    expect(txs[2].amountDisplay).toBe('0.00000250') // USDt precision 8, not raw "250"
   })
 
   it('rejects Lightning-only operations (Liquid is on-chain, no invoices/channels)', async () => {

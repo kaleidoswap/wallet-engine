@@ -10,14 +10,8 @@ import { bech32m } from '@scure/base'
 import type { TransactionStatus } from '../types/base'
 import { normalizeTxHash } from './spark-sent-token-records'
 
-/**
- * Render a raw integer amount in the asset's display precision.
- * Always emits exactly `precision` decimal digits (no trailing-zero trim) —
- * callers that want a tighter rendering should post-process.
- */
-export function formatAmount(amount: number, precision: number): string {
-  return (amount / Math.pow(10, precision)).toFixed(precision)
-}
+// Amount display formatting is centralized in ./amount (was duplicated here).
+export { formatAmount } from './amount'
 
 /**
  * Map a Spark transfer status string to our unified TransactionStatus.

@@ -184,7 +184,8 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   async getAssetBalance(assetId: string): Promise<UnifiedAsset['balance']> {
     this.assertConnected()
     const b: any = await this.account.getAssetBalance(assetId)
-    return rgbAssetBalance(b)
+    const precision = (await this.listAssets()).find((a) => a.id === assetId)?.precision ?? 0
+    return rgbAssetBalance(b, precision)
   }
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {

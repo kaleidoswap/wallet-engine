@@ -47,6 +47,7 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 // to import this adapter to reach the asset id.
 export { LIQUID_USDT_ASSET_ID } from '../../constants'
 import { LIQUID_USDT_ASSET_ID } from '../../constants'
+import { formatAmount } from '../../lib/amount'
 
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'
@@ -207,7 +208,8 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const bal: bigint = await this.withLock(() => this.account.getTokenBalance(assetId))
     const n = Number(bal)
-    return { total: n, available: n, pending: 0, totalDisplay: String(n), availableDisplay: String(n) }
+    const precision = KNOWN_ASSETS[assetId]?.precision ?? 8
+    return { total: n, available: n, pending: 0, totalDisplay: formatAmount(n, precision), availableDisplay: formatAmount(n, precision) }
   }
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
@@ -276,13 +278,14 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       const isSend = t.type === 'outgoing'
       const fee = Number(t.fee ?? 0)
       const { assetId, amount } = this.primaryMovement(t.balance ?? [], policy, fee, isSend)
+      const precision = assetId ? (KNOWN_ASSETS[assetId]?.precision ?? 8) : 8
       return {
         id: t.txid,
         type: (isSend ? 'send' : 'receive') as UnifiedTransaction['type'],
         status: (t.height != null ? 'confirmed' : 'pending') as TransactionStatus,
         timestamp: (t.timestamp ?? 0) * 1000,
         amount,
-        amountDisplay: String(amount),
+        amountDisplay: formatAmount(amount, precision),
         fee,
         asset: assetId ? this.txAsset(assetId, policy) : (undefined as unknown as UnifiedAsset),
         protocolData: { height: t.height, assetId, balance: t.balance },
@@ -413,7 +416,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       precision: meta.precision,
       protocol: 'LIQUID',
       layer: meta.layer,
-      balance: { total: n, available: n, pending: 0, totalDisplay: String(n), availableDisplay: String(n) },
+      balance: { total: n, available: n, pending: 0, totalDisplay: formatAmount(n, meta.precision), availableDisplay: formatAmount(n, meta.precision) },
       capabilities: {
         canSend: true,
         canReceive: true,
