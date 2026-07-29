@@ -20,7 +20,7 @@ import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
 
 /** Fund-moving / signing operations a policy can gate. */
-export type PolicyOperation = 'send' | 'keysend' | 'signPsbt' | 'signMessage' | 'swap'
+export type PolicyOperation = 'send' | 'keysend' | 'signPsbt' | 'signLiquidPset' | 'signMessage' | 'swap'
 
 export interface PolicyRequest {
   operation: PolicyOperation

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { LiquidWdkAdapter } from '../src/adapters/wdk/LiquidWdkAdapter'
 import { LIQUID_USDT_ASSET_ID } from '../src/constants'
 
@@ -230,5 +230,53 @@ describe('LiquidWdkAdapter', () => {
     expect(results[1].map((a) => a.protocol)).toEqual(['LIQUID', 'LIQUID'])
     expect(results[2].address).toBe('lq1qconcurrent')
     expect(results[3].blockHeight).toBe(42)
+  })
+
+  it('forwards every PSET and Simplicity operation without leaking LWK objects', async () => {
+    const account = {
+      getSimplicityCapabilities: vi.fn(() => ({ version: 'experimental-0.1', available: true })),
+      inspectPset: vi.fn(async (pset: string) => ({ pset, uniqueId: 'review-id' })),
+      blindPset: vi.fn(async (pset: string) => `blind:${pset}`),
+      signPset: vi.fn(async ({ pset }: { pset: string }) => ({
+        pset: `signed:${pset}`,
+        signedInputIndexes: [1],
+        unchanged: false,
+      })),
+      finalizePset: vi.fn(async (pset: string) => ({ pset, transactionHex: '00', txid: 'final-id' })),
+      broadcastPset: vi.fn(async () => ({ txid: 'broadcast-id' })),
+      deriveSimplicityPublicKey: vi.fn(async (path?: string) => ({ publicKey: 'pubkey', derivationPath: path })),
+      compileSimplicityProgram: vi.fn(async () => ({ cmr: 'cmr', address: 'address' })),
+    }
+    const adapter = connected(account)
+
+    await expect(adapter.getSimplicityCapabilities()).resolves.toMatchObject({ available: true })
+    await expect(adapter.inspectLiquidPset('pset')).resolves.toMatchObject({ uniqueId: 'review-id' })
+    await expect(adapter.blindLiquidPset('pset')).resolves.toBe('blind:pset')
+    await expect(adapter.signLiquidPset({ pset: 'pset', inputIndexes: [1] }))
+      .resolves.toMatchObject({ signedInputIndexes: [1] })
+    await expect(adapter.finalizeLiquidPset('signed')).resolves.toMatchObject({ txid: 'final-id' })
+    await expect(adapter.broadcastLiquidPset('final')).resolves.toEqual({ txid: 'broadcast-id' })
+    await expect(adapter.deriveSimplicityPublicKey('m/1')).resolves.toEqual({
+      publicKey: 'pubkey',
+      derivationPath: 'm/1',
+    })
+    await expect(adapter.compileSimplicityProgram({ source: 'main := unit' }))
+      .resolves.toMatchObject({ cmr: 'cmr', address: 'address' })
+
+    expect(account.signPset).toHaveBeenCalledWith({ pset: 'pset', inputIndexes: [1] })
+    expect(account.compileSimplicityProgram).toHaveBeenCalledWith({ source: 'main := unit' })
+  })
+
+  it('degrades cleanly with a pre-Simplicity WDK account', async () => {
+    const adapter = connected({})
+    await expect(adapter.getSimplicityCapabilities()).resolves.toMatchObject({
+      available: false,
+      pset: { inspect: false, blind: false, sign: false, finalize: false },
+      simplicity: { compile: false, derivePublicKey: false, finalizeTransaction: false },
+    })
+    await expect(adapter.compileSimplicityProgram({ source: 'main := unit' })).rejects.toMatchObject({
+      code: 'NOT_SUPPORTED',
+      protocol: 'LIQUID',
+    })
   })
 })

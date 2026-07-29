@@ -28,10 +28,19 @@ import {
   IProtocolAdapter,
   ProtocolConfig,
   ProtocolAdapterRegistry,
+  asSimplicityOperations,
 } from '../adapters/IProtocolAdapter'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
+import type {
+  LiquidPsetReview,
+  LiquidPsetSignRequest,
+  LiquidPsetSignResult,
+  SimplicityCapabilities,
+  SimplicityCompileRequest,
+  SimplicityCompileResult,
+} from '../types/simplicity'
 
 /** Per-protocol timeout for cross-protocol fan-out reads (assets/transactions). */
 const PER_PROTOCOL_TIMEOUT_MS = 8_000
@@ -51,7 +60,7 @@ export interface ProtocolManagerConfig {
   verifyMessageFallback?: (message: string, signature: string) => Promise<string>
   /**
    * Optional signing/spend policy. When set, fund-moving + signing operations
-   * (sendPayment/payKeysend/executeSwap/signMessage) are gated through
+   * (sendPayment/payKeysend/executeSwap/signMessage/signLiquidPset) are gated through
    * `evaluatePolicy` and throw `PolicyError` on denial. Omit for no enforcement
    * (default, fully backward-compatible). The active grant is selected with
    * `setActiveGrant()`.
@@ -359,6 +368,52 @@ export class ProtocolManager {
       adapter.protocolName,
       'NOT_SUPPORTED'
     )
+  }
+
+  private simplicityOperations() {
+    const adapter = this.getActiveAdapter()
+    const operations = asSimplicityOperations(adapter)
+    if (!operations) {
+      throw new ProtocolError(
+        'Liquid Simplicity/PSET operations are not supported by the active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED',
+      )
+    }
+    return operations
+  }
+
+  async getSimplicityCapabilities(): Promise<SimplicityCapabilities> {
+    return this.simplicityOperations().getSimplicityCapabilities()
+  }
+
+  async inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview> {
+    return this.simplicityOperations().inspectLiquidPset(psetBase64)
+  }
+
+  async blindLiquidPset(psetBase64: string): Promise<string> {
+    return this.simplicityOperations().blindLiquidPset(psetBase64)
+  }
+
+  async signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult> {
+    this.enforce('signLiquidPset')
+    return this.simplicityOperations().signLiquidPset(request)
+  }
+
+  async finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
+    return this.simplicityOperations().finalizeLiquidPset(psetBase64)
+  }
+
+  async broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }> {
+    return this.simplicityOperations().broadcastLiquidPset(psetBase64)
+  }
+
+  async deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }> {
+    return this.simplicityOperations().deriveSimplicityPublicKey(derivationPath)
+  }
+
+  async compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult> {
+    return this.simplicityOperations().compileSimplicityProgram(request)
   }
 
   async getReceiveAddress(assetId?: string): Promise<Address> {

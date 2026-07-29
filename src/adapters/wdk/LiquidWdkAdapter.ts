@@ -48,6 +48,14 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 export { LIQUID_USDT_ASSET_ID } from '../../constants'
 import { LIQUID_USDT_ASSET_ID } from '../../constants'
 import { formatAmount } from '../../lib/amount'
+import type {
+  LiquidPsetReview,
+  LiquidPsetSignRequest,
+  LiquidPsetSignResult,
+  SimplicityCapabilities,
+  SimplicityCompileRequest,
+  SimplicityCompileResult,
+} from '../../types/simplicity'
 
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'
@@ -105,6 +113,18 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       () => undefined,
     )
     return run
+  }
+
+  private requireExperimentalAccountMethod(name: string): (...args: any[]) => any {
+    const method = this.account?.[name]
+    if (typeof method !== 'function') {
+      throw new ProtocolError(
+        `${name} requires a Simplicity-capable @kaleidorg/wdk-wallet-liquid build`,
+        'LIQUID',
+        'NOT_SUPPORTED',
+      )
+    }
+    return method.bind(this.account)
   }
 
   // --- Connection ---------------------------------------------------------
@@ -370,6 +390,62 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const r: any = await this.withLock(() => this.manager.getFeeRates())
     return { normal: Number(r?.normal ?? 0), fast: Number(r?.fast ?? 0) }
+  }
+
+  // --- External PSET + Simplicity ----------------------------------------
+  async getSimplicityCapabilities(): Promise<SimplicityCapabilities> {
+    this.assertConnected()
+    if (typeof this.account?.getSimplicityCapabilities !== 'function') {
+      return {
+        version: 'experimental-0.1',
+        available: false,
+        pset: { inspect: false, blind: false, sign: false, finalize: false },
+        simplicity: { compile: false, derivePublicKey: false, finalizeTransaction: false },
+      }
+    }
+    return this.withLock(() => this.account.getSimplicityCapabilities())
+  }
+
+  async inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview> {
+    this.assertConnected()
+    const inspect = this.requireExperimentalAccountMethod('inspectPset')
+    return this.withLock(() => inspect(psetBase64))
+  }
+
+  async blindLiquidPset(psetBase64: string): Promise<string> {
+    this.assertConnected()
+    const blind = this.requireExperimentalAccountMethod('blindPset')
+    return this.withLock(() => blind(psetBase64))
+  }
+
+  async signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult> {
+    this.assertConnected()
+    const sign = this.requireExperimentalAccountMethod('signPset')
+    return this.withLock(() => sign(request))
+  }
+
+  async finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
+    this.assertConnected()
+    const finalize = this.requireExperimentalAccountMethod('finalizePset')
+    return this.withLock(() => finalize(psetBase64))
+  }
+
+  async broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }> {
+    this.assertConnected()
+    const broadcast = this.requireExperimentalAccountMethod('broadcastPset')
+    return this.withLock(() => broadcast(psetBase64))
+  }
+
+  async deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }> {
+    this.assertConnected()
+    const derive = this.requireExperimentalAccountMethod('deriveSimplicityPublicKey')
+    return this.withLock(() => derive(derivationPath))
+  }
+
+  async compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult> {
+    this.assertConnected()
+    const compile = this.requireExperimentalAccountMethod('compileSimplicityProgram')
+    return this.withLock(() => compile(request))
   }
 
   // --- Not applicable to Liquid (on-chain only, no LN/invoices) -----------

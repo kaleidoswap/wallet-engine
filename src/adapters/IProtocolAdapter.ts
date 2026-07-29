@@ -49,6 +49,14 @@ import type { ProtocolCapability } from '../capabilities/operations'
 import type { RgbConfig } from '../types/rgb'
 import type { SparkConfig } from '../types/spark'
 import type { ArkadeConfig } from '../types/arkade'
+import type {
+  LiquidPsetReview,
+  LiquidPsetSignRequest,
+  LiquidPsetSignResult,
+  SimplicityCapabilities,
+  SimplicityCompileRequest,
+  SimplicityCompileResult,
+} from '../types/simplicity'
 
 /**
  * Base configuration common to all protocols.
@@ -166,6 +174,18 @@ export interface IOnchainOperations {
   broadcastTransaction(txHex: string): Promise<{ txid: string }>
 }
 
+/** Liquid PSET review/signing and optional Simplicity compilation. */
+export interface ISimplicityOperations {
+  getSimplicityCapabilities(): Promise<SimplicityCapabilities>
+  inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview>
+  blindLiquidPset(psetBase64: string): Promise<string>
+  signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult>
+  finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }>
+  broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }>
+  deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }>
+  compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult>
+}
+
 /** RGB asset operations (RGB-LN / RGB-L1). */
 export interface IRgbOperations {
   /** Create an RGB on-chain invoice. */
@@ -277,6 +297,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<IKeysendOperations> &
   Partial<ISigningOperations> &
   Partial<IOnchainOperations> &
+  Partial<ISimplicityOperations> &
   Partial<IRgbOperations> &
   Partial<IBackupOperations> &
   Partial<ISparkOperations> &
@@ -300,6 +321,14 @@ export function asRgbOperations(a: IProtocolAdapter): IRgbOperations | null {
 }
 export function asSigningOperations(a: IProtocolAdapter): ISigningOperations | null {
   return isFn(a.signPsbt) && isFn(a.signMessage) ? (a as ISigningOperations) : null
+}
+export function asSimplicityOperations(a: IProtocolAdapter): ISimplicityOperations | null {
+  return isFn(a.getSimplicityCapabilities) && isFn(a.inspectLiquidPset) &&
+    isFn(a.blindLiquidPset) && isFn(a.signLiquidPset) &&
+    isFn(a.finalizeLiquidPset) && isFn(a.broadcastLiquidPset) &&
+    isFn(a.deriveSimplicityPublicKey) && isFn(a.compileSimplicityProgram)
+    ? (a as ISimplicityOperations)
+    : null
 }
 export function asBackupOperations(a: IProtocolAdapter): IBackupOperations | null {
   return isFn(a.backup) && isFn(a.restoreBackup) ? (a as IBackupOperations) : null
