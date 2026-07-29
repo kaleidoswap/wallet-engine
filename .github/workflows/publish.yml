@@ -51,6 +51,7 @@ jobs:
           node --input-type=module -e "
             const m = await import('@kaleidorg/wallet-engine');
             if (typeof m.classifyDestination !== 'function') { throw new Error('root barrel missing expected export'); }
+            if (typeof m.asSimplicityOperations !== 'function') { throw new Error('root barrel missing Simplicity exports'); }
             console.log('OK: root barrel imports in bare Node with', Object.keys(m).length, 'exports');
           "
 

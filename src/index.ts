@@ -10,6 +10,7 @@ export type { SparkConfig, SparkTransfer, SparkLightningInvoice, SparkLightningS
 export type { ArkadeConfig, ArkadeVtxo, ArkadeBalance, ArkadeTransaction } from './types/arkade'
 export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, KaleidoswapQuote, RgbNodeInfo, TradingPair } from './types/rgb'
 export * from './types/flashnet'
+export * from './types/simplicity'
 
 // Adapter interface
 export {
@@ -22,6 +23,7 @@ export {
   type IKeysendOperations,
   type ISigningOperations,
   type IOnchainOperations,
+  type ISimplicityOperations,
   type IRgbOperations,
   type IBackupOperations,
   type ISparkOperations,
@@ -32,6 +34,7 @@ export {
   asSwapOperations,
   asRgbOperations,
   asSigningOperations,
+  asSimplicityOperations,
   asBackupOperations,
   asSparkOperations,
   asArkadeOperations,
