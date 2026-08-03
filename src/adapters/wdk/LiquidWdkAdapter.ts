@@ -48,6 +48,20 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 export { LIQUID_USDT_ASSET_ID } from '../../constants'
 import { LIQUID_USDT_ASSET_ID } from '../../constants'
 
+export interface LiquidSyncWarning {
+  code: 'LIQUID_WATERFALLS_FALLBACK'
+  message: string
+  details?: { reason?: 'waterfalls_failed' }
+}
+import type {
+  LiquidPsetReview,
+  LiquidPsetSignRequest,
+  LiquidPsetSignResult,
+  SimplicityCapabilities,
+  SimplicityCompileRequest,
+  SimplicityCompileResult,
+} from '../../types/simplicity'
+
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'
   /** BIP-39 mnemonic for this wallet. */
@@ -62,8 +76,15 @@ export interface LiquidAdapterConfig extends BaseProtocolConfig {
    * public Blockstream Esplora is not one. Default: false.
    */
   waterfalls?: boolean
+  /**
+   * Explicitly allow a one-time retry through the network's built-in standard Esplora provider
+   * if Waterfalls fails. This changes providers and may disclose wallet addresses/scripts to it.
+   */
+  allowDefaultEsploraFallback?: boolean
   /** Optional waterfalls server recipient key; encrypts the descriptor before it is sent. */
   waterfallsRecipient?: string
+  /** Receives non-fatal sync warnings, including successful Waterfalls fallback. */
+  onWarning?: (warning: LiquidSyncWarning) => void | Promise<void>
 }
 
 /** Local mirror of the lwk network union (kept here so WDK/lwk types never cross the contract). */
@@ -106,7 +127,21 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return run
   }
 
+  private requireExperimentalAccountMethod(name: string): (...args: any[]) => any {
+    const method = this.account?.[name]
+    if (typeof method !== 'function') {
+      throw new ProtocolError(
+        `${name} requires a Simplicity-capable @kaleidorg/wdk-wallet-liquid build`,
+        'LIQUID',
+        'NOT_SUPPORTED',
+      )
+    }
+    return method.bind(this.account)
+  }
+
   // --- Connection ---------------------------------------------------------
+  async connect(config: LiquidAdapterConfig): Promise<void>
+  async connect(config: BaseProtocolConfig): Promise<void>
   async connect(config: BaseProtocolConfig): Promise<void> {
     const cfg = config as LiquidAdapterConfig
     if (!cfg.mnemonic) {
@@ -120,7 +155,9 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       network: LIQUID_NETWORK_MAP[this.network] ?? 'mainnet',
       esploraUrl: cfg.esploraUrl,
       waterfalls: cfg.waterfalls,
+      allowDefaultEsploraFallback: cfg.allowDefaultEsploraFallback,
       waterfallsRecipient: cfg.waterfallsRecipient,
+      onWarning: cfg.onWarning,
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
@@ -367,6 +404,62 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const r: any = await this.withLock(() => this.manager.getFeeRates())
     return { normal: Number(r?.normal ?? 0), fast: Number(r?.fast ?? 0) }
+  }
+
+  // --- External PSET + Simplicity ----------------------------------------
+  async getSimplicityCapabilities(): Promise<SimplicityCapabilities> {
+    this.assertConnected()
+    if (typeof this.account?.getSimplicityCapabilities !== 'function') {
+      return {
+        version: 'experimental-0.1',
+        available: false,
+        pset: { inspect: false, blind: false, sign: false, finalize: false },
+        simplicity: { compile: false, derivePublicKey: false, finalizeTransaction: false },
+      }
+    }
+    return this.withLock(() => this.account.getSimplicityCapabilities())
+  }
+
+  async inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview> {
+    this.assertConnected()
+    const inspect = this.requireExperimentalAccountMethod('inspectPset')
+    return this.withLock(() => inspect(psetBase64))
+  }
+
+  async blindLiquidPset(psetBase64: string): Promise<string> {
+    this.assertConnected()
+    const blind = this.requireExperimentalAccountMethod('blindPset')
+    return this.withLock(() => blind(psetBase64))
+  }
+
+  async signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult> {
+    this.assertConnected()
+    const sign = this.requireExperimentalAccountMethod('signPset')
+    return this.withLock(() => sign(request))
+  }
+
+  async finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
+    this.assertConnected()
+    const finalize = this.requireExperimentalAccountMethod('finalizePset')
+    return this.withLock(() => finalize(psetBase64))
+  }
+
+  async broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }> {
+    this.assertConnected()
+    const broadcast = this.requireExperimentalAccountMethod('broadcastPset')
+    return this.withLock(() => broadcast(psetBase64))
+  }
+
+  async deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }> {
+    this.assertConnected()
+    const derive = this.requireExperimentalAccountMethod('deriveSimplicityPublicKey')
+    return this.withLock(() => derive(derivationPath))
+  }
+
+  async compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult> {
+    this.assertConnected()
+    const compile = this.requireExperimentalAccountMethod('compileSimplicityProgram')
+    return this.withLock(() => compile(request))
   }
 
   // --- Not applicable to Liquid (on-chain only, no LN/invoices) -----------

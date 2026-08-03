@@ -75,6 +75,9 @@ export async function connectLiquid(wallet: WalletFixture): Promise<LiquidWdkAda
         mnemonic: wallet.mnemonic!,
         esploraUrl: LIQUID.esploraUrl,
         waterfalls: LIQUID.waterfalls,
+        // Live tests deliberately opt in so a Waterfalls outage exercises the
+        // published standard-Esplora recovery path instead of failing the suite.
+        allowDefaultEsploraFallback: LIQUID.waterfalls,
       } as any)
       return adapter
     } catch (err) {

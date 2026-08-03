@@ -1,5 +1,10 @@
-import { describe, it, expect } from 'vitest'
-import { LiquidWdkAdapter } from '../src/adapters/wdk/LiquidWdkAdapter'
+import { describe, it, expect, vi } from 'vitest'
+import {
+  LiquidWdkAdapter,
+  type LiquidSyncWarning,
+} from '../src/adapters/wdk/LiquidWdkAdapter'
+import type { LiquidSyncWarning as PublicLiquidSyncWarning } from '../src/adapters/wdk'
+import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { LIQUID_USDT_ASSET_ID } from '../src/constants'
 
 /**
@@ -30,6 +35,44 @@ describe('LiquidWdkAdapter', () => {
     expect(adapter.protocolName).toBe('LIQUID')
     expect(adapter.supportedLayers).toEqual(['BTC_LIQUID', 'LIQUID_ASSET'])
     expect(adapter.supportsSwaps()).toBe(false)
+  })
+
+  it('forwards recoverable Liquid sync warnings to the client callback', async () => {
+    let managerConfig: Record<string, unknown> | undefined
+    class FakeLiquidWalletManager {
+      constructor(_mnemonic: string, config: Record<string, unknown>) {
+        managerConfig = config
+      }
+      async getAccount() {
+        return {}
+      }
+    }
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => ({ default: FakeLiquidWalletManager }))
+
+    let receivedWarning: PublicLiquidSyncWarning | undefined
+    const adapter = new LiquidWdkAdapter()
+    await adapter.connect({
+      protocol: 'LIQUID',
+      mnemonic: 'test mnemonic',
+      network: 'testnet',
+      esploraUrl: 'https://waterfalls.example/liquidtestnet/api',
+      waterfalls: true,
+      allowDefaultEsploraFallback: true,
+      onWarning: (warning) => {
+        const code: 'LIQUID_WATERFALLS_FALLBACK' = warning.code
+        expect(code).toBe('LIQUID_WATERFALLS_FALLBACK')
+        receivedWarning = warning
+      },
+    })
+
+    expect(managerConfig?.allowDefaultEsploraFallback).toBe(true)
+    const forwarded = managerConfig?.onWarning as (warning: LiquidSyncWarning) => void
+    forwarded({
+      code: 'LIQUID_WATERFALLS_FALLBACK',
+      message: 'Liquid Waterfalls failed; using standard Esplora fallback.',
+      details: { reason: 'waterfalls_failed' },
+    })
+    expect(receivedWarning?.code).toBe('LIQUID_WATERFALLS_FALLBACK')
   })
 
   it('lists L-BTC (policy asset) first, then other Liquid assets with known metadata', async () => {
@@ -229,5 +272,53 @@ describe('LiquidWdkAdapter', () => {
     expect(results[1].map((a) => a.protocol)).toEqual(['LIQUID', 'LIQUID'])
     expect(results[2].address).toBe('lq1qconcurrent')
     expect(results[3].blockHeight).toBe(42)
+  })
+
+  it('forwards every PSET and Simplicity operation without leaking LWK objects', async () => {
+    const account = {
+      getSimplicityCapabilities: vi.fn(() => ({ version: 'experimental-0.1', available: true })),
+      inspectPset: vi.fn(async (pset: string) => ({ pset, uniqueId: 'review-id' })),
+      blindPset: vi.fn(async (pset: string) => `blind:${pset}`),
+      signPset: vi.fn(async ({ pset }: { pset: string }) => ({
+        pset: `signed:${pset}`,
+        signedInputIndexes: [1],
+        unchanged: false,
+      })),
+      finalizePset: vi.fn(async (pset: string) => ({ pset, transactionHex: '00', txid: 'final-id' })),
+      broadcastPset: vi.fn(async () => ({ txid: 'broadcast-id' })),
+      deriveSimplicityPublicKey: vi.fn(async (path?: string) => ({ publicKey: 'pubkey', derivationPath: path })),
+      compileSimplicityProgram: vi.fn(async () => ({ cmr: 'cmr', address: 'address' })),
+    }
+    const adapter = connected(account)
+
+    await expect(adapter.getSimplicityCapabilities()).resolves.toMatchObject({ available: true })
+    await expect(adapter.inspectLiquidPset('pset')).resolves.toMatchObject({ uniqueId: 'review-id' })
+    await expect(adapter.blindLiquidPset('pset')).resolves.toBe('blind:pset')
+    await expect(adapter.signLiquidPset({ pset: 'pset', inputIndexes: [1] }))
+      .resolves.toMatchObject({ signedInputIndexes: [1] })
+    await expect(adapter.finalizeLiquidPset('signed')).resolves.toMatchObject({ txid: 'final-id' })
+    await expect(adapter.broadcastLiquidPset('final')).resolves.toEqual({ txid: 'broadcast-id' })
+    await expect(adapter.deriveSimplicityPublicKey('m/1')).resolves.toEqual({
+      publicKey: 'pubkey',
+      derivationPath: 'm/1',
+    })
+    await expect(adapter.compileSimplicityProgram({ source: 'main := unit' }))
+      .resolves.toMatchObject({ cmr: 'cmr', address: 'address' })
+
+    expect(account.signPset).toHaveBeenCalledWith({ pset: 'pset', inputIndexes: [1] })
+    expect(account.compileSimplicityProgram).toHaveBeenCalledWith({ source: 'main := unit' })
+  })
+
+  it('degrades cleanly with a pre-Simplicity WDK account', async () => {
+    const adapter = connected({})
+    await expect(adapter.getSimplicityCapabilities()).resolves.toMatchObject({
+      available: false,
+      pset: { inspect: false, blind: false, sign: false, finalize: false },
+      simplicity: { compile: false, derivePublicKey: false, finalizeTransaction: false },
+    })
+    await expect(adapter.compileSimplicityProgram({ source: 'main := unit' })).rejects.toMatchObject({
+      code: 'NOT_SUPPORTED',
+      protocol: 'LIQUID',
+    })
   })
 })

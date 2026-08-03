@@ -28,6 +28,9 @@ export type ProtocolCapability =
   | 'spark-transfer'
   | 'arkade-onboard'
   | 'arkade-offboard'
+  | 'liquid-pset-inspect'
+  | 'liquid-pset-sign'
+  | 'simplicity-compile'
 
 export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapability[]> = {
   RGB_LN: [
@@ -65,7 +68,15 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
     'asset-receive',
     'rgb-invoice',
   ],
-  LIQUID: ['onchain-send', 'onchain-receive', 'asset-send', 'asset-receive'],
+  LIQUID: [
+    'onchain-send',
+    'onchain-receive',
+    'asset-send',
+    'asset-receive',
+    'liquid-pset-inspect',
+    'liquid-pset-sign',
+    'simplicity-compile',
+  ],
   BTC: ['onchain-send', 'onchain-receive'],
 }
 
