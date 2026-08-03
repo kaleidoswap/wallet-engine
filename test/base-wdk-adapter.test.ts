@@ -49,6 +49,21 @@ describe('BaseWdkAdapter', () => {
     expect((a as any).mnemonic).toBeNull()
   })
 
+  it('revokes connection state before third-party cleanup settles', () => {
+    const a = new TestAdapter()
+    Object.assign(a as any, {
+      connected: true,
+      account: { dispose: () => new Promise<void>(() => {}) },
+      mnemonic: 'abandon abandon ability',
+    })
+
+    void a.disconnect()
+
+    expect(a.isConnected()).toBe(false)
+    expect((a as any).account).toBeNull()
+    expect((a as any).mnemonic).toBeNull()
+  })
+
   it('defaults version and exposes supportsSwaps from the manifest (RGB_L1 = false)', () => {
     const a = new TestAdapter()
     expect(a.version).toBe('0.1.0-wdk')

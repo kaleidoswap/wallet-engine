@@ -39,16 +39,23 @@ export abstract class BaseWdkAdapter {
 
   /** Tear down the account + manager (whichever teardown hooks they expose) and reset state. */
   async disconnect(): Promise<void> {
-    try {
-      await this.account?.dispose?.()
-      await this.account?.cleanupConnections?.()
-      await this.manager?.dispose?.()
-    } finally {
-      this.account = null
-      this.manager = null
-      this.connected = false
-      this.mnemonic = null
-    }
+    // Revoke local signing capability synchronously. Third-party cleanup may
+    // reject or never settle; neither outcome may keep the adapter connected or
+    // leave its mnemonic reachable through this instance.
+    const account = this.account
+    const manager = this.manager
+    this.account = null
+    this.manager = null
+    this.connected = false
+    this.mnemonic = null
+
+    const results = await Promise.allSettled([
+      Promise.resolve().then(() => account?.dispose?.()),
+      Promise.resolve().then(() => account?.cleanupConnections?.()),
+      Promise.resolve().then(() => manager?.dispose?.()),
+    ])
+    const failure = results.find((result): result is PromiseRejectedResult => result.status === 'rejected')
+    if (failure) throw failure.reason
   }
 
   /** Native swap capability, read from the capability manifest. */

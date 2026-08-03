@@ -32,6 +32,15 @@ describe('evaluatePolicy — default-allow', () => {
     expect(evaluatePolicy({ operation: 'send' }, {}).allowed).toBe(true)
     expect(evaluatePolicy({ operation: 'send' }, { mode: 'allow' }).allowed).toBe(true)
   })
+
+  it('rejects malformed amounts before they can bypass comparisons', () => {
+    for (const amountSat of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5]) {
+      expect(evaluatePolicy({ operation: 'send', amountSat }, {})).toMatchObject({
+        allowed: false,
+        code: 'AMOUNT_INVALID',
+      })
+    }
+  })
 })
 
 describe('evaluatePolicy — default-deny', () => {
@@ -111,6 +120,9 @@ describe('evaluatePolicy — default-deny', () => {
     expect(evaluatePolicy({ operation: 'send', grantId: 'g', destination: 'lnbc1known' }, p).allowed).toBe(true)
     expect(evaluatePolicy({ operation: 'send', grantId: 'g', destination: 'lnbc1other' }, p)).toMatchObject({
       code: 'DEST_NOT_ALLOWLISTED',
+    })
+    expect(evaluatePolicy({ operation: 'send', grantId: 'g' }, p)).toMatchObject({
+      code: 'DEST_UNKNOWN',
     })
   })
 

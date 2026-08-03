@@ -82,6 +82,17 @@ function deny(code: string, reason: string): PolicyDecision {
  * Evaluate a request against a policy. Pure — same input, same output, no I/O.
  */
 export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): PolicyDecision {
+  // Runtime callers are not constrained by TypeScript. Reject malformed
+  // amounts before comparing limits: NaN and negative values otherwise make
+  // every `>` cap check false and silently bypass the policy.
+  if (
+    AMOUNT_OPS.has(req.operation) &&
+    req.amountSat != null &&
+    (!Number.isSafeInteger(req.amountSat) || req.amountSat <= 0)
+  ) {
+    return deny('AMOUNT_INVALID', `'${req.operation}' amount must be a positive safe integer`)
+  }
+
   // 1. Global per-transaction cap (applies regardless of grants/mode). When a
   // cap is configured for an amount-op but the amount is unknown, fail CLOSED:
   // an unknown amount must never slip past a spend limit (e.g. an amountless
@@ -137,7 +148,13 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
       )
     }
   }
-  if (req.destination != null && (grant.destinationAllowlist || grant.allowedDestinationKinds)) {
+  if (grant.destinationAllowlist || grant.allowedDestinationKinds) {
+    if (req.destination == null || req.destination.trim() === '') {
+      return deny(
+        'DEST_UNKNOWN',
+        `grant '${grant.id}' restricts destinations but none was provided`,
+      )
+    }
     if (grant.destinationAllowlist && !grant.destinationAllowlist.includes(req.destination)) {
       return deny('DEST_NOT_ALLOWLISTED', `destination not in grant '${grant.id}' allowlist`)
     }
