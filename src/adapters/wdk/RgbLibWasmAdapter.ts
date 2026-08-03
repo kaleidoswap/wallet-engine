@@ -539,10 +539,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const wd = params.witnessData ?? params.witness_data
     if (wd) {
       const amountSat = wd.amountSat ?? wd.amount_sat
+      // rgb-lib-wasm deserializes witness amounts through serde_json::Number,
+      // which rejects integer-valued JS numbers. Decimal strings preserve the
+      // exact satoshi value and are accepted by both supported API casings.
+      const serializedAmountSat = String(Math.round(Number(amountSat ?? 0)))
       const witnessData = {
-        amountSat: Math.round(Number(amountSat ?? 0)),
-        amount_sat: Math.round(Number(amountSat ?? 0)),
-        ...(wd.blinding != null ? { blinding: Math.round(Number(wd.blinding)) } : {}),
+        amountSat: serializedAmountSat,
+        amount_sat: serializedAmountSat,
+        blinding: wd.blinding != null ? Math.round(Number(wd.blinding)) : null,
       }
       recipient.witnessData = witnessData
       recipient.witness_data = witnessData
