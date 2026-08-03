@@ -182,8 +182,16 @@ describe('RgbLibWasmAdapter', () => {
       amount: 7,
       witness_data: { amount_sat: 1200 },
     })
-    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({ amountSat: 1200, amount_sat: 1200 })
-    expect(seen.map['rgb:USDT'][0].witness_data).toEqual({ amountSat: 1200, amount_sat: 1200 })
+    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({
+      amountSat: '1200',
+      amount_sat: '1200',
+      blinding: null,
+    })
+    expect(seen.map['rgb:USDT'][0].witness_data).toEqual({
+      amountSat: '1200',
+      amount_sat: '1200',
+      blinding: null,
+    })
   })
 
   it('normalizes the rgb-lib transaction type (deposit/send → User, machinery kept)', async () => {
