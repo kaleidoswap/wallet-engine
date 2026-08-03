@@ -120,24 +120,9 @@ export function getAssetName(
 
 // ── Display formatting ────────────────────────────────────────────────────
 
-/**
- * Render a satoshi integer as BTC with exactly 8 decimals. Used for the
- * Arkade BTC display strings (asset balances + tx amounts). Always emits
- * 8 decimal digits — callers that want a tighter rendering must post-process.
- */
-export function formatSats(sats: number): string {
-  return (sats / 1e8).toFixed(8);
-}
-
-/**
- * Render a raw integer amount in the asset's display precision. Mirrors
- * `formatSats` semantics for arbitrary precision; integer-precision assets
- * (precision <= 0) render without a decimal point.
- */
-export function formatUnits(amount: number, precision: number): string {
-  if (precision <= 0) return String(amount);
-  return (amount / Math.pow(10, precision)).toFixed(precision);
-}
+// Amount display formatting is centralized in ./amount (was duplicated here).
+// `formatUnits` is the local name for the shared `formatAmount`.
+export { formatAmount as formatUnits, formatSats } from "./amount";
 
 // ── VTXO selection (expiry-first) ──────────────────────────────────────────
 

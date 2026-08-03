@@ -310,7 +310,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.assertConnected()
     try {
       const raw: any = await this.account.getAssetBalance(assetId)
-      return rgbAssetBalance(raw)
+      const precision = (await this.listAssets()).find((x) => x.id === assetId)?.precision ?? 0
+      return rgbAssetBalance(raw, precision)
     } catch {
       const a = (await this.listAssets()).find((x) => x.id === assetId)
       return a?.balance ?? rgbAssetBalance({})

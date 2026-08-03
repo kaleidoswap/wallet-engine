@@ -144,6 +144,25 @@ describe('evaluatePolicy — default-deny', () => {
       protocol: 'BTC',
     }, p)).toMatchObject({ allowed: false, code: 'PROTOCOL_NOT_GRANTED' })
   })
+
+  it('treats Liquid PSET signing as an explicit signing grant without applying spend caps', () => {
+    const p: SigningPolicy = {
+      mode: 'deny',
+      maxAmountSat: 1,
+      grants: [{ id: 'review-ui', operations: ['signLiquidPset'], protocols: ['LIQUID'] }],
+    }
+    expect(evaluatePolicy({
+      operation: 'signLiquidPset',
+      grantId: 'review-ui',
+      protocol: 'LIQUID',
+      amountSat: 1_000_000,
+    }, p)).toEqual({ allowed: true })
+    expect(evaluatePolicy({
+      operation: 'signLiquidPset',
+      grantId: 'review-ui',
+      protocol: 'BTC',
+    }, p)).toMatchObject({ allowed: false, code: 'PROTOCOL_NOT_GRANTED' })
+  })
 })
 
 describe('enforcePolicy', () => {

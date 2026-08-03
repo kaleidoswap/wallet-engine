@@ -46,7 +46,7 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
-import { normalizeVtxos, sortVtxosByExpiry, toNumber } from '../../lib/arkade-helpers'
+import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
 
@@ -189,8 +189,8 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         available: b.available,
         pending: 0,
         locked: 0,
-        totalDisplay: String(b.total),
-        availableDisplay: String(b.available),
+        totalDisplay: formatSats(b.total),
+        availableDisplay: formatSats(b.available),
       },
       capabilities: { canSend: true, canReceive: true, canSwap: false, supportsLightning: false, supportsOnchain: true },
       metadata: { boarding: b.boardingTotal, settled: b.settled, preconfirmed: b.preconfirmed, recoverable: b.recoverable },
@@ -223,7 +223,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
           precision: decimals,
           protocol: 'ARKADE',
           layer: 'ARKADE_ARKADE',
-          balance: { total: amount, available: amount, pending: 0, totalDisplay: String(amount), availableDisplay: String(amount) },
+          balance: { total: amount, available: amount, pending: 0, totalDisplay: formatUnits(amount, decimals), availableDisplay: formatUnits(amount, decimals) },
           icon: typeof meta.icon === 'string' ? meta.icon : undefined,
           capabilities: { canSend: true, canReceive: true, canSwap: false, supportsLightning: false, supportsOnchain: false },
         })
@@ -242,7 +242,8 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     }
     const bal: bigint = await this.account.getTokenBalance(assetId)
     const n = Number(bal)
-    return { total: n, available: n, pending: 0, totalDisplay: String(n), availableDisplay: String(n) }
+    const precision = (await this.listAssets()).find((a) => a.id === assetId)?.precision ?? 0
+    return { total: n, available: n, pending: 0, totalDisplay: formatUnits(n, precision), availableDisplay: formatUnits(n, precision) }
   }
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
