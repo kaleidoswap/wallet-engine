@@ -33,6 +33,7 @@ import {
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
+import { decodeBolt11 } from '../lib/bolt11'
 import type {
   LiquidPsetReview,
   LiquidPsetSignRequest,
@@ -44,6 +45,7 @@ import type {
 
 /** Per-protocol timeout for cross-protocol fan-out reads (assets/transactions). */
 const PER_PROTOCOL_TIMEOUT_MS = 8_000
+const DISCONNECT_TIMEOUT_MS = 2_000
 
 export interface ProtocolManagerConfig {
   defaultProtocol?: ProtocolType
@@ -60,12 +62,18 @@ export interface ProtocolManagerConfig {
   verifyMessageFallback?: (message: string, signature: string) => Promise<string>
   /**
    * Optional signing/spend policy. When set, fund-moving + signing operations
-   * (sendPayment/payKeysend/executeSwap/signMessage/signLiquidPset) are gated through
+   * (sendPayment/payKeysend/executeSwap/signMessage/signPsbt/signLiquidPset) are gated through
    * `evaluatePolicy` and throw `PolicyError` on denial. Omit for no enforcement
    * (default, fully backward-compatible). The active grant is selected with
    * `setActiveGrant()`.
    */
   policy?: SigningPolicy
+  /**
+   * Permit callers to obtain raw adapters while a policy is configured.
+   * Raw adapters bypass ProtocolManager policy checks, so this defaults to
+   * false whenever `policy` is present. Trusted hosts may opt in explicitly.
+   */
+  allowUnsafeAdapterAccess?: boolean
 }
 
 export class ProtocolManager {
@@ -75,6 +83,9 @@ export class ProtocolManager {
   private verifyMessageFallback?: (message: string, signature: string) => Promise<string>
   private policy?: SigningPolicy
   private activeGrantId?: string
+  private allowUnsafeAdapterAccess: boolean
+  private connectionGeneration = new Map<ProtocolType, number>()
+  private connectionJobs = new Map<ProtocolType, Promise<void>>()
 
   constructor(_config: ProtocolManagerConfig = {}) {
     this.registry = new ProtocolAdapterRegistry()
@@ -82,6 +93,8 @@ export class ProtocolManager {
     this.log = _config.logger ?? getLogger()
     this.verifyMessageFallback = _config.verifyMessageFallback
     this.policy = _config.policy
+    this.allowUnsafeAdapterAccess =
+      _config.allowUnsafeAdapterAccess ?? _config.policy === undefined
   }
 
   /**
@@ -172,7 +185,7 @@ export class ProtocolManager {
     return this.activeProtocol
   }
 
-  public getActiveAdapter(): IProtocolAdapter {
+  private getActiveAdapterUnchecked(): IProtocolAdapter {
     if (!this.activeProtocol) {
       throw new Error('No active protocol set')
     }
@@ -185,7 +198,17 @@ export class ProtocolManager {
     return adapter
   }
 
+  /**
+   * Raw adapter access bypasses every manager policy gate. It is disabled by
+   * default when a policy is configured; trusted hosts must opt in explicitly.
+   */
+  public getActiveAdapter(): IProtocolAdapter {
+    this.assertUnsafeAdapterAccessAllowed()
+    return this.getActiveAdapterUnchecked()
+  }
+
   getAdapter(protocol: ProtocolType): IProtocolAdapter {
+    this.assertUnsafeAdapterAccessAllowed()
     const adapter = this.registry.get(protocol)
     if (!adapter) {
       throw new Error(`Adapter not found for protocol: ${protocol}`)
@@ -197,49 +220,102 @@ export class ProtocolManager {
    * Try to get an adapter, returning undefined if not registered.
    */
   getAdapterIfAvailable(protocol: ProtocolType): IProtocolAdapter | undefined {
+    this.assertUnsafeAdapterAccessAllowed()
     return this.registry.get(protocol)
+  }
+
+  private assertUnsafeAdapterAccessAllowed(): void {
+    if (this.policy && !this.allowUnsafeAdapterAccess) {
+      throw new ProtocolError(
+        'Raw adapter access is disabled while a signing/spend policy is active',
+        this.activeProtocol ?? 'BTC',
+        'UNSAFE_ADAPTER_ACCESS',
+      )
+    }
+  }
+
+  private bumpConnectionGeneration(protocol: ProtocolType): number {
+    const next = (this.connectionGeneration.get(protocol) ?? 0) + 1
+    this.connectionGeneration.set(protocol, next)
+    return next
+  }
+
+  private isConnectionCurrent(protocol: ProtocolType, generation: number): boolean {
+    return this.connectionGeneration.get(protocol) === generation
   }
 
   // ========================================================================
   // Connection Management
   // ========================================================================
 
-  async connect(protocol: ProtocolType, config: ProtocolConfig): Promise<void> {
+  connect(protocol: ProtocolType, config: ProtocolConfig): Promise<void> {
     const adapter = this.registry.get(protocol)
     if (!adapter) {
-      throw new ProtocolError(`Protocol not found: ${protocol}`, protocol, 'NOT_FOUND')
+      return Promise.reject(new ProtocolError(`Protocol not found: ${protocol}`, protocol, 'NOT_FOUND'))
     }
 
-    await adapter.connect(config)
-    this.log.info(`[ProtocolManager] Connected to ${protocol}`)
+    // Serialize connects per adapter. A later connect request invalidates an
+    // earlier one, waits for its cleanup, and only then starts with its config.
+    const generation = this.bumpConnectionGeneration(protocol)
+    const previous = this.connectionJobs.get(protocol)
+    const run = (async () => {
+      await previous?.catch(() => {})
+      if (!this.isConnectionCurrent(protocol, generation)) {
+        throw new ProtocolError(`Connection invalidated: ${protocol}`, protocol, 'CONNECTION_INVALIDATED')
+      }
 
-    // Auto-set as active if no active protocol
-    if (!this.activeProtocol) {
-      this.activeProtocol = protocol
+      await adapter.connect(config)
+      if (!this.isConnectionCurrent(protocol, generation)) {
+        await this.disconnectAdapterBounded(adapter)
+        throw new ProtocolError(`Connection invalidated: ${protocol}`, protocol, 'CONNECTION_INVALIDATED')
+      }
+
+      this.log.info(`[ProtocolManager] Connected to ${protocol}`)
+      if (!this.activeProtocol) this.activeProtocol = protocol
+    })()
+
+    this.connectionJobs.set(protocol, run)
+    const clearIfCurrent = () => {
+      if (this.connectionJobs.get(protocol) === run) this.connectionJobs.delete(protocol)
     }
+    void run.then(clearIfCurrent, clearIfCurrent)
+    return run
   }
 
   async disconnect(protocol: ProtocolType): Promise<void> {
+    this.bumpConnectionGeneration(protocol)
+    if (this.activeProtocol === protocol) this.activeProtocol = null
     const adapter = this.registry.get(protocol)
     if (adapter) {
-      await adapter.disconnect()
+      await this.disconnectAdapterBounded(adapter)
       this.log.info(`[ProtocolManager] Disconnected from ${protocol}`)
-
-      if (this.activeProtocol === protocol) {
-        this.activeProtocol = null
-      }
     }
   }
 
   async disconnectAll(): Promise<void> {
-    for (const adapter of this.registry.getAll()) {
-      try {
-        await adapter.disconnect()
-      } catch (error) {
-        this.log.error(`[ProtocolManager] Error disconnecting ${adapter.protocolName}:`, error)
-      }
-    }
+    const adapters = this.registry.getAll()
+    for (const adapter of adapters) this.bumpConnectionGeneration(adapter.protocolName)
+    // Invalidate routing synchronously, before any third-party cleanup await.
     this.activeProtocol = null
+    const results = await Promise.allSettled(
+      adapters.map((adapter) => this.disconnectAdapterBounded(adapter)),
+    )
+    results.forEach((result, index) => {
+      if (result.status === 'rejected') {
+        this.log.error(
+          `[ProtocolManager] Error disconnecting ${adapters[index].protocolName}:`,
+          result.reason,
+        )
+      }
+    })
+  }
+
+  private disconnectAdapterBounded(adapter: IProtocolAdapter): Promise<void> {
+    return this.withTimeoutMs(
+      Promise.resolve().then(() => adapter.disconnect()),
+      DISCONNECT_TIMEOUT_MS,
+      `disconnect(${adapter.protocolName})`,
+    )
   }
 
   async getAllConnectionInfo(): Promise<Map<ProtocolType, ConnectionInfo>> {
@@ -265,15 +341,15 @@ export class ProtocolManager {
   // ========================================================================
 
   async listAssets(): Promise<UnifiedAsset[]> {
-    return this.getActiveAdapter().listAssets()
+    return this.getActiveAdapterUnchecked().listAssets()
   }
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
-    return this.getActiveAdapter().getAsset(assetId)
+    return this.getActiveAdapterUnchecked().getAsset(assetId)
   }
 
   async getAssetBalance(assetId: string) {
-    return this.getActiveAdapter().getAssetBalance(assetId)
+    return this.getActiveAdapterUnchecked().getAssetBalance(assetId)
   }
 
   /**
@@ -294,30 +370,41 @@ export class ProtocolManager {
   }
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
-    return this.getActiveAdapter().listTransactions(filter)
+    return this.getActiveAdapterUnchecked().listTransactions(filter)
   }
 
   async getTransaction(txId: string, assetId?: string): Promise<UnifiedTransaction> {
-    return this.getActiveAdapter().getTransaction(txId, assetId)
+    return this.getActiveAdapterUnchecked().getTransaction(txId, assetId)
   }
 
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
-    return this.getActiveAdapter().createInvoice(request)
+    return this.getActiveAdapterUnchecked().createInvoice(request)
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    return this.getActiveAdapter().decodeInvoice(invoice)
+    return this.getActiveAdapterUnchecked().decodeInvoice(invoice)
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    this.enforce('send', { amountSat: request.amount, destination: request.invoice })
-    return this.getActiveAdapter().sendPayment(request)
+    this.enforce('send', { amountSat: this.resolveSendAmountSat(request), destination: request.invoice })
+    return this.getActiveAdapterUnchecked().sendPayment(request)
+  }
+
+  /**
+   * Sat amount a send will move, for policy evaluation: the caller's explicit
+   * amount, else the value encoded in the BOLT11. Undefined only for a truly
+   * amountless invoice with no explicit amount — which the policy engine treats
+   * as unknown and denies whenever a spend cap is set.
+   */
+  private resolveSendAmountSat(request: PaymentRequest): number | undefined {
+    if (request.amount != null) return request.amount
+    return decodeBolt11(request.invoice).amountSat
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
     // keysend amount is in msat; policy limits are in sats.
     this.enforce('keysend', { amountSat: Math.ceil(request.amount / 1000), destination: request.pubkey })
-    const adapter = this.getActiveAdapter()
+    const adapter = this.getActiveAdapterUnchecked()
     if (!adapter.payKeysend) {
       throw new ProtocolError(
         'Keysend not supported by active protocol',
@@ -329,7 +416,7 @@ export class ProtocolManager {
   }
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
-    return this.getActiveAdapter().getPaymentStatus(paymentHash)
+    return this.getActiveAdapterUnchecked().getPaymentStatus(paymentHash)
   }
 
   /**
@@ -339,7 +426,7 @@ export class ProtocolManager {
    */
   async signMessage(message: string): Promise<string> {
     this.enforce('signMessage')
-    const adapter = this.getActiveAdapter()
+    const adapter = this.getActiveAdapterUnchecked()
     if (typeof adapter.signMessage !== 'function') {
       throw new ProtocolError(
         'signMessage not supported by active protocol',
@@ -350,13 +437,27 @@ export class ProtocolManager {
     return adapter.signMessage(message)
   }
 
+  /** Sign a PSBT through the same policy boundary as every other signing op. */
+  async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
+    this.enforce('signPsbt')
+    const adapter = this.getActiveAdapterUnchecked()
+    if (typeof adapter.signPsbt !== 'function') {
+      throw new ProtocolError(
+        'PSBT signing not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED',
+      )
+    }
+    return adapter.signPsbt(psbtHex)
+  }
+
   /**
    * Verify an LND-style zbase32 signature, returning the signer's hex pubkey.
    * Routes to the active adapter, else the injected generic fallback, else
    * throws NOT_SUPPORTED.
    */
   async verifyMessage(message: string, signature: string): Promise<string> {
-    const adapter = this.getActiveAdapter()
+    const adapter = this.getActiveAdapterUnchecked()
     if (typeof adapter.verifyMessage === 'function') {
       return adapter.verifyMessage(message, signature)
     }
@@ -371,7 +472,7 @@ export class ProtocolManager {
   }
 
   private simplicityOperations() {
-    const adapter = this.getActiveAdapter()
+    const adapter = this.getActiveAdapterUnchecked()
     const operations = asSimplicityOperations(adapter)
     if (!operations) {
       throw new ProtocolError(
@@ -417,11 +518,11 @@ export class ProtocolManager {
   }
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
-    return this.getActiveAdapter().getReceiveAddress(assetId)
+    return this.getActiveAdapterUnchecked().getReceiveAddress(assetId)
   }
 
   async getSwapQuote(request: QuoteRequest): Promise<Quote> {
-    const adapter = this.getActiveAdapter()
+    const adapter = this.getActiveAdapterUnchecked()
     if (!adapter.supportsSwaps() || !adapter.getSwapQuote) {
       throw new ProtocolError(
         'Swaps not supported by active protocol',
@@ -433,8 +534,12 @@ export class ProtocolManager {
   }
 
   async executeSwap(quote: Quote): Promise<SwapResult> {
-    this.enforce('swap', { amountSat: quote.fromAmount })
-    const adapter = this.getActiveAdapter()
+    const receiverAddress = (quote as Quote & { receiverAddress?: unknown }).receiverAddress
+    this.enforce('swap', {
+      amountSat: quote.fromAmount,
+      destination: typeof receiverAddress === 'string' ? receiverAddress : undefined,
+    })
+    const adapter = this.getActiveAdapterUnchecked()
     if (!adapter.supportsSwaps() || !adapter.executeSwap) {
       throw new ProtocolError(
         'Swaps not supported by active protocol',
@@ -490,11 +595,15 @@ export class ProtocolManager {
 
   /** Race a per-protocol call against an 8s timeout, clearing the timer on settle. */
   private withTimeout<T>(p: Promise<T>, protocol: ProtocolType, op: string): Promise<T> {
+    return this.withTimeoutMs(p, PER_PROTOCOL_TIMEOUT_MS, `${op}(${protocol})`)
+  }
+
+  private withTimeoutMs<T>(p: Promise<T>, timeoutMs: number, label: string): Promise<T> {
     let timer: ReturnType<typeof setTimeout>
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(
-        () => reject(new Error(`${op}(${protocol}) timed out after ${PER_PROTOCOL_TIMEOUT_MS}ms`)),
-        PER_PROTOCOL_TIMEOUT_MS
+        () => reject(new Error(`${label} timed out after ${timeoutMs}ms`)),
+        timeoutMs,
       )
     })
     // Clear the timer whether p resolves or rejects, so a fast call never leaves
