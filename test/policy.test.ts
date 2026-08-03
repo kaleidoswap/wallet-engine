@@ -15,6 +15,32 @@ describe('evaluatePolicy — default-allow', () => {
     // signMessage carries no amount → never capped
     expect(evaluatePolicy({ operation: 'signMessage' }, p).allowed).toBe(true)
   })
+
+  it('fails CLOSED when a global cap is set but an amount-op amount is unknown', () => {
+    const p: SigningPolicy = { maxAmountSat: 1000 }
+    // amount-op with no amountSat (e.g. amountless BOLT11) → denied, not skipped
+    expect(evaluatePolicy({ operation: 'send' }, p)).toMatchObject({
+      allowed: false,
+      code: 'AMOUNT_UNKNOWN',
+    })
+    expect(evaluatePolicy({ operation: 'swap' }, p)).toMatchObject({ code: 'AMOUNT_UNKNOWN' })
+    // non-amount ops are unaffected by the cap
+    expect(evaluatePolicy({ operation: 'signMessage' }, p).allowed).toBe(true)
+  })
+
+  it('allows an unknown amount when NO cap is configured', () => {
+    expect(evaluatePolicy({ operation: 'send' }, {}).allowed).toBe(true)
+    expect(evaluatePolicy({ operation: 'send' }, { mode: 'allow' }).allowed).toBe(true)
+  })
+
+  it('rejects malformed amounts before they can bypass comparisons', () => {
+    for (const amountSat of [Number.NaN, Number.POSITIVE_INFINITY, -1, 0, 1.5]) {
+      expect(evaluatePolicy({ operation: 'send', amountSat }, {})).toMatchObject({
+        allowed: false,
+        code: 'AMOUNT_INVALID',
+      })
+    }
+  })
 })
 
 describe('evaluatePolicy — default-deny', () => {
@@ -63,6 +89,12 @@ describe('evaluatePolicy — default-deny', () => {
     ).toMatchObject({ code: 'AMOUNT_OVER_GRANT_LIMIT' })
   })
 
+  it('fails CLOSED when a grant cap is set but the amount is unknown', () => {
+    expect(
+      evaluatePolicy({ operation: 'send', grantId: 'dapp-A', protocol: 'SPARK' }, policy),
+    ).toMatchObject({ allowed: false, code: 'AMOUNT_UNKNOWN' })
+  })
+
   it('enforces the destination-kind allowlist', () => {
     // an on-chain BTC address is not BOLT11 → denied
     const r = evaluatePolicy(
@@ -89,6 +121,28 @@ describe('evaluatePolicy — default-deny', () => {
     expect(evaluatePolicy({ operation: 'send', grantId: 'g', destination: 'lnbc1other' }, p)).toMatchObject({
       code: 'DEST_NOT_ALLOWLISTED',
     })
+    expect(evaluatePolicy({ operation: 'send', grantId: 'g' }, p)).toMatchObject({
+      code: 'DEST_UNKNOWN',
+    })
+  })
+
+  it('treats Liquid PSET signing as an explicit signing grant without applying spend caps', () => {
+    const p: SigningPolicy = {
+      mode: 'deny',
+      maxAmountSat: 1,
+      grants: [{ id: 'review-ui', operations: ['signLiquidPset'], protocols: ['LIQUID'] }],
+    }
+    expect(evaluatePolicy({
+      operation: 'signLiquidPset',
+      grantId: 'review-ui',
+      protocol: 'LIQUID',
+      amountSat: 1_000_000,
+    }, p)).toEqual({ allowed: true })
+    expect(evaluatePolicy({
+      operation: 'signLiquidPset',
+      grantId: 'review-ui',
+      protocol: 'BTC',
+    }, p)).toMatchObject({ allowed: false, code: 'PROTOCOL_NOT_GRANTED' })
   })
 
   it('treats Liquid PSET signing as an explicit signing grant without applying spend caps', () => {

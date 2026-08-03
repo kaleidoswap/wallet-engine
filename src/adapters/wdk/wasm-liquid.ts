@@ -12,5 +12,10 @@
  *
  * Mirrors `./wasm-rgb` (the RGB-L1 analogue).
  */
-export { LiquidWdkAdapter, type LiquidAdapterConfig, LIQUID_USDT_ASSET_ID } from './LiquidWdkAdapter'
+export {
+  LiquidWdkAdapter,
+  type LiquidAdapterConfig,
+  type LiquidSyncWarning,
+  LIQUID_USDT_ASSET_ID,
+} from './LiquidWdkAdapter'
 export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './moduleLoader'

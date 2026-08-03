@@ -151,7 +151,15 @@ class KaleidoClientManager {
   }
 
   getConfig(): KaleidoClientConfig | null {
-    return this.config;
+    if (!this.config) return null;
+    // NWC URIs embed a client secret and API keys are bearer credentials.
+    // Match the Spark/Arkade managers: expose operational settings without
+    // making a routine config read or log capable of leaking credentials.
+    return {
+      ...this.config,
+      apiKey: undefined,
+      nwcUri: undefined,
+    };
   }
 
   /**

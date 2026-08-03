@@ -57,6 +57,12 @@ import type {
   SimplicityCompileResult,
 } from '../../types/simplicity'
 
+export interface LiquidSyncWarning {
+  code: 'LIQUID_WATERFALLS_FALLBACK'
+  message: string
+  details?: { reason?: 'waterfalls_failed' }
+}
+
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'
   /** BIP-39 mnemonic for this wallet. */
@@ -71,8 +77,15 @@ export interface LiquidAdapterConfig extends BaseProtocolConfig {
    * public Blockstream Esplora is not one. Default: false.
    */
   waterfalls?: boolean
+  /**
+   * Explicitly allow a one-time retry through the network's built-in standard Esplora provider
+   * if Waterfalls fails. This changes providers and may disclose wallet addresses/scripts to it.
+   */
+  allowDefaultEsploraFallback?: boolean
   /** Optional waterfalls server recipient key; encrypts the descriptor before it is sent. */
   waterfallsRecipient?: string
+  /** Receives non-fatal sync warnings, including successful Waterfalls fallback. */
+  onWarning?: (warning: LiquidSyncWarning) => void | Promise<void>
 }
 
 /** Local mirror of the lwk network union (kept here so WDK/lwk types never cross the contract). */
@@ -128,6 +141,8 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Connection ---------------------------------------------------------
+  async connect(config: LiquidAdapterConfig): Promise<void>
+  async connect(config: BaseProtocolConfig): Promise<void>
   async connect(config: BaseProtocolConfig): Promise<void> {
     const cfg = config as LiquidAdapterConfig
     if (!cfg.mnemonic) {
@@ -141,7 +156,9 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       network: LIQUID_NETWORK_MAP[this.network] ?? 'mainnet',
       esploraUrl: cfg.esploraUrl,
       waterfalls: cfg.waterfalls,
+      allowDefaultEsploraFallback: cfg.allowDefaultEsploraFallback,
       waterfallsRecipient: cfg.waterfallsRecipient,
+      onWarning: cfg.onWarning,
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true

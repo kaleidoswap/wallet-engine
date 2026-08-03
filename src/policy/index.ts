@@ -82,17 +82,34 @@ function deny(code: string, reason: string): PolicyDecision {
  * Evaluate a request against a policy. Pure — same input, same output, no I/O.
  */
 export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): PolicyDecision {
-  // 1. Global per-transaction cap (applies regardless of grants/mode).
+  // Runtime callers are not constrained by TypeScript. Reject malformed
+  // amounts before comparing limits: NaN and negative values otherwise make
+  // every `>` cap check false and silently bypass the policy.
   if (
-    policy.maxAmountSat != null &&
     AMOUNT_OPS.has(req.operation) &&
     req.amountSat != null &&
-    req.amountSat > policy.maxAmountSat
+    (!Number.isSafeInteger(req.amountSat) || req.amountSat <= 0)
   ) {
-    return deny(
-      'AMOUNT_OVER_GLOBAL_LIMIT',
-      `amount ${req.amountSat} exceeds global limit ${policy.maxAmountSat}`,
-    )
+    return deny('AMOUNT_INVALID', `'${req.operation}' amount must be a positive safe integer`)
+  }
+
+  // 1. Global per-transaction cap (applies regardless of grants/mode). When a
+  // cap is configured for an amount-op but the amount is unknown, fail CLOSED:
+  // an unknown amount must never slip past a spend limit (e.g. an amountless
+  // BOLT11 whose value the caller never resolved).
+  if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
+    if (req.amountSat == null) {
+      return deny(
+        'AMOUNT_UNKNOWN',
+        `'${req.operation}' amount is unknown but a global spend limit is set`,
+      )
+    }
+    if (req.amountSat > policy.maxAmountSat) {
+      return deny(
+        'AMOUNT_OVER_GLOBAL_LIMIT',
+        `amount ${req.amountSat} exceeds global limit ${policy.maxAmountSat}`,
+      )
+    }
   }
 
   const grants = policy.grants ?? []
@@ -117,18 +134,27 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
   if (grant.protocols && req.protocol && !grant.protocols.includes(req.protocol)) {
     return deny('PROTOCOL_NOT_GRANTED', `grant '${grant.id}' may not act on ${req.protocol}`)
   }
-  if (
-    grant.maxAmountSat != null &&
-    AMOUNT_OPS.has(req.operation) &&
-    req.amountSat != null &&
-    req.amountSat > grant.maxAmountSat
-  ) {
-    return deny(
-      'AMOUNT_OVER_GRANT_LIMIT',
-      `amount ${req.amountSat} exceeds grant '${grant.id}' limit ${grant.maxAmountSat}`,
-    )
+  if (grant.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
+    if (req.amountSat == null) {
+      return deny(
+        'AMOUNT_UNKNOWN',
+        `'${req.operation}' amount is unknown but grant '${grant.id}' sets a spend limit`,
+      )
+    }
+    if (req.amountSat > grant.maxAmountSat) {
+      return deny(
+        'AMOUNT_OVER_GRANT_LIMIT',
+        `amount ${req.amountSat} exceeds grant '${grant.id}' limit ${grant.maxAmountSat}`,
+      )
+    }
   }
-  if (req.destination != null && (grant.destinationAllowlist || grant.allowedDestinationKinds)) {
+  if (grant.destinationAllowlist || grant.allowedDestinationKinds) {
+    if (req.destination == null || req.destination.trim() === '') {
+      return deny(
+        'DEST_UNKNOWN',
+        `grant '${grant.id}' restricts destinations but none was provided`,
+      )
+    }
     if (grant.destinationAllowlist && !grant.destinationAllowlist.includes(req.destination)) {
       return deny('DEST_NOT_ALLOWLISTED', `destination not in grant '${grant.id}' allowlist`)
     }
