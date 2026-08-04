@@ -382,11 +382,16 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       //    state so callers get the truth plus the preimage NIP-47 requires.
       if (isBolt11(destination)) {
         const maxFee = (request as any).maxFeeSats ?? (request as any).maxFee ?? DEFAULT_MAX_FEE_SATS
+        // Amountless (0-sat) invoices require an explicit amount; the SDK
+        // rejects amountSatsToSend on amount-bearing ones, so gate on the
+        // invoice itself, not on whether the caller supplied an amount.
+        const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null
         const result: any = await this.account.payLightningInvoice({
           invoice: destination,
           maxFeeSats: maxFee,
-          // Amountless (0-sat) invoices require an explicit amount; omit otherwise.
-          ...(request.amount && request.amount > 0 ? { amountSatsToSend: request.amount } : {}),
+          ...(invoiceIsAmountless && request.amount && request.amount > 0
+            ? { amountSatsToSend: request.amount }
+            : {}),
         })
         const id = String(result?.id ?? result?.paymentHash ?? '')
         // Raw wallet access is best-effort: without it the poller degrades to

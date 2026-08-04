@@ -79,6 +79,15 @@ describe('RlnWdkAdapter invoice/payment bodies', () => {
     expect(body.amt_msat).toBe(1_500_000)
   })
 
+  it('sendPayment never re-amounts an amount-bearing invoice', async () => {
+    const { adapter, calls } = connectedRln()
+    // lnbc10u… encodes 10 µBTC = 1000 sats; a stale caller-supplied amount
+    // must not override it (the node pays the invoice amount).
+    await adapter.sendPayment({ invoice: 'lnbc10u1pabcdef...', amount: 1500 })
+    const body = calls.sendPayment[0]
+    expect(body.amt_msat).toBeUndefined()
+  })
+
   it('sendPayment forwards asset_id + asset_amount for an open-amount RGB invoice', async () => {
     const { adapter, calls } = connectedRln()
     await adapter.sendPayment({ invoice: 'lnbc1...', asset_id: 'rgb:usdt', asset_amount: 7 } as any)

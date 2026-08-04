@@ -74,6 +74,27 @@ describe('RlnWdkAdapter.executeProtocolOperation allowlist', () => {
       ).rejects.toThrow(/not allowed/i)
     }
   })
+
+  it('rejects fund-moving ops unless the host opts in via allowPrivilegedOps', async () => {
+    const { adapter } = connectedRln()
+    for (const op of ['keysend', 'openChannel', 'closeChannel', 'createUtxos', 'makerInit', 'makerExecute', 'whitelistSwap', 'atomicTaker', 'backup']) {
+      await expect(
+        adapter.executeProtocolOperation(op, {}),
+        `"${op}" must require allowPrivilegedOps`,
+      ).rejects.toThrow(/allowPrivilegedOps/i)
+    }
+  })
+
+  it('dispatches privileged ops when the host opted in', async () => {
+    const { adapter, calls } = connectedRln()
+    ;(adapter as any).allowPrivilegedOps = true
+    ;(adapter as any).account.keysend = async (p: any) => {
+      calls.push(['keysend', p])
+      return { payment_hash: 'ph' }
+    }
+    await adapter.executeProtocolOperation('keysend', { dest_pubkey: '02ab', amt_msat: 1000 })
+    expect(calls.at(-1)?.[0]).toBe('keysend')
+  })
 })
 
 describe('ArkadeWdkAdapter.executeProtocolOperation allowlist', () => {

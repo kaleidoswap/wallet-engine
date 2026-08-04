@@ -5,6 +5,10 @@ import { KaleidoswapSwap } from '../src/swap/KaleidoswapSwap'
  * Money fields coming back from the swap module must fail CLOSED on values that
  * would silently corrupt (missing/renamed field → NaN, or magnitude past
  * Number.MAX_SAFE_INTEGER). See S4.
+ *
+ * UNITS: everything on this boundary is raw base units — the quote's amounts
+ * pass straight through to execution, so there is no display/raw conversion
+ * for these tests to model (that mismatch was CVE-grade: audit C1).
  */
 function swapWithQuoteResponse(q: any) {
   const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
@@ -18,24 +22,37 @@ const REQ = {
   toAsset: 'BTC',
   fromLayer: 'RGB_LN',
   toLayer: 'BTC_LN',
-  fromAmount: 100,
+  fromAmount: 100_000_000, // raw base units
 }
 
 describe('KaleidoswapSwap.getQuote amount guards', () => {
   it('maps a well-formed quote', async () => {
     const swap = swapWithQuoteResponse({
       rfqId: 'r1',
-      tokenInAmount: 100,
+      tokenInAmount: 100_000_000,
       tokenOutAmount: 5000,
       price: 50,
       fee: 1,
       expiresAt: 1700000000,
     })
     const q = await swap.getQuote(REQ as any)
-    expect(q.fromAmount).toBe(100)
+    expect(q.fromAmount).toBe(100_000_000)
     expect(q.toAmount).toBe(5000)
     expect(q.price).toBe(50)
     expect(q.expiresAt).toBe(1700000000 * 1000)
+  })
+
+  it('passes the raw fromAmount through to the module unchanged', async () => {
+    let sent: any = null
+    const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
+    ;(swap as any).proto = {
+      quoteSwap: async (opts: any) => {
+        sent = opts
+        return { rfqId: 'r1', tokenInAmount: 1, tokenOutAmount: 1, price: 1, fee: 0, expiresAt: 1 }
+      },
+    }
+    await swap.getQuote(REQ as any)
+    expect(sent.fromAmount).toBe(100_000_000)
   })
 
   it('throws when a money field is missing (would be NaN)', async () => {
@@ -74,9 +91,10 @@ describe('KaleidoswapSwap.getQuote amount guards', () => {
 })
 
 /**
- * Quote binding (M1): the swap module re-quotes internally and executes at
- * THAT price — the approved quote is never enforced server-side. executeSwap
- * must enforce it client-side: expiry before ordering, slippage after.
+ * Quote binding: execution passes the approved quote's rfqId and exact raw
+ * amounts to the maker — there is no server-side re-quote, so the fill cannot
+ * diverge from the approval on either leg. executeSwap must refuse quotes
+ * that are expired or missing their id/amounts.
  */
 function swapWithSwapResponse(r: any) {
   const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
@@ -84,11 +102,18 @@ function swapWithSwapResponse(r: any) {
   return swap
 }
 
-const FILL = { orderId: 'o1', tokenInAmount: 100, tokenOutAmount: 5000, fee: 1 }
+const FILL = {
+  paymentHash: 'ph1',
+  swapstring: 'ss1',
+  accessToken: 'tok1',
+  status: 'Waiting',
+  tokenInAmount: 100_000_000,
+  tokenOutAmount: 5000,
+}
 const APPROVED = {
   id: 'r1',
   fromAsset: REQ.fromAsset,
-  fromAmount: 100,
+  fromAmount: 100_000_000,
   toAsset: REQ.toAsset,
   toAmount: 5000,
   price: 50,
@@ -96,14 +121,31 @@ const APPROVED = {
   expiresAt: Date.now() + 60_000,
   provider: 'kaleidoswap' as const,
 }
-const EXEC_REQ = { ...REQ, receiverAddress: 'rgb:inv', receiverAddressFormat: 'RGB_INVOICE' }
 
 describe('KaleidoswapSwap.executeSwap quote binding', () => {
-  it('executes when the fill matches the approved quote', async () => {
+  it('executes the approved quote and surfaces the access token', async () => {
     const swap = swapWithSwapResponse(FILL)
-    const r = await swap.executeSwap({ ...EXEC_REQ, approvedQuote: APPROVED } as any)
-    expect(r.swapId).toBe('o1')
+    const r = await swap.executeSwap(APPROVED as any)
+    expect(r.swapId).toBe('ph1')
+    expect(r.paymentHash).toBe('ph1')
+    expect(r.accessToken).toBe('tok1')
+    expect(r.status).toBe('pending')
+    expect(r.quote.fromAmount).toBe(100_000_000)
     expect(r.quote.toAmount).toBe(5000)
+  })
+
+  it('passes the rfq id and exact raw amounts to the module', async () => {
+    let sent: any = null
+    const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
+    ;(swap as any).proto = { swap: async (opts: any) => ((sent = opts), FILL) }
+    await swap.executeSwap(APPROVED as any)
+    expect(sent).toEqual({
+      rfqId: 'r1',
+      fromAssetId: REQ.fromAsset,
+      toAssetId: REQ.toAsset,
+      tokenInAmount: 100_000_000,
+      tokenOutAmount: 5000,
+    })
   })
 
   it('rejects before ordering when the approved quote has expired', async () => {
@@ -111,38 +153,64 @@ describe('KaleidoswapSwap.executeSwap quote binding', () => {
     const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
     ;(swap as any).proto = { swap: async () => ((ordered = true), FILL) }
     await expect(
-      swap.executeSwap({ ...EXEC_REQ, approvedQuote: { ...APPROVED, expiresAt: Date.now() - 1000 } } as any),
+      swap.executeSwap({ ...APPROVED, expiresAt: Date.now() - 1000 } as any),
     ).rejects.toThrow(/expired/i)
     expect(ordered).toBe(false)
   })
 
-  it('rejects a fill degraded past the slippage tolerance (default 1%)', async () => {
-    const swap = swapWithSwapResponse({ ...FILL, tokenOutAmount: 4900 }) // -2%
-    await expect(swap.executeSwap({ ...EXEC_REQ, approvedQuote: APPROVED } as any)).rejects.toThrow(/degraded/i)
+  it('rejects a quote without an rfq id', async () => {
+    const swap = swapWithSwapResponse(FILL)
+    await expect(swap.executeSwap({ ...APPROVED, id: '' } as any)).rejects.toThrow(/rfq/i)
   })
 
-  it('accepts a fill within the slippage tolerance', async () => {
-    const swap = swapWithSwapResponse({ ...FILL, tokenOutAmount: 4960 }) // -0.8%
-    const r = await swap.executeSwap({ ...EXEC_REQ, approvedQuote: APPROVED } as any)
-    expect(r.quote.toAmount).toBe(4960)
+  it('rejects a quote missing either amount', async () => {
+    const swap = swapWithSwapResponse(FILL)
+    await expect(swap.executeSwap({ ...APPROVED, fromAmount: 0 } as any)).rejects.toThrow(/amount/i)
+    await expect(swap.executeSwap({ ...APPROVED, toAmount: NaN } as any)).rejects.toThrow(/amount/i)
+  })
+})
+
+describe('KaleidoswapSwap.getSwapStatus', () => {
+  function swapWithStatus(s: any, capture?: (args: any[]) => void) {
+    const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
+    ;(swap as any).proto = {
+      swap: async () => FILL,
+      getOrderStatus: async (...args: any[]) => {
+        capture?.(args)
+        return s
+      },
+    }
+    return swap
+  }
+
+  it('maps atomic statuses fail-safe', async () => {
+    const cases: Array<[string, string]> = [
+      ['Succeeded', 'confirmed'],
+      ['Failed', 'failed'],
+      ['Expired', 'failed'],
+      ['Waiting', 'pending'],
+      ['Pending', 'pending'],
+      ['SomethingNew', 'pending'],
+    ]
+    for (const [raw, mapped] of cases) {
+      const swap = swapWithStatus({ payment_hash: 'ph1', status: raw, qty_from: 1, qty_to: 2 })
+      const r = await swap.getSwapStatus('ph1')
+      expect(r.status).toBe(mapped)
+    }
   })
 
-  it('honors a caller-supplied maxSlippageBps', async () => {
-    const swap = swapWithSwapResponse({ ...FILL, tokenOutAmount: 4960 }) // -0.8%
-    await expect(
-      swap.executeSwap({ ...EXEC_REQ, approvedQuote: APPROVED, maxSlippageBps: 50 } as any),
-    ).rejects.toThrow(/degraded/i)
+  it('reuses the access token captured at execution', async () => {
+    let captured: any[] = []
+    const swap = swapWithStatus({ payment_hash: 'ph1', status: 'Pending' }, (args) => (captured = args))
+    await swap.executeSwap(APPROVED as any) // stores tok1 for ph1
+    await swap.getSwapStatus('ph1')
+    expect(captured).toEqual(['ph1', 'tok1'])
   })
 
-  it('accepts a better-than-quoted fill', async () => {
-    const swap = swapWithSwapResponse({ ...FILL, tokenOutAmount: 5100 })
-    const r = await swap.executeSwap({ ...EXEC_REQ, approvedQuote: APPROVED } as any)
-    expect(r.quote.toAmount).toBe(5100)
-  })
-
-  it('remains backward-compatible without an approved quote', async () => {
-    const swap = swapWithSwapResponse({ ...FILL, tokenOutAmount: 1 })
-    const r = await swap.executeSwap(EXEC_REQ as any)
-    expect(r.quote.toAmount).toBe(1)
+  it('prefers a caller-supplied access token', async () => {
+    let captured: any[] = []
+    const swap = swapWithStatus({ payment_hash: 'ph1', status: 'Pending' }, (args) => (captured = args))
+    await swap.getSwapStatus('ph1', 'tok-host')
+    expect(captured).toEqual(['ph1', 'tok-host'])
   })
 })

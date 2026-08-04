@@ -279,7 +279,7 @@ export interface IArkadeOperations {
 export interface ISwapOperations {
   getSwapQuote(request: QuoteRequest): Promise<Quote>
   executeSwap(quote: Quote): Promise<SwapResult>
-  getSwapStatus(swapId: string): Promise<SwapResult>
+  getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult>
 }
 
 /** Generic escape hatch used by some WDK adapters (allowlisted internally). */

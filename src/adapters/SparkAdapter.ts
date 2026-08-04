@@ -28,6 +28,7 @@ import {
 } from "@buildonspark/spark-sdk";
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
+import { decodeBolt11 } from "../lib/bolt11";
 import {
   type SentTokenTxRecord,
   loadSentTokenRecords,
@@ -684,13 +685,16 @@ export class SparkAdapter implements IProtocolAdapter {
         // it reaches a terminal state.
         const extReq = request as PaymentRequest & { maxFee?: number };
         // For amountless ("0-sat") BOLT-11 invoices the Spark SDK requires
-        // `amountSatsToSend` to be passed explicitly. We always forward
-        // `request.amount` when present so amountless invoices can be paid
-        // with the user-entered amount.
+        // `amountSatsToSend` to be passed explicitly — and rejects it on
+        // amount-bearing ones, so gate on the invoice itself rather than on
+        // whether the caller supplied an amount.
+        const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null;
         const result = await wallet.payLightningInvoice({
           invoice: destination,
           maxFeeSats: extReq.maxFee ?? DEFAULT_MAX_FEE_SATS,
-          ...(request.amount && request.amount > 0 ? { amountSatsToSend: request.amount } : {}),
+          ...(invoiceIsAmountless && request.amount && request.amount > 0
+            ? { amountSatsToSend: request.amount }
+            : {}),
         } as Parameters<typeof wallet.payLightningInvoice>[0]);
         const lnResult = result as unknown as Record<string, unknown>;
 

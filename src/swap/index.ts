@@ -8,5 +8,4 @@ export {
   KaleidoswapSwap,
   type KaleidoswapSwapConfig,
   type SwapQuoteRequest,
-  type SwapExecuteRequest,
 } from './KaleidoswapSwap'

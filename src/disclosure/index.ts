@@ -63,9 +63,13 @@ export const LITE_USD = {
 export type LiteBucket = 'BTC' | 'USD' | 'OTHER'
 
 export function liteBucketOf(asset: UnifiedAsset): LiteBucket {
-  // All BTC representations (on-chain, LN, Spark, Arkade, L-BTC) collapse to one "BTC".
-  if (asset.ticker === 'BTC' || asset.ticker === 'L-BTC' || asset.id === 'BTC') return 'BTC'
-  if (asset.id === LITE_USD.assetId || asset.ticker === 'USDt' || asset.ticker === 'USD') return 'USD'
+  // Bucket by adapter-assigned identity only — id and layer come from our
+  // adapters, while tickers are issuer-controlled metadata, so a scam token
+  // tickered "BTC" or "USDt" must never inflate the displayed totals.
+  // 'BTC' is the native-BTC id in every adapter; BTC_LIQUID marks the Liquid
+  // policy asset (L-BTC), whose id is the network-dependent policy asset id.
+  if (asset.id === 'BTC' || asset.layer === 'BTC_LIQUID') return 'BTC'
+  if (asset.id === LITE_USD.assetId) return 'USD'
   return 'OTHER'
 }
 
