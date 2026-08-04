@@ -57,13 +57,21 @@ describe('policyFor', () => {
 describe('liteBucketOf', () => {
   it('collapses every BTC representation into BTC', () => {
     expect(liteBucketOf(asset({ id: 'BTC', ticker: 'BTC', total: 1 }))).toBe('BTC')
-    expect(liteBucketOf(asset({ id: 'x', ticker: 'L-BTC', total: 1 }))).toBe('BTC')
+    // L-BTC is identified by the adapter-assigned BTC_LIQUID layer (its id is
+    // the network-dependent Liquid policy asset id).
+    expect(liteBucketOf(asset({ id: 'x', ticker: 'L-BTC', layer: 'BTC_LIQUID', total: 1 }))).toBe('BTC')
   })
 
-  it('buckets USDt-on-Liquid and USD tickers into USD', () => {
+  it('buckets USDt-on-Liquid by asset id', () => {
     expect(liteBucketOf(asset({ id: LIQUID_USDT_ASSET_ID, ticker: 'whatever', total: 1 }))).toBe('USD')
-    expect(liteBucketOf(asset({ id: 'x', ticker: 'USDt', total: 1 }))).toBe('USD')
-    expect(liteBucketOf(asset({ id: 'x', ticker: 'USD', total: 1 }))).toBe('USD')
+  })
+
+  it('never buckets by ticker — issuer-controlled metadata must not inflate totals', () => {
+    // A scam RGB asset tickered like the real thing stays OTHER.
+    expect(liteBucketOf(asset({ id: 'rgb:scam1', ticker: 'USDt', layer: 'RGB_LN', total: 1 }))).toBe('OTHER')
+    expect(liteBucketOf(asset({ id: 'rgb:scam2', ticker: 'USD', layer: 'RGB_LN', total: 1 }))).toBe('OTHER')
+    expect(liteBucketOf(asset({ id: 'rgb:scam3', ticker: 'BTC', layer: 'RGB_LN', total: 1 }))).toBe('OTHER')
+    expect(liteBucketOf(asset({ id: 'rgb:scam4', ticker: 'L-BTC', layer: 'RGB_LN', total: 1 }))).toBe('OTHER')
   })
 
   it('everything else is OTHER', () => {
@@ -79,15 +87,16 @@ describe('aggregateForLite', () => {
   it('sums BTC and USD buckets and passes others through', () => {
     const r = aggregateForLite([
       asset({ id: 'BTC', ticker: 'BTC', total: 0.5 }),
-      asset({ id: 'x', ticker: 'L-BTC', total: 0.25 }),
-      asset({ id: 'x', ticker: 'USDt', total: 100 }),
+      asset({ id: 'x', ticker: 'L-BTC', layer: 'BTC_LIQUID', total: 0.25 }),
+      asset({ id: 'rgb:fake-usdt', ticker: 'USDt', layer: 'RGB_LN', total: 100 }),
       asset({ id: LIQUID_USDT_ASSET_ID, ticker: 'q', total: 50 }),
       asset({ id: 'rgb:XAUT', ticker: 'XAUT', total: 3 }),
     ])
     expect(r.btc).toBeCloseTo(0.75)
-    expect(r.usd).toBe(150)
-    expect(r.other).toHaveLength(1)
-    expect(r.other[0].ticker).toBe('XAUT')
+    // The fake-ticker "USDt" does NOT inflate the USD bucket.
+    expect(r.usd).toBe(50)
+    expect(r.other).toHaveLength(2)
+    expect(r.other.map((a) => a.ticker).sort()).toEqual(['USDt', 'XAUT'])
   })
 
   it('is empty-safe', () => {

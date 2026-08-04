@@ -3,10 +3,17 @@
  * ---------------
  * Wraps the WDK Kaleidoswap swap protocol module (@kaleidorg/wdk-protocol-swap-kaleidoswap)
  * behind domain `Quote`/`SwapResult` types. This is the cross-asset swap path (RFQ via the
- * maker) — distinct from the lower-level cross-L2 atomic (VHTLC/Boltz) layer in types/cross-l2.
+ * maker, settled as an atomic HTLC swap over Lightning) — distinct from the lower-level
+ * cross-L2 atomic (VHTLC/Boltz) layer in types/cross-l2.
  *
- * The swap module is bound to an account (it needs a wallet to settle legs) + a baseUrl.
- * No WDK/kaleido-sdk types cross this boundary.
+ * The swap module is bound to an account (the taker's RLN account, which whitelists the
+ * HTLC) + a baseUrl. No WDK/kaleido-sdk types cross this boundary.
+ *
+ * UNITS: every amount on this boundary is in RAW base units (satoshis for BTC, the
+ * asset's smallest unit for RGB assets) — the module rejects fractional inputs, so a
+ * display-unit caller fails loudly instead of creating an order scaled by 10^precision.
+ * Execution passes the approved quote's rfqId and exact raw amounts to the maker, so a
+ * fill can never diverge from what the user approved on either leg.
  */
 
 import { Quote, QuoteRequest, SwapResult, ProtocolError } from '../types/base'
@@ -46,65 +53,48 @@ export interface SwapQuoteRequest extends QuoteRequest {
   toLayer: string
 }
 
-export interface SwapExecuteRequest extends SwapQuoteRequest {
-  /** Destination address/invoice for the OUTPUT asset. */
-  receiverAddress: string
-  /** Format of the receiver address (e.g. 'RGB_INVOICE', 'BOLT11', 'BTC_ADDRESS'). */
-  receiverAddressFormat: string
-  /**
-   * The quote the user approved (from getQuote). The swap module always
-   * re-quotes internally and executes at THAT price — the maker is never bound
-   * to the approved quote. When this is set, executeSwap enforces it
-   * client-side: rejects before ordering if the approved quote has expired,
-   * and rejects the fill if the executed output degrades past
-   * `maxSlippageBps` vs the approved output (the order is left unfunded —
-   * funds only move when the deposit leg is paid).
-   */
-  approvedQuote?: Quote
-  /** Max acceptable output degradation vs approvedQuote.toAmount, in basis points. Default 100 (1%). */
-  maxSlippageBps?: number
-}
-
-/** Default slippage tolerance between the approved quote and the executed fill: 1%. */
-export const DEFAULT_MAX_SLIPPAGE_BPS = 100
-
 /**
- * Thin response shapes for the swap module's RFQ calls. These are NOT the
+ * Thin response shapes for the swap module's calls. These are NOT the
  * module's own types (it stays `any` at construction) — they exist so a
  * renamed/missing money field is a compile error here, not a silent `NaN`.
  */
 interface RawQuote {
   rfqId: string
-  tokenInAmount: number | string
-  tokenOutAmount: number | string
+  tokenInAmount: number | string | bigint
+  tokenOutAmount: number | string | bigint
   price: number | string
-  fee: number | string
+  fee: number | string | bigint
   expiresAt: number | string
 }
 interface RawSwap {
-  orderId: string
-  tokenInAmount: number | string
-  tokenOutAmount: number | string
-  price?: number | string
-  fee: number | string
-  depositAddress?: string | null
-  depositAddressFormat?: string | null
-}
-interface RawOrderStatus {
-  id: string
+  paymentHash: string
+  swapstring?: string
+  accessToken?: string | null
   status?: string
-  rfq_id?: string
-  price?: number | string
-  from_asset?: { asset_id?: string; amount?: number | string }
-  to_asset?: { asset_id?: string; amount?: number | string }
+  tokenInAmount: number | string | bigint
+  tokenOutAmount: number | string | bigint
+}
+interface RawAtomicSwap {
+  payment_hash?: string
+  status?: string
+  qty_from?: number | string
+  qty_to?: number | string
+  from_asset?: string | null
+  to_asset?: string | null
 }
 
 export class KaleidoswapSwap {
   private proto: any = null
+  /**
+   * In-memory fallback for per-swap status access tokens (paymentHash → token).
+   * Hosts should persist `SwapResult.accessToken` themselves — this map does
+   * not survive process/service-worker restarts.
+   */
+  private accessTokens = new Map<string, string>()
 
   /**
-   * @param account a connected WDK account (e.g. the RLN account that settles RGB-LN legs).
-   *        Passed straight through to the swap module; held as `any`.
+   * @param account a connected WDK RLN account (whitelists the swap HTLC on the
+   *        taker's node). Passed straight through to the swap module; held as `any`.
    */
   constructor(private account: any, private config: KaleidoswapSwapConfig) {}
 
@@ -142,74 +132,62 @@ export class KaleidoswapSwap {
     }
   }
 
-  async executeSwap(req: SwapExecuteRequest): Promise<SwapResult & { depositAddress: string | null; depositAddressFormat: string | null }> {
-    if (req.fromAmount == null) {
-      throw new ProtocolError('Swap requires fromAmount', 'RGB_LN', 'NO_AMOUNT')
+  /**
+   * Execute an approved quote as an atomic swap. The maker binds execution to
+   * the quote's rfqId and the exact raw amounts passed here — there is no
+   * server-side re-quote, so both legs settle at what the user approved or
+   * the swap fails/expires with no funds moved.
+   */
+  async executeSwap(quote: Quote): Promise<SwapResult> {
+    if (!quote?.id) {
+      throw new ProtocolError('Swap execution requires the approved quote (with its rfq id)', 'RGB_LN', 'NO_QUOTE')
     }
-    const approved = req.approvedQuote
-    if (approved && approved.expiresAt > 0 && Date.now() > approved.expiresAt) {
+    if (!(quote.fromAmount > 0) || !(quote.toAmount > 0)) {
+      throw new ProtocolError('Swap execution requires the approved quote amounts', 'RGB_LN', 'NO_AMOUNT')
+    }
+    if (quote.expiresAt > 0 && Date.now() > quote.expiresAt) {
       throw new ProtocolError('Approved quote has expired — request a fresh quote', 'RGB_LN', 'QUOTE_EXPIRED')
     }
     const proto = await this.ensure()
     const r: RawSwap = await proto.swap({
-      fromAssetId: req.fromAsset,
-      toAssetId: req.toAsset,
-      fromLayer: req.fromLayer,
-      toLayer: req.toLayer,
-      fromAmount: req.fromAmount,
-      receiverAddress: req.receiverAddress,
-      receiverAddressFormat: req.receiverAddressFormat,
+      rfqId: quote.id,
+      fromAssetId: quote.fromAsset,
+      toAssetId: quote.toAsset,
+      tokenInAmount: quote.fromAmount,
+      tokenOutAmount: quote.toAmount,
     })
-    const executedOut = toAmount(r.tokenOutAmount, 'tokenOutAmount')
-    if (approved && approved.toAmount > 0) {
-      const bps = req.maxSlippageBps ?? DEFAULT_MAX_SLIPPAGE_BPS
-      const minOut = approved.toAmount * (1 - bps / 10_000)
-      if (executedOut < minOut) {
-        // The order exists but is unfunded — funds only move when the deposit
-        // leg is paid, so refusing here abandons it safely (it expires).
-        throw new ProtocolError(
-          `Swap fill degraded past ${bps} bps: approved output ${approved.toAmount}, executed ${executedOut}`,
-          'RGB_LN',
-          'QUOTE_DEGRADED'
-        )
-      }
-    }
+    if (r.paymentHash && r.accessToken) this.accessTokens.set(r.paymentHash, r.accessToken)
     return {
-      swapId: r.orderId,
-      status: 'pending',
+      swapId: r.paymentHash,
+      paymentHash: r.paymentHash,
+      accessToken: r.accessToken ?? undefined,
+      status: mapAtomicStatus(r.status),
       quote: {
-        id: r.orderId,
-        fromAsset: req.fromAsset,
+        ...quote,
         fromAmount: toAmount(r.tokenInAmount, 'tokenInAmount'),
-        toAsset: req.toAsset,
-        toAmount: executedOut,
-        // Carry the executed price through when the maker returns it (was dropped to 0).
-        price: r.price != null ? toAmount(r.price, 'price') : 0,
-        fee: { amount: toAmount(r.fee, 'fee'), asset: req.fromAsset },
-        expiresAt: 0,
-        provider: 'kaleidoswap',
+        toAmount: toAmount(r.tokenOutAmount, 'tokenOutAmount'),
       },
       timestamp: Date.now(),
-      depositAddress: r.depositAddress ?? null,
-      depositAddressFormat: r.depositAddressFormat ?? null,
     }
   }
 
-  async getSwapStatus(orderId: string): Promise<SwapResult> {
+  /** Poll an atomic swap by its payment hash. */
+  async getSwapStatus(paymentHash: string, accessToken?: string): Promise<SwapResult> {
     const proto = await this.ensure()
-    const o: RawOrderStatus = await proto.getOrderStatus(orderId)
-    const status = mapOrderStatus(o?.status)
+    const token = accessToken ?? this.accessTokens.get(paymentHash) ?? ''
+    const s: RawAtomicSwap = await proto.getOrderStatus(paymentHash, token)
     return {
-      swapId: o.id,
-      status,
+      swapId: s?.payment_hash ?? paymentHash,
+      paymentHash: s?.payment_hash ?? paymentHash,
+      status: mapAtomicStatus(s?.status),
       quote: {
-        id: o.rfq_id ?? o.id,
-        fromAsset: o.from_asset?.asset_id ?? '',
-        fromAmount: toAmount(o.from_asset?.amount ?? 0, 'from_asset.amount'),
-        toAsset: o.to_asset?.asset_id ?? '',
-        toAmount: toAmount(o.to_asset?.amount ?? 0, 'to_asset.amount'),
-        price: toAmount(o.price ?? 0, 'price'),
-        fee: { amount: 0, asset: o.from_asset?.asset_id ?? '' },
+        id: s?.payment_hash ?? paymentHash,
+        fromAsset: s?.from_asset ?? '',
+        fromAmount: toAmount(s?.qty_from ?? 0, 'qty_from'),
+        toAsset: s?.to_asset ?? '',
+        toAmount: toAmount(s?.qty_to ?? 0, 'qty_to'),
+        price: 0,
+        fee: { amount: 0, asset: s?.from_asset ?? '' },
         expiresAt: 0,
         provider: 'kaleidoswap',
       },
@@ -218,13 +196,17 @@ export class KaleidoswapSwap {
   }
 }
 
-function mapOrderStatus(s?: string): SwapResult['status'] {
+/**
+ * Atomic swap statuses: Waiting → Pending → Succeeded | Expired | Failed.
+ * Anything unrecognized maps to 'pending' (fail-safe: never report success
+ * for a status we don't know).
+ */
+function mapAtomicStatus(s?: string): SwapResult['status'] {
   switch (s) {
-    case 'FILLED':
+    case 'Succeeded':
       return 'confirmed'
-    case 'FAILED':
-    case 'EXPIRED':
-    case 'CANCELLED':
+    case 'Failed':
+    case 'Expired':
       return 'failed'
     default:
       return 'pending'

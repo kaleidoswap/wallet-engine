@@ -45,8 +45,9 @@ import { isBolt11 } from '../../lib/bolt11'
 import { assertSafeToSign } from '../../lib/ln-message-sign'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
-import { KaleidoswapSwap, type SwapQuoteRequest, type SwapExecuteRequest } from '../../swap/KaleidoswapSwap'
+import { KaleidoswapSwap, type SwapQuoteRequest } from '../../swap/KaleidoswapSwap'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
+import { decodeBolt11 } from '../../lib/bolt11'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -58,6 +59,23 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   makerUrl?: string
   /** BIP-44 account index (default 0). */
   accountIndex?: number
+  /**
+   * Bearer token for a multi-tenant RLN node — required whenever `nodeUrl`
+   * is shared across wallets/tenants, since the node has no other way to
+   * tell requests apart. `jwt` is accepted as an alias for callers that
+   * already carry the token under that name.
+   */
+  apiKey?: string
+  jwt?: string
+  /**
+   * Opt-in gate for fund-moving node operations on the escape hatch
+   * (`executeProtocolOperation`): keysend, channel open/close, createUtxos,
+   * maker/taker swap primitives, backup. Off by default because `operation`
+   * may be influenced by callers (deep links, chat/MCP tool args) and these
+   * ops move funds with no policy gate or confirmation hook. Hosts that
+   * expose channel management or node tooling UIs set this explicitly.
+   */
+  allowPrivilegedOps?: boolean
 }
 
 /**
@@ -66,33 +84,43 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
  * Anything not listed here is rejected — see the method's SECURITY note.
  */
 const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
-  'openChannel',
-  'closeChannel',
   'getChannelId',
   'connectPeer',
   'disconnectPeer',
   'listPeers',
-  'keysend',
-  'createUtxos',
   'listUnspents',
   'estimateFee',
   'failTransfers',
   'syncRgbWallet',
   'getAssetMetadata',
   'getAssetMedia',
-  'whitelistSwap',
   'getTakerPubkey',
-  'atomicTaker',
   'listSwaps',
   'getSwap',
-  'makerInit',
-  'makerExecute',
-  'backup',
   'signMessage',
   // 'restore' / 'changePassword' are deliberately NOT allowlisted: they are
   // wallet-lifecycle operations, and `operation` may be influenced by callers
   // (deep links, chat/MCP tool args). Hosts that need them must call the
   // account directly behind their own gating UI.
+])
+
+/**
+ * Fund-moving / custody-relevant node operations, reachable only when the
+ * host opts in via `allowPrivilegedOps`. Each of these can move funds (or,
+ * for backup, exfiltrate wallet state) with no policy gate and no
+ * confirmation hook, so they must never be callable from an
+ * attacker-influenced `operation` string by default.
+ */
+const RLN_PRIVILEGED_OPS: ReadonlySet<string> = new Set([
+  'openChannel',
+  'closeChannel',
+  'keysend',
+  'createUtxos',
+  'whitelistSwap',
+  'atomicTaker',
+  'makerInit',
+  'makerExecute',
+  'backup',
 ])
 
 export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
@@ -104,6 +132,8 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   private makerUrl = ''
   /** Lazily-built maker swap client, bound to this connected account. */
   private swap: KaleidoswapSwap | null = null
+  /** Host opt-in for fund-moving escape-hatch ops (see RLN_PRIVILEGED_OPS). */
+  private allowPrivilegedOps = false
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -113,14 +143,30 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     this.network = cfg.network ?? 'mainnet'
     this.makerUrl = cfg.makerUrl ?? ''
     this.swap = null
+    this.allowPrivilegedOps = cfg.allowPrivilegedOps === true
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-rln', () => import('@kaleidorg/wdk-wallet-rln'))
     const RlnWalletManager = mod.default ?? mod
     // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
     // BIP-39 string validation (which throws "The seed phrase is invalid").
-    this.manager = new RlnWalletManager(resolveWalletSeed(cfg.mnemonic), { nodeUrl: cfg.nodeUrl })
+    this.manager = new RlnWalletManager(resolveWalletSeed(cfg.mnemonic), {
+      nodeUrl: cfg.nodeUrl,
+      apiKey: cfg.jwt ?? cfg.apiKey,
+    })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
+  }
+
+  async disconnect(): Promise<void> {
+    try {
+      await super.disconnect()
+    } finally {
+      // Base clears manager/account/mnemonic; this adapter also holds a
+      // maker-bound swap client and its URL, which must not outlive disconnect.
+      this.swap = null
+      this.makerUrl = ''
+      this.allowPrivilegedOps = false
+    }
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -277,8 +323,14 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       asset_id?: string
       asset_amount?: number
     }
-    const body: any = { invoice: request.invoice.trim() }
-    if (request.amount != null && request.amount > 0) body.amt_msat = request.amount * 1000
+    const invoice = request.invoice.trim()
+    const body: any = { invoice }
+    // Forward `amt_msat` only for amountless invoices — forwarding it for an
+    // amount-bearing invoice silently re-amounts the payment to whatever the
+    // caller passed (stale UI state, WebLN args) instead of the invoice amount.
+    if (request.amount != null && request.amount > 0 && decodeBolt11(invoice).amountMsat == null) {
+      body.amt_msat = request.amount * 1000
+    }
     if (req.asset_id) body.asset_id = req.asset_id
     if (req.asset_amount != null) body.asset_amount = req.asset_amount
     const r: any = await this.node.sendPayment(body)
@@ -415,8 +467,8 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
-    await this.account.sendBtc(params)
-    return { ok: true }
+    const r: any = await this.account.sendBtc(params)
+    return { ok: true, txid: r?.txid ?? '' }
   }
 
   // --- RGB on-chain UTXO management ----------------------------------------
@@ -487,29 +539,17 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Execute a previously-quoted swap. The maker needs the OUTPUT receiver
-   * address/format and the layer hints; callers carry them on the quote object.
+   * Execute an approved quote as an atomic swap. The maker binds execution
+   * to the quote's rfq id and exact raw amounts; settlement is an HTLC to
+   * this adapter's own node — no receiver address, no deposit leg.
    */
   async executeSwap(quote: Quote): Promise<SwapResult> {
-    const q = quote as Quote & Partial<SwapExecuteRequest>
-    return this.ensureSwap().executeSwap({
-      fromAsset: quote.fromAsset,
-      toAsset: quote.toAsset,
-      fromAmount: quote.fromAmount,
-      fromLayer: q.fromLayer ?? 'RGB_LN',
-      toLayer: q.toLayer ?? 'RGB_LN',
-      receiverAddress: q.receiverAddress ?? '',
-      receiverAddressFormat: q.receiverAddressFormat ?? 'RGB_INVOICE',
-      // Bind execution to the quote the user approved: enforce its expiry and
-      // reject a degraded fill (the maker re-quotes internally and is never
-      // bound to this quote server-side).
-      approvedQuote: quote,
-      maxSlippageBps: q.maxSlippageBps,
-    })
+    return this.ensureSwap().executeSwap(quote)
   }
 
-  async getSwapStatus(swapId: string): Promise<SwapResult> {
-    return this.ensureSwap().getSwapStatus(swapId)
+  /** `swapId` is the atomic swap's payment hash. */
+  async getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult> {
+    return this.ensureSwap().getSwapStatus(swapId, accessToken)
   }
 
   // --- Escape hatch -------------------------------------------------------
@@ -521,6 +561,16 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     if (operation === 'signMessage') {
       const message = typeof params === 'string' ? params : params?.message
       if (typeof message === 'string') assertSafeToSign(message)
+    }
+    if (RLN_PRIVILEGED_OPS.has(operation)) {
+      if (!this.allowPrivilegedOps) {
+        throw new ProtocolError(
+          `Operation '${operation}' moves funds and requires allowPrivilegedOps in the adapter config`,
+          'RGB_LN',
+          'PRIVILEGED_OP'
+        )
+      }
+      return this.runAllowlistedOp(RLN_PRIVILEGED_OPS, operation, params)
     }
     return this.runAllowlistedOp(RLN_ALLOWED_OPS, operation, params)
   }

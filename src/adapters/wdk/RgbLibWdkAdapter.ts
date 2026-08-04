@@ -276,8 +276,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
-    await this.account.sendTransaction({ to: params.address, value: params.amount, feeRate: params.feeRate })
-    return { ok: true }
+    const r: any = await this.account.sendTransaction({ to: params.address, value: params.amount, feeRate: params.feeRate })
+    return { ok: true, txid: typeof r === 'string' ? r : (r?.txid ?? r?.hash ?? '') }
   }
 
 }

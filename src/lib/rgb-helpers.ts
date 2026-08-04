@@ -70,7 +70,21 @@ export function mapPaymentStatus(status?: string): TransactionStatus {
  */
 export function mapSwapStatus(status?: string): TransactionStatus {
   if (!status) return "pending";
-  if (status === "completed" || status === "success" || status === "Completed") return "confirmed";
-  if (status === "failed" || status === "error" || status === "Failed") return "failed";
+  if (
+    status === "completed" ||
+    status === "success" ||
+    status === "Completed" ||
+    status === "Succeeded"
+  ) {
+    return "confirmed";
+  }
+  if (
+    status === "failed" ||
+    status === "error" ||
+    status === "Failed" ||
+    status === "Expired"
+  ) {
+    return "failed";
+  }
   return "pending";
 }

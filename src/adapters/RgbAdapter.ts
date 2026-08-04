@@ -6,11 +6,6 @@
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
 import { kaleidoClientManager } from "../lib/kaleido-client-manager";
-import type {
-  CreateSwapOrderRequest,
-  CreateSwapOrderResponse,
-  SwapOrderStatusResponse,
-} from "kaleido-sdk";
 import {
   KaleidoError,
   APIError,
@@ -75,6 +70,11 @@ export class RgbAdapter implements IProtocolAdapter {
 
   private connected = false;
   private config: RgbConfig | null = null;
+  /**
+   * In-memory fallback for per-swap status access tokens (paymentHash → token).
+   * Hosts should persist `SwapResult.accessToken` themselves — this map does
+   * not survive process/service-worker restarts.
+   */
   private swapAccessTokens = new Map<string, string>();
 
   // ========================================================================
@@ -1003,7 +1003,8 @@ export class RgbAdapter implements IProtocolAdapter {
             networkFee: 0,
           },
         },
-        expiresAt: quoteResponse.expires_at,
+        // Maker reports seconds since epoch; the engine convention is ms.
+        expiresAt: quoteResponse.expires_at * 1000,
         provider: "Kaleidoswap",
       };
     } catch (error: unknown) {
@@ -1025,46 +1026,67 @@ export class RgbAdapter implements IProtocolAdapter {
       );
     }
 
+    const rfqId = (quote as Quote & { rfqId?: string }).rfqId || quote.id;
+    if (!rfqId) {
+      throw new ProtocolError(
+        "Swap execution requires the approved quote's rfq id",
+        "RGB_LN",
+        "NO_QUOTE",
+      );
+    }
+    if (!(quote.fromAmount > 0) || !(quote.toAmount > 0)) {
+      throw new ProtocolError(
+        "Swap execution requires the approved quote amounts",
+        "RGB_LN",
+        "NO_AMOUNT",
+      );
+    }
+    if (quote.expiresAt > 0 && Date.now() > quote.expiresAt) {
+      throw new ProtocolError(
+        "Approved quote has expired — request a fresh quote",
+        "RGB_LN",
+        "QUOTE_EXPIRED",
+      );
+    }
+
     try {
       const client = kaleidoClientManager.getClient();
-      const quoteAny = quote as Quote & {
-        rfqId?: string;
-        fromLayer?: string;
-        toLayer?: string;
-        receiverAddress?: string;
-      };
-      const quote_request = {
-        rfq_id: quoteAny.rfqId || quote.id || "",
-        from_asset: {
-          asset_id: quote.fromAsset,
-          amount: quote.fromAmount,
-          layer: quoteAny.fromLayer || "RGB_LN",
-        },
-        to_asset: {
-          asset_id: quote.toAsset,
-          amount: quote.toAmount,
-          layer: quoteAny.toLayer || "RGB_LN",
-        },
-        receiver_address: {
-          address: quoteAny.receiverAddress || "",
-          format: "BTC_ADDRESS" as const,
-        },
-        min_onchain_conf: 1,
-        refund_address: "",
-        email: "",
-      } as CreateSwapOrderRequest;
-      const result = await client.maker.createSwapOrder(quote_request);
-      const swapResult = result as CreateSwapOrderResponse &
-        Record<string, unknown> & { payment_hash?: string };
-      const swapId = (swapResult.order_id ?? swapResult.id ?? "") as string;
-      if (swapId && swapResult.access_token) {
-        this.swapAccessTokens.set(swapId, swapResult.access_token);
-      }
+      // The maker binds the swap to the rfq_id and these exact raw amounts —
+      // there is no server-side re-quote, so the fill can never diverge from
+      // the approved quote on either leg.
+      const init = await client.maker.initSwap({
+        rfq_id: rfqId,
+        from_asset: quote.fromAsset,
+        from_amount: quote.fromAmount,
+        to_asset: quote.toAsset,
+        to_amount: quote.toAmount,
+      });
 
+      // Whitelist BEFORE confirming execution: once the maker starts the
+      // swap it routes the HTLC immediately, and an un-whitelisted node
+      // rejects it. (rln is the NWC client shape in NWC mode, hence `any`.)
+      const rln = client.rln as unknown as {
+        whitelistSwap(body: { swapstring: string }): Promise<void>;
+        getTakerPubkey(): Promise<string>;
+      };
+      await rln.whitelistSwap({ swapstring: init.swapstring });
+      const takerPubkey = await rln.getTakerPubkey();
+
+      // /swaps/execute responds with an HTTP-style {status: 200, message} —
+      // the swap itself starts in 'Waiting'; poll getSwapStatus for truth.
+      await client.maker.executeSwap({
+        swapstring: init.swapstring,
+        taker_pubkey: takerPubkey,
+        payment_hash: init.payment_hash,
+      });
+
+      const accessToken = init.access_token ?? undefined;
+      if (accessToken) this.swapAccessTokens.set(init.payment_hash, accessToken);
       return {
-        swapId,
-        paymentHash: (swapResult.payment_hash ?? "") as string,
-        status: mapSwapStatus(swapResult.status as string | undefined),
+        swapId: init.payment_hash,
+        paymentHash: init.payment_hash,
+        accessToken,
+        status: "pending",
         quote,
         timestamp: Date.now(),
       };
@@ -1073,32 +1095,42 @@ export class RgbAdapter implements IProtocolAdapter {
     }
   }
 
-  async getSwapStatus(swapId: string): Promise<SwapResult> {
+  /** `swapId` is the atomic swap's payment hash. */
+  async getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
     }
 
     try {
       const client = kaleidoClientManager.getClient();
-      const accessToken = this.swapAccessTokens.get(swapId);
-      if (!accessToken) {
-        throw new ProtocolError(
-          "Missing swap access token for status lookup",
-          "RGB_LN",
-          "SWAP_ACCESS_TOKEN_MISSING",
-        );
-      }
-      const status = (await client.maker.getSwapOrderStatus({
-        order_id: swapId,
-        access_token: accessToken,
-      })) as SwapOrderStatusResponse & Record<string, unknown>;
-      const order = (status.order ?? status) as { status?: string; created_at?: number };
+      const status = await client.maker.getAtomicSwapStatus({
+        payment_hash: swapId,
+        access_token: accessToken ?? this.swapAccessTokens.get(swapId) ?? "",
+      });
+      const swap = (status.swap ?? status) as {
+        status?: string;
+        qty_from?: number;
+        qty_to?: number;
+        from_asset?: string | null;
+        to_asset?: string | null;
+      };
 
       return {
         swapId,
-        status: mapSwapStatus(order.status),
-        quote: {} as Quote, // Would need to store original quote
-        timestamp: order.created_at || Date.now(),
+        paymentHash: swapId,
+        status: mapSwapStatus(swap?.status),
+        quote: {
+          id: swapId,
+          fromAsset: swap?.from_asset ?? "",
+          fromAmount: Number(swap?.qty_from ?? 0),
+          toAsset: swap?.to_asset ?? "",
+          toAmount: Number(swap?.qty_to ?? 0),
+          price: 0,
+          fee: { amount: 0, asset: swap?.from_asset ?? "" },
+          expiresAt: 0,
+          provider: "Kaleidoswap",
+        },
+        timestamp: Date.now(),
       };
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get swap status");

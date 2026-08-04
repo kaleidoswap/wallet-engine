@@ -116,12 +116,17 @@ class KaleidoClientManager {
       return;
     }
 
+    // `apiKey` here is the RLN node credential (the maker API is public), so
+    // it maps to the SDK's node-scoped `nodeApiKey` — passing it as the SDK's
+    // `apiKey` would send it to the maker and never to the node. Requires
+    // kaleido-sdk ≥ 0.1.16; older SDKs ignore the field (the pre-existing
+    // unauthenticated behavior, not a regression).
     this.client = KaleidoClient.create({
       baseUrl: config.baseUrl,
       nodeUrl: config.nodeUrl,
-      apiKey: config.apiKey,
+      nodeApiKey: config.apiKey,
       timeout: config.timeout,
-    });
+    } as Parameters<typeof KaleidoClient.create>[0]);
 
     log.info("[KaleidoClientManager] Initialized with config:", {
       baseUrl: config.baseUrl,
