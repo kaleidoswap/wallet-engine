@@ -118,15 +118,21 @@ class KaleidoClientManager {
 
     // `apiKey` here is the RLN node credential (the maker API is public), so
     // it maps to the SDK's node-scoped `nodeApiKey` — passing it as the SDK's
-    // `apiKey` would send it to the maker and never to the node. Requires
-    // kaleido-sdk ≥ 0.1.16; older SDKs ignore the field (the pre-existing
-    // unauthenticated behavior, not a regression).
+    // `apiKey` would send it to the maker and never to the node.
+    //
+    // SECURITY: `nodeApiKey` only exists in kaleido-sdk >= 0.1.16, which is why
+    // the peer range starts there. Do NOT reintroduce a cast here: an unknown
+    // extra property is dropped silently at runtime, so on an older SDK the
+    // node credential would vanish and every RLN call would go out
+    // unauthenticated while this method still reported a healthy client. Typed
+    // literally, that downgrade is a compile error instead — see
+    // `sdkSupportsNodeAuth` in `test/kaleido-node-auth.test.ts`.
     this.client = KaleidoClient.create({
       baseUrl: config.baseUrl,
       nodeUrl: config.nodeUrl,
       nodeApiKey: config.apiKey,
       timeout: config.timeout,
-    } as Parameters<typeof KaleidoClient.create>[0]);
+    });
 
     log.info("[KaleidoClientManager] Initialized with config:", {
       baseUrl: config.baseUrl,
