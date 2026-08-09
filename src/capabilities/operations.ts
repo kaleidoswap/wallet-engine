@@ -68,14 +68,16 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
     'asset-receive',
     'rgb-invoice',
   ],
+  // Experimental PSET/Simplicity operations (`liquid-pset-inspect`,
+  // `liquid-pset-sign`, `simplicity-compile`) are NOT listed here: their real
+  // availability depends on the resolved LWK binding at runtime, so the Liquid
+  // adapter derives them from `account.getSimplicityCapabilities()` and appends
+  // them to this base only when the binding actually supports them (fail closed).
   LIQUID: [
     'onchain-send',
     'onchain-receive',
     'asset-send',
     'asset-receive',
-    'liquid-pset-inspect',
-    'liquid-pset-sign',
-    'simplicity-compile',
   ],
   BTC: ['onchain-send', 'onchain-receive'],
 }

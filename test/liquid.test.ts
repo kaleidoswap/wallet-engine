@@ -322,4 +322,34 @@ describe('LiquidWdkAdapter', () => {
       protocol: 'LIQUID',
     })
   })
+
+  // In real @kaleidorg/wdk-wallet-liquid beta.7 the PSET/Simplicity methods are
+  // ALWAYS present on LiquidAccount; whether they actually work is decided at
+  // runtime by getSimplicityCapabilities() probing the LWK binding. So the
+  // `capabilities` manifest — which the UI reads to gate actions — must be
+  // derived from that runtime probe, never statically claimed.
+  it('does not advertise experimental PSET/Simplicity capabilities without runtime support (fail closed)', () => {
+    const without = connected({}) // pre-Simplicity account: no capability probe
+    expect(without.capabilities).not.toContain('liquid-pset-inspect')
+    expect(without.capabilities).not.toContain('liquid-pset-sign')
+    expect(without.capabilities).not.toContain('simplicity-compile')
+    // The always-on Liquid operations are still advertised.
+    expect(without.capabilities).toEqual(
+      expect.arrayContaining(['onchain-send', 'onchain-receive', 'asset-send', 'asset-receive']),
+    )
+  })
+
+  it('advertises experimental capabilities derived from the runtime Simplicity probe', () => {
+    const withSimplicity = connected({
+      getSimplicityCapabilities: () => ({
+        version: 'experimental-0.1',
+        available: true,
+        pset: { inspect: true, blind: true, sign: true, finalize: true },
+        simplicity: { compile: true, derivePublicKey: true, finalizeTransaction: true },
+      }),
+    })
+    expect(withSimplicity.capabilities).toEqual(
+      expect.arrayContaining(['liquid-pset-inspect', 'liquid-pset-sign', 'simplicity-compile']),
+    )
+  })
 })

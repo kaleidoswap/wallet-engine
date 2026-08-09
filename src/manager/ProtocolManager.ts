@@ -29,6 +29,7 @@ import {
   ProtocolConfig,
   ProtocolAdapterRegistry,
   asSimplicityOperations,
+  type ISimplicityOperations,
 } from '../adapters/IProtocolAdapter'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
@@ -106,12 +107,20 @@ export class ProtocolManager {
     this.activeGrantId = grantId ?? undefined
   }
 
-  /** Gate a fund-moving/signing op through the policy. No-op when no policy is set. */
-  private enforce(operation: PolicyOperation, opts: { amountSat?: number; destination?: string } = {}): void {
+  /**
+   * Gate a fund-moving/signing op through the policy. No-op when no policy is
+   * set. `opts.protocol` overrides the protocol the op is evaluated against —
+   * used by operations that route to a fixed adapter (e.g. Liquid PSET ops
+   * always act on LIQUID, regardless of which protocol is merely active).
+   */
+  private enforce(
+    operation: PolicyOperation,
+    opts: { amountSat?: number; destination?: string; protocol?: ProtocolType } = {},
+  ): void {
     enforcePolicy(
       {
         operation,
-        protocol: this.activeProtocol ?? undefined,
+        protocol: opts.protocol ?? this.activeProtocol ?? undefined,
         grantId: this.activeGrantId,
         amountSat: opts.amountSat,
         destination: opts.destination,
@@ -471,50 +480,80 @@ export class ProtocolManager {
     )
   }
 
-  private simplicityOperations() {
-    const adapter = this.getActiveAdapterUnchecked()
+  /**
+   * Resolve the Liquid PSET/Simplicity operation group from the *registered
+   * LIQUID adapter* — never from whichever protocol is merely active. A
+   * non-Liquid adapter that happens to implement these methods must not receive
+   * a Liquid PSET. Fails closed with NOT_SUPPORTED when no LIQUID adapter is
+   * registered or it does not implement the full group.
+   */
+  private liquidSimplicityOperations(): ISimplicityOperations {
+    const adapter = this.registry.get('LIQUID')
+    if (!adapter) {
+      throw new ProtocolError(
+        'Liquid Simplicity/PSET operations require a registered LIQUID adapter',
+        'LIQUID',
+        'NOT_SUPPORTED',
+      )
+    }
     const operations = asSimplicityOperations(adapter)
     if (!operations) {
       throw new ProtocolError(
-        'Liquid Simplicity/PSET operations are not supported by the active protocol',
-        adapter.protocolName,
+        'The registered LIQUID adapter does not implement the Simplicity/PSET operation group',
+        'LIQUID',
         'NOT_SUPPORTED',
       )
     }
     return operations
   }
 
+  /**
+   * Finalization and broadcast of a Liquid PSET are disabled until an exact-byte
+   * `LiquidSpendAuthorization` contract exists. A PSET can carry multiple assets
+   * and blinded (hidden) values, so the current `amountSat` policy model cannot
+   * authorize it safely; forwarding the bytes to the adapter would move funds
+   * without an enforceable spend authorization. Fail closed rather than route.
+   */
+  private liquidSpendUnsupported(operation: string): never {
+    throw new ProtocolError(
+      `${operation} is disabled until an exact-byte Liquid spend authorization contract exists`,
+      'LIQUID',
+      'NOT_SUPPORTED',
+    )
+  }
+
   async getSimplicityCapabilities(): Promise<SimplicityCapabilities> {
-    return this.simplicityOperations().getSimplicityCapabilities()
+    return this.liquidSimplicityOperations().getSimplicityCapabilities()
   }
 
   async inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview> {
-    return this.simplicityOperations().inspectLiquidPset(psetBase64)
+    return this.liquidSimplicityOperations().inspectLiquidPset(psetBase64)
   }
 
   async blindLiquidPset(psetBase64: string): Promise<string> {
-    return this.simplicityOperations().blindLiquidPset(psetBase64)
+    this.enforce('blindLiquidPset', { protocol: 'LIQUID' })
+    return this.liquidSimplicityOperations().blindLiquidPset(psetBase64)
   }
 
   async signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult> {
-    this.enforce('signLiquidPset')
-    return this.simplicityOperations().signLiquidPset(request)
+    this.enforce('signLiquidPset', { protocol: 'LIQUID' })
+    return this.liquidSimplicityOperations().signLiquidPset(request)
   }
 
-  async finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
-    return this.simplicityOperations().finalizeLiquidPset(psetBase64)
+  async finalizeLiquidPset(_psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
+    this.liquidSpendUnsupported('finalizeLiquidPset')
   }
 
-  async broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }> {
-    return this.simplicityOperations().broadcastLiquidPset(psetBase64)
+  async broadcastLiquidPset(_psetBase64: string): Promise<{ txid: string }> {
+    this.liquidSpendUnsupported('broadcastLiquidPset')
   }
 
   async deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }> {
-    return this.simplicityOperations().deriveSimplicityPublicKey(derivationPath)
+    return this.liquidSimplicityOperations().deriveSimplicityPublicKey(derivationPath)
   }
 
   async compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult> {
-    return this.simplicityOperations().compileSimplicityProgram(request)
+    return this.liquidSimplicityOperations().compileSimplicityProgram(request)
   }
 
   async getReceiveAddress(assetId?: string): Promise<Address> {

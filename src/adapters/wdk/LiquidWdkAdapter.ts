@@ -39,7 +39,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
-import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
+import { PROTOCOL_OPERATIONS, type ProtocolCapability } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 
@@ -105,8 +105,44 @@ const KNOWN_ASSETS: Record<string, { ticker: string; name: string; precision: nu
 
 export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'LIQUID'
-  readonly capabilities = PROTOCOL_OPERATIONS.LIQUID
   readonly supportedLayers: Layer[] = getCapabilities('LIQUID').layers
+
+  /**
+   * Runtime-derived operation manifest. The base Liquid operations are always
+   * available; the experimental PSET/Simplicity operations are advertised only
+   * when the connected account's LWK binding actually supports them — the same
+   * runtime probe the individual methods gate on. Before connect (no account)
+   * or on a pre-Simplicity build, only the base operations are reported, so the
+   * UI never offers an action the binding cannot perform (fail closed).
+   */
+  get capabilities(): readonly ProtocolCapability[] {
+    const base = PROTOCOL_OPERATIONS.LIQUID
+    const caps = this.readSimplicityCapabilitiesSync()
+    if (!caps) return base
+    const extra: ProtocolCapability[] = []
+    if (caps.pset?.inspect) extra.push('liquid-pset-inspect')
+    if (caps.pset?.sign) extra.push('liquid-pset-sign')
+    if (caps.simplicity?.compile) extra.push('simplicity-compile')
+    return extra.length ? [...base, ...extra] : base
+  }
+
+  /**
+   * Synchronous, side-effect-free read of the account's Simplicity capability
+   * probe. `getBindingCapabilities` only inspects the LWK binding prototype — it
+   * never touches the re-entrant Wollet or Esplora — so it is safe to call
+   * outside the opLock. Returns undefined on any failure so `capabilities`
+   * fails closed.
+   */
+  private readSimplicityCapabilitiesSync(): SimplicityCapabilities | undefined {
+    const probe = this.account?.getSimplicityCapabilities
+    if (typeof probe !== 'function') return undefined
+    try {
+      const caps = probe.call(this.account)
+      return caps && typeof caps === 'object' ? (caps as SimplicityCapabilities) : undefined
+    } catch {
+      return undefined
+    }
+  }
 
   private policyAsset: string | null = null
 
