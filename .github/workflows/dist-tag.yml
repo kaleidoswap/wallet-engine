@@ -1,0 +1,54 @@
+name: Move an npm dist-tag
+
+# Repoints an npm dist-tag at an ALREADY PUBLISHED version. Separate from
+# publish.yml because that workflow can only publish: `npm publish` on a version
+# that already exists fails, so it cannot be reused to fix a tag after the fact.
+#
+# This exists because `latest` sat on 1.0.0-beta.4 for months while real releases
+# went out under `beta`, so a plain `npm i @kaleidorg/wallet-engine` handed
+# consumers a stale build.
+#
+# Requires the same NPM_TOKEN secret as publish.yml. The token stays in CI — the
+# point is that nobody has to hold it locally to move a tag.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Published version to point at (e.g. 1.0.0-beta.62)'
+        required: true
+      dist_tag:
+        description: 'Tag to move (e.g. latest)'
+        required: true
+        default: latest
+
+jobs:
+  dist-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Move the tag
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ inputs.version }}
+          DIST_TAG: ${{ inputs.dist_tag }}
+        run: |
+          set -euo pipefail
+          PKG="@kaleidorg/wallet-engine"
+          # Inputs reach a shell, so constrain their shape before use. They come
+          # from a maintainer dispatch rather than an untrusted event, but a typo
+          # should fail here rather than turn into an argument to npm.
+          printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
+            || { echo "Refusing: '$VERSION' is not a plain semver version." >&2; exit 64; }
+          printf '%s' "$DIST_TAG" | grep -qE '^[a-z][a-z0-9-]*$' \
+            || { echo "Refusing: '$DIST_TAG' is not a simple dist-tag name." >&2; exit 64; }
+          # Refuse to point a tag at something that was never published, which
+          # would otherwise leave the tag dangling.
+          npm view "$PKG@$VERSION" version > /dev/null
+          npm dist-tag add "$PKG@$VERSION" "$DIST_TAG"
+          echo "Tags now:"
+          npm dist-tag ls "$PKG"
