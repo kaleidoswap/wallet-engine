@@ -177,6 +177,26 @@ describe('NwcLightningPayments', () => {
     })).rejects.toMatchObject({ code: 'PAYMENT_AMBIGUOUS', ambiguous: true })
   })
 
+  it('classifies a malformed fulfilled payment response as non-retryable ambiguity', async () => {
+    const client = nwcClient({
+      payInvoice: vi.fn(async () => null),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.payInvoice({
+      bolt11: bolt11Fixture({ hrp: 'lnbcrt10n' }),
+      requestId: 'payment-malformed-response',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+    })
+  })
+
   it('rejects invoice-network and fixed-amount mismatches before sending', async () => {
     const wrongNetworkClient = nwcClient()
     const wrongNetwork = new NwcLightningPayments({

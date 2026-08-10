@@ -169,6 +169,49 @@ describe('RlnLightningPayments', () => {
     expect(client.rln.sendPayment).toHaveBeenCalledWith({ invoice, amt_msat: 2_000 })
   })
 
+  it('requires a matching response payment hash before reporting direct RLN success', async () => {
+    const client = directClient({
+      sendPayment: vi.fn(async () => ({
+        payment_id: 'provider-local-id',
+        status: 'Succeeded',
+      })),
+    })
+    const payments = new RlnLightningPayments({
+      nodeUrl: 'https://node.example',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.payInvoice({
+      bolt11: bolt11Fixture({ hrp: 'lnbcrt10n' }),
+      requestId: 'payment-missing-hash',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+    })
+  })
+
+  it('classifies a malformed fulfilled direct RLN response as non-retryable ambiguity', async () => {
+    const client = directClient({
+      sendPayment: vi.fn(async () => null),
+    })
+    const payments = new RlnLightningPayments({
+      nodeUrl: 'https://node.example',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.payInvoice({
+      bolt11: bolt11Fixture({ hrp: 'lnbcrt10n' }),
+      requestId: 'payment-malformed-response',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+    })
+  })
+
   it('rejects fee, invoice-network, and fixed-amount mismatches before direct RLN payment', async () => {
     const feeClient = directClient()
     const fee = new RlnLightningPayments({

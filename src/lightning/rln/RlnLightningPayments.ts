@@ -139,7 +139,16 @@ function safeProviderTimestamp(value: unknown, field: string): number | undefine
 }
 
 function mapRlnError(error: unknown, paymentMayHaveStarted = false): LightningPaymentError {
-  if (error instanceof LightningPaymentError) return error
+  if (error instanceof LightningPaymentError) {
+    if (paymentMayHaveStarted && error.code === 'UNKNOWN') {
+      return new LightningPaymentError(
+        'PAYMENT_AMBIGUOUS',
+        'Direct RLN payment returned an invalid response; reconcile by payment hash',
+        { ambiguous: true },
+      )
+    }
+    return error
+  }
   const candidate = error as { code?: unknown; statusCode?: unknown } | null
   const code = candidate != null ? String(candidate.code ?? '') : ''
   const status = candidate != null && typeof candidate.statusCode === 'number'
@@ -327,10 +336,10 @@ export class RlnLightningPayments implements LightningPayments {
     } catch (error) {
       throw mapRlnError(error, true)
     }
-    if (raw.payment_hash != null && raw.payment_hash !== decoded.paymentHash) {
+    if (raw.payment_hash !== decoded.paymentHash) {
       throw new LightningPaymentError(
         'PAYMENT_AMBIGUOUS',
-        'Direct RLN returned a mismatched payment identity; reconcile by BOLT11 payment hash',
+        'Direct RLN returned no matching payment identity; reconcile by BOLT11 payment hash',
         { ambiguous: true },
       )
     }

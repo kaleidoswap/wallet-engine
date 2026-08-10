@@ -140,7 +140,16 @@ function safeProviderMsat(value: unknown, field: string): string | undefined {
 }
 
 function mapNwcError(error: unknown, paymentMayHaveStarted = false): LightningPaymentError {
-  if (error instanceof LightningPaymentError) return error
+  if (error instanceof LightningPaymentError) {
+    if (paymentMayHaveStarted && error.code === 'UNKNOWN') {
+      return new LightningPaymentError(
+        'PAYMENT_AMBIGUOUS',
+        'NWC payment returned an invalid response; reconcile by payment hash',
+        { ambiguous: true },
+      )
+    }
+    return error
+  }
   const code = error != null && typeof error === 'object' && 'code' in error
     ? String((error as { code?: unknown }).code)
     : undefined
