@@ -19,8 +19,21 @@
 import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
 
-/** Fund-moving / signing operations a policy can gate. */
-export type PolicyOperation = 'send' | 'keysend' | 'signPsbt' | 'signLiquidPset' | 'signMessage' | 'swap'
+/**
+ * Fund-moving / signing operations a policy can gate. `blindLiquidPset` and
+ * `signLiquidPset` are the wallet-mutating Liquid PSET operations; they are not
+ * amount-capped because a PSET can carry multiple assets and blinded (hidden)
+ * values that the `amountSat` model cannot authorize — they are gated as
+ * explicit signing grants instead.
+ */
+export type PolicyOperation =
+  | 'send'
+  | 'keysend'
+  | 'signPsbt'
+  | 'blindLiquidPset'
+  | 'signLiquidPset'
+  | 'signMessage'
+  | 'swap'
 
 export interface PolicyRequest {
   operation: PolicyOperation

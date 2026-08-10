@@ -174,13 +174,30 @@ export interface IOnchainOperations {
   broadcastTransaction(txHex: string): Promise<{ txid: string }>
 }
 
-/** Liquid PSET review/signing and optional Simplicity compilation. */
+/**
+ * Liquid PSET review/signing and optional Simplicity compilation.
+ *
+ * EXPERIMENTAL: these operate on an arbitrary externally-supplied PSET and their
+ * real availability depends on the resolved LWK binding — the Liquid adapter
+ * advertises them via `capabilities` only when `getSimplicityCapabilities()`
+ * reports runtime support. `ProtocolManager` routes them exclusively to the
+ * registered LIQUID adapter and policy-gates the mutating ones
+ * (`blindLiquidPset`/`signLiquidPset`).
+ *
+ * `finalizeLiquidPset` and `broadcastLiquidPset` are declared here for the raw
+ * adapter surface, but are DISABLED on `ProtocolManager` (throw NOT_SUPPORTED):
+ * a PSET can carry multiple assets and blinded values that the `amountSat`
+ * policy model cannot authorize, so they stay fail-closed until an exact-byte
+ * `LiquidSpendAuthorization` contract exists.
+ */
 export interface ISimplicityOperations {
   getSimplicityCapabilities(): Promise<SimplicityCapabilities>
   inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview>
   blindLiquidPset(psetBase64: string): Promise<string>
   signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult>
+  /** @deprecated Disabled on ProtocolManager until exact-byte spend authorization exists. */
   finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }>
+  /** @deprecated Disabled on ProtocolManager until exact-byte spend authorization exists. */
   broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }>
   deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }>
   compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult>
