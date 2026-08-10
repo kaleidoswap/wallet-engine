@@ -12,6 +12,10 @@ export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, 
 export * from './types/flashnet'
 export * from './types/simplicity'
 
+// SDK-free, transport-neutral Lightning payment contract. Concrete transports
+// remain opt-in subpaths and are deliberately not imported by this barrel.
+export * from './lightning'
+
 // Adapter interface
 export {
   type IProtocolAdapter,
