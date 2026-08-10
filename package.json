@@ -50,6 +50,10 @@
       "types": "./dist/format.d.ts",
       "default": "./dist/format.js"
     },
+    "./lightning": {
+      "types": "./dist/lightning/index.d.ts",
+      "default": "./dist/lightning/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
