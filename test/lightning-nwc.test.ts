@@ -438,4 +438,28 @@ describe('NwcLightningPayments', () => {
       ambiguous: true,
     })
   })
+
+  it('classifies malformed fields in a fulfilled keysend response as ambiguity', async () => {
+    const client = nwcClient({
+      getInfo: vi.fn(async () => ({ network: 'regtest', methods: ['get_info', 'pay_keysend'] })),
+      payKeysend: vi.fn(async () => ({
+        preimage: '01'.repeat(32),
+        fees_paid: 'not-a-safe-msat-number',
+      })),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
+    })
+
+    await expect(payments.payKeysend?.({
+      destinationPubkey: `02${'11'.repeat(32)}`,
+      amountMsat: '2000',
+      requestId: 'keysend-malformed-fee',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+    })
+  })
 })

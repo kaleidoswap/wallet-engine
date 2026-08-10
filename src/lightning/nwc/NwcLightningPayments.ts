@@ -514,25 +514,27 @@ export class NwcLightningPayments implements LightningPayments {
     }
 
     let raw: Record<string, unknown>
+    let feeMsat: string | undefined
     try {
       raw = objectResult(await this.#client.payKeysend({
         amount,
         pubkey: request.destinationPubkey,
       }), 'keysend payment')
+      if (!isLightningPreimage(raw.preimage)) {
+        throw new LightningPaymentError(
+          'PAYMENT_AMBIGUOUS',
+          'NWC keysend returned no valid preimage',
+          { ambiguous: true },
+        )
+      }
+      feeMsat = safeProviderMsat(raw.fees_paid, 'fees_paid')
     } catch (error) {
       throw mapNwcError(error, true)
-    }
-    if (!isLightningPreimage(raw.preimage)) {
-      throw new LightningPaymentError(
-        'PAYMENT_AMBIGUOUS',
-        'NWC keysend returned no valid preimage',
-        { ambiguous: true },
-      )
     }
     return {
       paymentHash: paymentHashFromPreimage(raw.preimage),
       amountMsat: request.amountMsat,
-      ...(raw.fees_paid != null ? { feeMsat: safeProviderMsat(raw.fees_paid, 'fees_paid') } : {}),
+      ...(feeMsat != null ? { feeMsat } : {}),
       preimage: raw.preimage,
       status: 'succeeded',
       settledAtUnixSeconds: this.#nowUnixSeconds(),
