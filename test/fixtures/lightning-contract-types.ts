@@ -4,6 +4,14 @@ import type {
   LightningPaymentCapabilities,
   LightningPayments,
 } from '@kaleidorg/wallet-engine/lightning'
+import type {
+  NwcLightningPayments,
+  NwcLightningPaymentsOptions,
+} from '@kaleidorg/wallet-engine/lightning/nwc'
+import type {
+  RlnLightningPayments,
+  RlnLightningPaymentsOptions,
+} from '@kaleidorg/wallet-engine/lightning/rln'
 
 const capabilities: LightningPaymentCapabilities = {
   createInvoice: true,
@@ -58,3 +66,21 @@ void payments.lookupPayment({ paymentHash: payment.paymentHash })
 void payments.close()
 void capabilities
 void ambiguousCapabilities
+
+const nwcOptions: NwcLightningPaymentsOptions = {
+  connectionUri: 'nostr+walletconnect://wallet?relay=wss://relay&secret=redacted',
+  expectedNetworkId: 'regtest',
+}
+const rlnOptions: RlnLightningPaymentsOptions = {
+  nodeUrl: 'https://node.example',
+  nodeApiKey: 'memory-only',
+  expectedNetworkId: 'regtest',
+}
+declare const nwc: NwcLightningPayments
+declare const rln: RlnLightningPayments
+const nwcPayments: LightningPayments = nwc
+const rlnPayments: LightningPayments = rln
+void nwcOptions
+void rlnOptions
+void nwcPayments
+void rlnPayments

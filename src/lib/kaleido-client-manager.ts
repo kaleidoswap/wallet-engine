@@ -9,8 +9,9 @@
  * React Native / node hosts that don't use NWC never register one).
  */
 
-import { KaleidoClient } from "kaleido-sdk";
+import { HttpClient, KaleidoClient } from "kaleido-sdk";
 import type { MakerClient } from "kaleido-sdk";
+import { RlnClient } from "kaleido-sdk/rln";
 import { log } from "./log";
 import { ProtocolError } from "../types/base";
 import type { RgbTransport } from "../types/rgb";
@@ -24,6 +25,59 @@ export interface KaleidoClientConfig {
   transport?: RgbTransport;
   /** `nostr+walletconnect://` connection string — required when transport === "nwc". */
   nwcUri?: string;
+}
+
+/**
+ * Narrow construction seam shared by direct RLN consumers. The node bearer is
+ * intentionally named `nodeApiKey`; this type has no maker `apiKey` field.
+ */
+export interface KaleidoNodeClientConfig {
+  baseUrl?: string;
+  nodeUrl?: string;
+  nodeApiKey?: string;
+  timeout?: number;
+  logLevel?: "silent";
+}
+
+export function createKaleidoClientWithNodeCredential(
+  config: KaleidoNodeClientConfig,
+): KaleidoClient {
+  return KaleidoClient.create({
+    ...(config.baseUrl != null ? { baseUrl: config.baseUrl } : {}),
+    nodeUrl: config.nodeUrl,
+    nodeApiKey: config.nodeApiKey,
+    timeout: config.timeout,
+    ...(config.logLevel != null ? { logLevel: config.logLevel } : {}),
+  });
+}
+
+export interface DirectRlnNodeClientConfig {
+  nodeUrl: string;
+  nodeApiKey?: string;
+  /** Matches KaleidoConfig timeout units. */
+  timeoutSeconds?: number;
+}
+
+export interface DirectRlnNodeClientOwner {
+  rln: RlnClient;
+  close(): Promise<void>;
+}
+
+/** Build an RLN-only SDK client without constructing the default maker client. */
+export function createDirectRlnNodeClient(
+  config: DirectRlnNodeClientConfig,
+): DirectRlnNodeClientOwner {
+  const http = new HttpClient({
+    nodeUrl: config.nodeUrl,
+    nodeApiKey: config.nodeApiKey,
+    timeout: config.timeoutSeconds == null ? undefined : config.timeoutSeconds * 1000,
+  });
+  return {
+    // RlnClient's 0.1.17 default LogState is SILENT. Do not accept an
+    // application logger here: that SDK version logs full invoices at INFO.
+    rln: new RlnClient(http),
+    close: () => http.close(),
+  };
 }
 
 /** RLN-shaped client the NWC transport must provide (mirrors kaleido-sdk's RlnClient). */
@@ -120,14 +174,15 @@ class KaleidoClientManager {
     // it maps to the SDK's node-scoped `nodeApiKey` — passing it as the SDK's
     // `apiKey` would send it to the maker and never to the node.
     //
-    // SECURITY: `nodeApiKey` only exists in kaleido-sdk >= 0.1.16, which is why
-    // the peer range starts there. Do NOT reintroduce a cast here: an unknown
+    // SECURITY: `nodeApiKey` only exists in kaleido-sdk >= 0.1.16. The package
+    // floor is 0.1.17 because the opt-in Lightning adapters also require that
+    // release's /nwc and /rln exports. Do NOT reintroduce a cast here: an unknown
     // extra property is dropped silently at runtime, so on an older SDK the
     // node credential would vanish and every RLN call would go out
     // unauthenticated while this method still reported a healthy client. Typed
     // literally, that downgrade is a compile error instead — see
     // `sdkSupportsNodeAuth` in `test/kaleido-node-auth.test.ts`.
-    this.client = KaleidoClient.create({
+    this.client = createKaleidoClientWithNodeCredential({
       baseUrl: config.baseUrl,
       nodeUrl: config.nodeUrl,
       nodeApiKey: config.apiKey,

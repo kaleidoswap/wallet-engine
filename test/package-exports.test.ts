@@ -11,7 +11,9 @@ import * as lightning from '../src/lightning/index'
 const workspace = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageJson = JSON.parse(readFileSync(join(workspace, 'package.json'), 'utf8')) as {
   exports: Record<string, unknown>
+  peerDependencies: Record<string, string>
   peerDependenciesMeta: Record<string, { optional?: boolean }>
+  devDependencies: Record<string, string>
 }
 
 function resolveLocalModule(importer: string, specifier: string): string | undefined {
@@ -66,7 +68,23 @@ describe('Lightning package exports', () => {
     expect(imports.has('kaleido-sdk')).toBe(false)
   })
 
-  it('loads root and ./lightning through package self-reference in a plain Node consumer', () => {
+  it('exposes concrete adapters only through SDK-coupled opt-in subpaths at the verified floor', () => {
+    expect(packageJson.exports['./lightning/nwc']).toEqual({
+      types: './dist/lightning/nwc/index.d.ts',
+      default: './dist/lightning/nwc/index.js',
+    })
+    expect(packageJson.exports['./lightning/rln']).toEqual({
+      types: './dist/lightning/rln/index.d.ts',
+      default: './dist/lightning/rln/index.js',
+    })
+    expect(bareImports(join(workspace, 'src/lightning/nwc/index.ts')).has('kaleido-sdk')).toBe(true)
+    expect(bareImports(join(workspace, 'src/lightning/rln/index.ts')).has('kaleido-sdk')).toBe(true)
+    expect(packageJson.peerDependencies['kaleido-sdk']).toBe('>=0.1.17 <0.2.0')
+    expect(packageJson.devDependencies['kaleido-sdk']).toBe('0.1.17')
+    expect(packageJson.peerDependenciesMeta['kaleido-sdk']).toEqual({ optional: true })
+  })
+
+  it('loads root, ./lightning, and both adapters through package self-reference in a plain Node consumer', () => {
     execFileSync(process.execPath, [join(workspace, 'test/fixtures/lightning-package-consumer.mjs')], {
       cwd: workspace,
       stdio: 'pipe',
