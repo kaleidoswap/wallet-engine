@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KaleidoClient } from 'kaleido-sdk'
 
 import { RlnLightningPayments } from '../src/lightning/rln/RlnLightningPayments'
-import { bolt11Fixture, TEST_PAYMENT_HASH } from './fixtures/bolt11'
+import { bolt11Fixture, TEST_PAYMENT_HASH, TEST_PREIMAGE } from './fixtures/bolt11'
 
 function directClient(overrides: Record<string, unknown> = {}) {
   const rln = {
@@ -70,7 +70,7 @@ describe('RlnLightningPayments', () => {
     await expect(payments.getCapabilities()).resolves.toEqual({
       createInvoice: true,
       payInvoice: true,
-      lookupInvoice: true,
+      lookupInvoice: false,
       lookupPayment: true,
       amountlessInvoices: true,
       maxFeeControl: false,
@@ -220,7 +220,12 @@ describe('RlnLightningPayments', () => {
       bolt11: invoice,
       requestId: 'payment-error',
     }).catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ code: 'PAYMENT_AMBIGUOUS', cause: undefined })
+    expect(error).toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+      cause: undefined,
+    })
     expect(String(error)).not.toContain(invoice)
     expect(String(error)).not.toContain(preimage)
     expect(String(error)).not.toContain('node-custody-secret')
@@ -228,7 +233,7 @@ describe('RlnLightningPayments', () => {
   })
 
   it('normalizes an outbound direct RLN payment lookup and never exposes provider payment secrets', async () => {
-    const preimage = 'bb'.repeat(32)
+    const preimage = TEST_PREIMAGE
     const client = directClient({
       getPayment: vi.fn(async () => ({
         payment: {
@@ -288,6 +293,26 @@ describe('RlnLightningPayments', () => {
       clientFactory: () => unsafeClient,
     })
     await expect(unsafe.lookupPayment({ paymentHash: TEST_PAYMENT_HASH }))
+      .rejects.toMatchObject({ code: 'UNKNOWN' })
+  })
+
+  it('rejects an outgoing lookup whose preimage does not match the requested payment hash', async () => {
+    const client = directClient({
+      getPayment: vi.fn(async () => ({
+        payment: {
+          payment_hash: TEST_PAYMENT_HASH,
+          inbound: false,
+          status: 'Succeeded',
+          preimage: 'aa'.repeat(32),
+        },
+      })),
+    })
+    const payments = new RlnLightningPayments({
+      nodeUrl: 'https://node.example',
+      clientFactory: () => client,
+    })
+
+    await expect(payments.lookupPayment({ paymentHash: TEST_PAYMENT_HASH }))
       .rejects.toMatchObject({ code: 'UNKNOWN' })
   })
 

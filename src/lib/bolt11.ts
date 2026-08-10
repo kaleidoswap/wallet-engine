@@ -59,8 +59,10 @@ export interface Bolt11Summary {
   network: string
 }
 
-function invalidInvoice(message: string, cause?: unknown): LightningPaymentError {
-  return new LightningPaymentError('INVALID_INVOICE', message, { cause })
+function invalidInvoice(message: string, _cause?: unknown): LightningPaymentError {
+  // Decoder errors may quote the complete BOLT11 (including its payment
+  // secret). Keep only the stable, sanitized contract message.
+  return new LightningPaymentError('INVALID_INVOICE', message)
 }
 
 function wordsToBigInt(words: readonly number[]): bigint {

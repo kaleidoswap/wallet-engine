@@ -11,6 +11,7 @@ import type {
 import { LightningPaymentError } from '../errors'
 import { parseMsat, toSafeAmountNumber } from '../amounts'
 import { defineLightningCapabilities } from '../types'
+import { preimageMatchesPaymentHash } from '../preimages'
 import { createDirectRlnNodeClient } from '../../lib/kaleido-client-manager'
 import { validateBolt11Invoice } from '../../lib/bolt11'
 
@@ -154,7 +155,7 @@ function mapRlnError(error: unknown, paymentMayHaveStarted = false): LightningPa
     return new LightningPaymentError(
       'PAYMENT_AMBIGUOUS',
       'Direct RLN payment outcome is ambiguous; reconcile by payment hash',
-      { retryable: true, ambiguous: true },
+      { ambiguous: true },
     )
   }
   return new LightningPaymentError('PROVIDER_UNAVAILABLE', 'Direct RLN provider request failed', {
@@ -165,7 +166,9 @@ function mapRlnError(error: unknown, paymentMayHaveStarted = false): LightningPa
 const CAPABILITIES = defineLightningCapabilities({
   createInvoice: true,
   payInvoice: true,
-  lookupInvoice: true,
+  // The direct API requires the original BOLT11. This adapter remembers it
+  // only for its own lifetime, so lookup is not a durable advertised feature.
+  lookupInvoice: false,
   lookupPayment: true,
   amountlessInvoices: true,
   maxFeeControl: false,
@@ -348,6 +351,7 @@ export class RlnLightningPayments implements LightningPayments {
     }
   }
 
+  /** Best-effort lookup for invoices created during this adapter instance's lifetime. */
   async lookupInvoice(_request: LookupLightningInvoiceRequest): Promise<LightningInvoice> {
     this.#assertOpen()
     const requestedHash = normalizedPaymentHash(_request.paymentHash)
@@ -423,9 +427,13 @@ export class RlnLightningPayments implements LightningPayments {
         : providerStatus === 'pending'
           ? 'pending'
           : 'unknown'
-    const preimage = typeof raw.preimage === 'string' && /^[0-9a-f]{64}$/i.test(raw.preimage)
-      ? raw.preimage
-      : undefined
+    let preimage: string | undefined
+    if (raw.preimage != null) {
+      if (!preimageMatchesPaymentHash(raw.preimage, requestedHash)) {
+        throw new LightningPaymentError('UNKNOWN', 'Direct RLN payment preimage does not match the lookup')
+      }
+      preimage = raw.preimage
+    }
     return {
       paymentHash: requestedHash,
       ...(amountMsat != null ? { amountMsat } : {}),

@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 
 import { NwcLightningPayments } from '../src/lightning/nwc/NwcLightningPayments'
-import { bolt11Fixture, TEST_PAYMENT_HASH } from './fixtures/bolt11'
+import { bolt11Fixture, TEST_PAYMENT_HASH, TEST_PREIMAGE } from './fixtures/bolt11'
 
 function nwcClient(overrides: Record<string, unknown> = {}) {
   return {
@@ -121,7 +121,7 @@ describe('NwcLightningPayments', () => {
   it('validates network and exact amount before paying an amountless invoice', async () => {
     const invoice = bolt11Fixture({ hrp: 'lnbcrt' })
     const client = nwcClient({
-      payInvoice: vi.fn(async () => ({ preimage: 'cd'.repeat(32), fees_paid: 12 })),
+      payInvoice: vi.fn(async () => ({ preimage: TEST_PREIMAGE, fees_paid: 12 })),
     })
     const payments = new NwcLightningPayments({
       connectionUri: 'nostr+walletconnect://redacted',
@@ -138,7 +138,7 @@ describe('NwcLightningPayments', () => {
       paymentHash: TEST_PAYMENT_HASH,
       amountMsat: '2000',
       feeMsat: '12',
-      preimage: 'cd'.repeat(32),
+      preimage: TEST_PREIMAGE,
       status: 'succeeded',
       settledAtUnixSeconds: 1_700_000_100,
     })
@@ -159,6 +159,22 @@ describe('NwcLightningPayments', () => {
     })).rejects.toMatchObject({ code: 'MAX_FEE_UNSUPPORTED' })
     expect(client.getInfo).not.toHaveBeenCalled()
     expect(client.payInvoice).not.toHaveBeenCalled()
+  })
+
+  it('rejects a payment response whose preimage is not bound to the BOLT11 payment hash', async () => {
+    const client = nwcClient({
+      payInvoice: vi.fn(async () => ({ preimage: 'aa'.repeat(32) })),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.payInvoice({
+      bolt11: bolt11Fixture({ hrp: 'lnbcrt10n' }),
+      requestId: 'payment-wrong-preimage',
+    })).rejects.toMatchObject({ code: 'PAYMENT_AMBIGUOUS', ambiguous: true })
   })
 
   it('rejects invoice-network and fixed-amount mismatches before sending', async () => {
@@ -253,6 +269,27 @@ describe('NwcLightningPayments', () => {
       .rejects.toMatchObject({ code: 'PAYMENT_NOT_FOUND' })
   })
 
+  it('rejects an outgoing lookup whose preimage does not match the requested payment hash', async () => {
+    const invoice = bolt11Fixture({ hrp: 'lnbcrt10n' })
+    const client = nwcClient({
+      lookupInvoice: vi.fn(async () => ({
+        type: 'outgoing',
+        state: 'settled',
+        invoice,
+        payment_hash: TEST_PAYMENT_HASH,
+        preimage: 'aa'.repeat(32),
+      })),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.lookupPayment({ paymentHash: TEST_PAYMENT_HASH }))
+      .rejects.toMatchObject({ code: 'UNKNOWN' })
+  })
+
   it('tears down once and maps secret-bearing provider errors without retaining diagnostics', async () => {
     const invoice = bolt11Fixture({ hrp: 'lnbcrt10n' })
     const preimage = 'ef'.repeat(32)
@@ -272,7 +309,12 @@ describe('NwcLightningPayments', () => {
       bolt11: invoice,
       requestId: 'payment-secret-error',
     }).catch((caught: unknown) => caught)
-    expect(error).toMatchObject({ code: 'PAYMENT_AMBIGUOUS', cause: undefined })
+    expect(error).toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+      cause: undefined,
+    })
     expect(String(error)).not.toContain(invoice)
     expect(String(error)).not.toContain(preimage)
     expect(String(error)).not.toContain(connectionUri)
@@ -311,6 +353,29 @@ describe('NwcLightningPayments', () => {
     expect(client.payKeysend).toHaveBeenCalledWith({
       pubkey: `02${'11'.repeat(32)}`,
       amount: 2_000,
+    })
+  })
+
+  it('never marks an ambiguous keysend outcome as safe to retry', async () => {
+    const client = nwcClient({
+      getInfo: vi.fn(async () => ({ network: 'regtest', methods: ['get_info', 'pay_keysend'] })),
+      payKeysend: vi.fn(async () => {
+        throw new Error('transport failed after dispatch')
+      }),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
+    })
+
+    await expect(payments.payKeysend?.({
+      destinationPubkey: `02${'11'.repeat(32)}`,
+      amountMsat: '2000',
+      requestId: 'keysend-ambiguous',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
     })
   })
 })

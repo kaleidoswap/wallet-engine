@@ -51,8 +51,12 @@ function sign(hrp: string, words: number[]): number[] {
   return bech32.toWords(Uint8Array.from([...recovered.slice(1), recovered[0]]))
 }
 
+export const TEST_PREIMAGE = 'cd'.repeat(32)
+const TEST_PAYMENT_HASH_BYTES = sha256(
+  Uint8Array.from(TEST_PREIMAGE.match(/../g)!.map((byte) => Number.parseInt(byte, 16))),
+)
 export const TEST_PAYMENT_HASH = Array.from(
-  Uint8Array.from({ length: 32 }, (_, index) => index),
+  TEST_PAYMENT_HASH_BYTES,
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('')
 
@@ -65,7 +69,7 @@ export function bolt11Fixture(options: {
   const timestamp = options.timestamp ?? 1_700_000_000
   const fields = [
     ...taggedField('s', bech32.toWords(new Uint8Array(32).fill(1))),
-    ...taggedField('p', bech32.toWords(Uint8Array.from({ length: 32 }, (_, index) => index))),
+    ...taggedField('p', bech32.toWords(TEST_PAYMENT_HASH_BYTES)),
     ...taggedField('d', bech32.toWords(new TextEncoder().encode('test invoice'))),
     ...taggedField('x', uintWords(options.expirySeconds ?? 3600)),
   ]

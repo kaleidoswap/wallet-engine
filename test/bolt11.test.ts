@@ -228,7 +228,15 @@ describe('strict BOLT11 validation', () => {
       extraFields: [taggedField('p', bech32.toWords(PAYMENT_HASH))],
     })
 
-    expectErrorCode(() => decodeBolt11Invoice(badChecksum), 'INVALID_INVOICE')
+    const checksumError = (() => {
+      try {
+        decodeBolt11Invoice(badChecksum)
+      } catch (error) {
+        return error
+      }
+    })()
+    expect(checksumError).toMatchObject({ code: 'INVALID_INVOICE', cause: undefined })
+    expect(String(checksumError)).not.toContain(badChecksum)
     expectErrorCode(
       () => decodeBolt11Invoice(bolt11Fixture({ includePaymentHash: false })),
       'INVALID_INVOICE',

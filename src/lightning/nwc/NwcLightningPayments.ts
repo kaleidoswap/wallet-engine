@@ -1,8 +1,12 @@
 import { NWCClient } from 'kaleido-sdk/nwc'
-import { sha256 } from '@noble/hashes/sha2.js'
 
 import { parseMsat, toSafeAmountNumber } from '../amounts'
 import { LightningPaymentError } from '../errors'
+import {
+  isLightningPreimage,
+  paymentHashFromPreimage,
+  preimageMatchesPaymentHash,
+} from '../preimages'
 import { defineLightningCapabilities } from '../types'
 import { validateBolt11Invoice } from '../../lib/bolt11'
 import type {
@@ -161,20 +165,12 @@ function mapNwcError(error: unknown, paymentMayHaveStarted = false): LightningPa
         ? new LightningPaymentError(
           'PAYMENT_AMBIGUOUS',
           'NWC payment outcome is ambiguous; reconcile by payment hash',
-          { retryable: true, ambiguous: true },
+          { ambiguous: true },
         )
         : new LightningPaymentError('PROVIDER_UNAVAILABLE', 'NWC provider request failed', {
           retryable: true,
         })
   }
-}
-
-function hexToBytes(value: string): Uint8Array {
-  return Uint8Array.from(value.match(/../g)!.map((byte) => Number.parseInt(byte, 16)))
-}
-
-function bytesToHex(value: Uint8Array): string {
-  return Array.from(value, (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
 
 export class NwcLightningPayments implements LightningPayments {
@@ -345,10 +341,10 @@ export class NwcLightningPayments implements LightningPayments {
     } catch (error) {
       throw mapNwcError(error, true)
     }
-    if (typeof raw.preimage !== 'string' || !/^[0-9a-f]{64}$/i.test(raw.preimage)) {
+    if (!preimageMatchesPaymentHash(raw.preimage, decoded.paymentHash)) {
       throw new LightningPaymentError(
         'PAYMENT_AMBIGUOUS',
-        'NWC payment returned no valid preimage; reconcile by payment hash',
+        'NWC payment returned no preimage bound to the invoice; reconcile by payment hash',
         { ambiguous: true },
       )
     }
@@ -458,9 +454,13 @@ export class NwcLightningPayments implements LightningPayments {
     if (providerAmount != null && invoiceAmount != null && providerAmount !== invoiceAmount) {
       throw new LightningPaymentError('INVALID_AMOUNT', 'NWC payment amount does not match its BOLT11')
     }
-    const preimage = typeof raw.preimage === 'string' && /^[0-9a-f]{64}$/i.test(raw.preimage)
-      ? raw.preimage
-      : undefined
+    let preimage: string | undefined
+    if (raw.preimage != null) {
+      if (!preimageMatchesPaymentHash(raw.preimage, requestedHash)) {
+        throw new LightningPaymentError('UNKNOWN', 'NWC payment preimage does not match the lookup')
+      }
+      preimage = raw.preimage
+    }
 
     return {
       paymentHash: requestedHash,
@@ -511,7 +511,7 @@ export class NwcLightningPayments implements LightningPayments {
     } catch (error) {
       throw mapNwcError(error, true)
     }
-    if (typeof raw.preimage !== 'string' || !/^[0-9a-f]{64}$/i.test(raw.preimage)) {
+    if (!isLightningPreimage(raw.preimage)) {
       throw new LightningPaymentError(
         'PAYMENT_AMBIGUOUS',
         'NWC keysend returned no valid preimage',
@@ -519,7 +519,7 @@ export class NwcLightningPayments implements LightningPayments {
       )
     }
     return {
-      paymentHash: bytesToHex(sha256(hexToBytes(raw.preimage))),
+      paymentHash: paymentHashFromPreimage(raw.preimage),
       amountMsat: request.amountMsat,
       ...(raw.fees_paid != null ? { feeMsat: safeProviderMsat(raw.fees_paid, 'fees_paid') } : {}),
       preimage: raw.preimage,
