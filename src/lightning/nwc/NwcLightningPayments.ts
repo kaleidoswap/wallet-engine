@@ -342,26 +342,28 @@ export class NwcLightningPayments implements LightningPayments {
     }
 
     let raw: Record<string, unknown>
+    let feeMsat: string | undefined
     try {
       raw = objectResult(await this.#client.payInvoice({
         invoice: request.bolt11,
         ...(amount != null ? { amount } : {}),
       }), 'invoice payment')
+      if (!preimageMatchesPaymentHash(raw.preimage, decoded.paymentHash)) {
+        throw new LightningPaymentError(
+          'PAYMENT_AMBIGUOUS',
+          'NWC payment returned no preimage bound to the invoice; reconcile by payment hash',
+          { ambiguous: true },
+        )
+      }
+      feeMsat = safeProviderMsat(raw.fees_paid, 'fees_paid')
     } catch (error) {
       throw mapNwcError(error, true)
-    }
-    if (!preimageMatchesPaymentHash(raw.preimage, decoded.paymentHash)) {
-      throw new LightningPaymentError(
-        'PAYMENT_AMBIGUOUS',
-        'NWC payment returned no preimage bound to the invoice; reconcile by payment hash',
-        { ambiguous: true },
-      )
     }
 
     return {
       paymentHash: decoded.paymentHash,
       ...(amountMsat != null ? { amountMsat } : {}),
-      ...(raw.fees_paid != null ? { feeMsat: safeProviderMsat(raw.fees_paid, 'fees_paid') } : {}),
+      ...(feeMsat != null ? { feeMsat } : {}),
       preimage: raw.preimage,
       status: 'succeeded',
       settledAtUnixSeconds: this.#nowUnixSeconds(),
@@ -456,7 +458,7 @@ export class NwcLightningPayments implements LightningPayments {
       invoiceAmount = decoded.amountMsat
       createdAtUnixSeconds = decoded.createdAtUnixSeconds
     }
-    if (raw.payment_hash != null && raw.payment_hash !== requestedHash) {
+    if (raw.payment_hash !== requestedHash) {
       throw new LightningPaymentError('UNKNOWN', 'NWC payment identity does not match the lookup')
     }
     const providerAmount = safeProviderMsat(raw.amount, 'amount')

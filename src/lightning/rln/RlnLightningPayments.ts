@@ -344,13 +344,18 @@ export class RlnLightningPayments implements LightningPayments {
       )
     }
     const providerStatus = typeof raw.status === 'string' ? raw.status.toLowerCase() : ''
+    if (!['succeeded', 'failed', 'pending'].includes(providerStatus)) {
+      throw new LightningPaymentError(
+        'PAYMENT_AMBIGUOUS',
+        'Direct RLN returned no valid payment status; reconcile by BOLT11 payment hash',
+        { ambiguous: true },
+      )
+    }
     const status = providerStatus === 'succeeded'
       ? 'succeeded'
       : providerStatus === 'failed'
         ? 'failed'
-        : providerStatus === 'pending'
-          ? 'pending'
-          : 'unknown'
+        : 'pending'
     return {
       paymentHash: decoded.paymentHash,
       ...(amountMsat != null ? { amountMsat } : {}),

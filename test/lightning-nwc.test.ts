@@ -197,6 +197,29 @@ describe('NwcLightningPayments', () => {
     })
   })
 
+  it('classifies malformed fields in an otherwise fulfilled payment as ambiguity', async () => {
+    const client = nwcClient({
+      payInvoice: vi.fn(async () => ({
+        preimage: TEST_PREIMAGE,
+        fees_paid: 'not-a-safe-msat-number',
+      })),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.payInvoice({
+      bolt11: bolt11Fixture({ hrp: 'lnbcrt10n' }),
+      requestId: 'payment-malformed-fee',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+    })
+  })
+
   it('rejects invoice-network and fixed-amount mismatches before sending', async () => {
     const wrongNetworkClient = nwcClient()
     const wrongNetwork = new NwcLightningPayments({
@@ -304,6 +327,23 @@ describe('NwcLightningPayments', () => {
       connectionUri: 'nostr+walletconnect://redacted',
       clientFactory: () => client,
       nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.lookupPayment({ paymentHash: TEST_PAYMENT_HASH }))
+      .rejects.toMatchObject({ code: 'UNKNOWN' })
+  })
+
+  it('never reports a reconciled payment state without provider-bound identity', async () => {
+    const client = nwcClient({
+      lookupInvoice: vi.fn(async () => ({
+        type: 'outgoing',
+        state: 'settled',
+        amount: 1_000,
+      })),
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => client,
     })
 
     await expect(payments.lookupPayment({ paymentHash: TEST_PAYMENT_HASH }))

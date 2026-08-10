@@ -192,6 +192,29 @@ describe('RlnLightningPayments', () => {
     })
   })
 
+  it('requires a valid provider status before returning a direct RLN payment result', async () => {
+    const client = directClient({
+      sendPayment: vi.fn(async () => ({
+        payment_id: 'provider-local-id',
+        payment_hash: TEST_PAYMENT_HASH,
+      })),
+    })
+    const payments = new RlnLightningPayments({
+      nodeUrl: 'https://node.example',
+      clientFactory: () => client,
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.payInvoice({
+      bolt11: bolt11Fixture({ hrp: 'lnbcrt10n' }),
+      requestId: 'payment-missing-status',
+    })).rejects.toMatchObject({
+      code: 'PAYMENT_AMBIGUOUS',
+      retryable: false,
+      ambiguous: true,
+    })
+  })
+
   it('classifies a malformed fulfilled direct RLN response as non-retryable ambiguity', async () => {
     const client = directClient({
       sendPayment: vi.fn(async () => null),
