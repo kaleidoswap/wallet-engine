@@ -1,6 +1,10 @@
 /**
  * @kaleidorg/wallet-engine
- * Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet.
+ * Headless multi-protocol Bitcoin L2 wallet engine — one `IProtocolAdapter`
+ * contract over Spark, RGB-LN, RGB-L1, Liquid and Arkade, with a cross-protocol
+ * router, BIP321 unified receive and lite/advanced disclosure.
+ *
+ * This barrel is deliberately SDK-free; adapters live behind their own subpaths.
  */
 
 // Types
