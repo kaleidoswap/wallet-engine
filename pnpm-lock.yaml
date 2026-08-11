@@ -4,9 +4,6 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  postcss: 8.5.25
-
 importers:
 
   .:
@@ -48,6 +45,9 @@ importers:
       '@flashnet/sdk':
         specifier: ^0.5.7
         version: 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(ws@8.21.0))(typescript@5.9.3)
+      '@kaleidorg/swap-sdk':
+        specifier: ^0.1.1
+        version: 0.1.1
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -67,17 +67,20 @@ importers:
         specifier: ^4.9.0
         version: 4.9.0
       kaleido-sdk:
-        specifier: ^0.1.16
-        version: 0.1.17(typescript@5.9.3)
+        specifier: ^0.1.18
+        version: 0.1.18(typescript@5.9.3)
+      tsx:
+        specifier: ^4.23.12
+        version: 4.23.12
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
       vite:
         specifier: ^7.3.1
-        version: 7.3.6(@types/node@26.1.0)
+        version: 7.3.6(@types/node@26.1.0)(tsx@4.23.12)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.10(@types/node@26.1.0)(vite@7.3.6(@types/node@26.1.0))
+        version: 4.1.10(@types/node@26.1.0)(vite@7.3.6(@types/node@26.1.0)(tsx@4.23.12))
 
 packages:
 
@@ -436,6 +439,10 @@ packages:
 
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
+
+  '@kaleidorg/swap-sdk@0.1.1':
+    resolution: {integrity: sha512-kEHI0RBTn+6VGZe9K/j0uRH0nuGgEEk5i1usvBeiuXaVWDGwqhUHI00CFzojLp+flPEFwOteGS88lp4712oYpQ==}
+    engines: {node: '>=22'}
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3':
     resolution: {integrity: sha512-bSFvV/i5obI2yzQS3sgb6dxLhPL8dURGzG6VCrCHSGm5F23CH0o+kjQaheD5+QPpCF74guP5LhRzvkO1+QqR2Q==}
@@ -1671,6 +1678,10 @@ packages:
     resolution: {integrity: sha512-9M8JkDoycibvOR7G1woE/1iqmKV/GXoQMTjNtzzP1TvERmOytgAjHqwV/cHgEICU6zqEj61hD57KnbwkYMSUWw==}
     engines: {node: '>=18.0.0'}
 
+  kaleido-sdk@0.1.18:
+    resolution: {integrity: sha512-+qnJMpFMZxqIS5ws0zJT8IvI5J1BzWw+MegSEO/VhVn8V1BVQsJBgsxQ+gHZkqRTvE3KEfypTJGToNB9K0uNNQ==}
+    engines: {node: '>=18.0.0'}
+
   light-bolt11-decoder@3.2.0:
     resolution: {integrity: sha512-3QEofgiBOP4Ehs9BI+RkZdXZNtSys0nsJ6fyGeSiAGCBsMwHGUDS/JQlY/sTnWs91A2Nh0S9XXfA8Sy9g6QpuQ==}
 
@@ -2034,6 +2045,11 @@ packages:
 
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
+
+  tsx@4.23.12:
+    resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
+    engines: {node: '>=18.0.0'}
+    hasBin: true
 
   typed-array-buffer@1.0.3:
     resolution: {integrity: sha512-nAYYwfY3qnzX30IkA6AQZjVbtK6duGontcQm1WSG1MD94YLqK0515GNApXkoxKOWMusVssAHWLh9SeaoefYFGw==}
@@ -2614,6 +2630,8 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
+  '@kaleidorg/swap-sdk@0.1.1': {}
+
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
@@ -2995,13 +3013,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.10(vite@7.3.6(@types/node@26.1.0))':
+  '@vitest/mocker@4.1.10(vite@7.3.6(@types/node@26.1.0)(tsx@4.23.12))':
     dependencies:
       '@vitest/spy': 4.1.10
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.6(@types/node@26.1.0)
+      vite: 7.3.6(@types/node@26.1.0)(tsx@4.23.12)
 
   '@vitest/pretty-format@4.1.10':
     dependencies:
@@ -4240,6 +4258,13 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
+  kaleido-sdk@0.1.18(typescript@5.9.3):
+    dependencies:
+      nostr-tools: 2.23.9(typescript@5.9.3)
+      openapi-fetch: 0.15.2
+    transitivePeerDependencies:
+      - typescript
+
   light-bolt11-decoder@3.2.0:
     dependencies:
       '@scure/base': 1.1.1
@@ -4713,6 +4738,12 @@ snapshots:
 
   tslib@2.8.1: {}
 
+  tsx@4.23.12:
+    dependencies:
+      esbuild: 0.28.1
+    optionalDependencies:
+      fsevents: 2.3.3
+
   typed-array-buffer@1.0.3:
     dependencies:
       call-bound: 1.0.4
@@ -4774,7 +4805,7 @@ snapshots:
     dependencies:
       uint8array-tools: 0.0.8
 
-  vite@7.3.6(@types/node@26.1.0):
+  vite@7.3.6(@types/node@26.1.0)(tsx@4.23.12):
     dependencies:
       esbuild: 0.28.1
       fdir: 6.5.0(picomatch@4.0.5)
@@ -4785,11 +4816,12 @@ snapshots:
     optionalDependencies:
       '@types/node': 26.1.0
       fsevents: 2.3.3
+      tsx: 4.23.12
 
-  vitest@4.1.10(@types/node@26.1.0)(vite@7.3.6(@types/node@26.1.0)):
+  vitest@4.1.10(@types/node@26.1.0)(vite@7.3.6(@types/node@26.1.0)(tsx@4.23.12)):
     dependencies:
       '@vitest/expect': 4.1.10
-      '@vitest/mocker': 4.1.10(vite@7.3.6(@types/node@26.1.0))
+      '@vitest/mocker': 4.1.10(vite@7.3.6(@types/node@26.1.0)(tsx@4.23.12))
       '@vitest/pretty-format': 4.1.10
       '@vitest/runner': 4.1.10
       '@vitest/snapshot': 4.1.10
@@ -4806,7 +4838,7 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 7.3.6(@types/node@26.1.0)
+      vite: 7.3.6(@types/node@26.1.0)(tsx@4.23.12)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.1.0
