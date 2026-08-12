@@ -54,6 +54,14 @@
       "types": "./dist/lightning/index.d.ts",
       "default": "./dist/lightning/index.js"
     },
+    "./lightning/nwc": {
+      "types": "./dist/lightning/nwc/index.d.ts",
+      "default": "./dist/lightning/nwc/index.js"
+    },
+    "./lightning/rln": {
+      "types": "./dist/lightning/rln/index.d.ts",
+      "default": "./dist/lightning/rln/index.js"
+    },
     "./package.json": "./package.json"
   },
   "scripts": {
