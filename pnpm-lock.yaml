@@ -48,6 +48,9 @@ importers:
       '@flashnet/sdk':
         specifier: ^0.5.7
         version: 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-events@2.9.1(bare-abort-controller@1.1.2))(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(ws@8.21.0))(typescript@5.9.3)
+      '@kaleidorg/swap-sdk':
+        specifier: ^0.1.1
+        version: 0.1.1
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -67,8 +70,8 @@ importers:
         specifier: ^4.9.0
         version: 4.9.0
       kaleido-sdk:
-        specifier: 0.1.17
-        version: 0.1.17(typescript@5.9.3)
+        specifier: ^0.1.18
+        version: 0.1.18(typescript@5.9.3)
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
@@ -436,6 +439,10 @@ packages:
 
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
+
+  '@kaleidorg/swap-sdk@0.1.1':
+    resolution: {integrity: sha512-kEHI0RBTn+6VGZe9K/j0uRH0nuGgEEk5i1usvBeiuXaVWDGwqhUHI00CFzojLp+flPEFwOteGS88lp4712oYpQ==}
+    engines: {node: '>=22'}
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3':
     resolution: {integrity: sha512-bSFvV/i5obI2yzQS3sgb6dxLhPL8dURGzG6VCrCHSGm5F23CH0o+kjQaheD5+QPpCF74guP5LhRzvkO1+QqR2Q==}
@@ -1654,8 +1661,8 @@ packages:
   js-base64@3.8.0:
     resolution: {integrity: sha512-65kvbemyZhj+ExQt1PEFyBEjL5vAHysu1lJdW1AwhhChkO8ZBPizYk/m9GVrpbS2Je1hF+UYZ+6KywqtZV8mHw==}
 
-  kaleido-sdk@0.1.17:
-    resolution: {integrity: sha512-9M8JkDoycibvOR7G1woE/1iqmKV/GXoQMTjNtzzP1TvERmOytgAjHqwV/cHgEICU6zqEj61hD57KnbwkYMSUWw==}
+  kaleido-sdk@0.1.18:
+    resolution: {integrity: sha512-+qnJMpFMZxqIS5ws0zJT8IvI5J1BzWw+MegSEO/VhVn8V1BVQsJBgsxQ+gHZkqRTvE3KEfypTJGToNB9K0uNNQ==}
     engines: {node: '>=18.0.0'}
 
   light-bolt11-decoder@3.2.0:
@@ -2601,10 +2608,12 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
+  '@kaleidorg/swap-sdk@0.1.1': {}
+
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
-      kaleido-sdk: 0.1.17(typescript@5.9.3)
+      kaleido-sdk: 0.1.18(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
@@ -2616,7 +2625,7 @@ snapshots:
   '@kaleidorg/wdk-wallet-rln@1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
-      kaleido-sdk: 0.1.17(typescript@5.9.3)
+      kaleido-sdk: 0.1.18(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
@@ -4220,7 +4229,7 @@ snapshots:
 
   js-base64@3.8.0: {}
 
-  kaleido-sdk@0.1.17(typescript@5.9.3):
+  kaleido-sdk@0.1.18(typescript@5.9.3):
     dependencies:
       nostr-tools: 2.23.9(typescript@5.9.3)
       openapi-fetch: 0.15.2
