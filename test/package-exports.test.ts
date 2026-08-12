@@ -79,8 +79,8 @@ describe('Lightning package exports', () => {
     })
     expect(bareImports(join(workspace, 'src/lightning/nwc/index.ts')).has('kaleido-sdk')).toBe(true)
     expect(bareImports(join(workspace, 'src/lightning/rln/index.ts')).has('kaleido-sdk')).toBe(true)
-    expect(packageJson.peerDependencies['kaleido-sdk']).toBe('>=0.1.17 <0.2.0')
-    expect(packageJson.devDependencies['kaleido-sdk']).toBe('0.1.17')
+    expect(packageJson.peerDependencies['kaleido-sdk']).toBe('^0.1.18')
+    expect(packageJson.devDependencies['kaleido-sdk']).toBe('^0.1.18')
     expect(packageJson.peerDependenciesMeta['kaleido-sdk']).toEqual({ optional: true })
   })
 
