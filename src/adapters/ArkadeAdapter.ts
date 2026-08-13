@@ -24,6 +24,7 @@ import {
   invalidateArkadeSnapshotCache,
 } from "../lib/arkade-snapshot-cache";
 import { arkadeClientManager } from "../lib/arkade-client-manager";
+import { arkadeIntentsClientManager } from "../lib/arkade-intents-client-manager";
 import { arkadeSwapsClientManager } from "../lib/arkade-swaps-client-manager";
 import {
   Ramps,
@@ -136,8 +137,11 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
-    // Dispose Boltz swaps client first (stops SwapManager monitoring) so it
-    // doesn't try to use the wallet after we tear it down.
+    // Dispose swap clients first (stops SwapManager monitoring / closes the
+    // Intents transport) so neither uses the wallet after we tear it down.
+    // Intents is host-initialized, so this is defensive — a no-op when the
+    // host never wired it.
+    await arkadeIntentsClientManager.dispose();
     await arkadeSwapsClientManager.dispose();
     await arkadeClientManager.disconnect();
     this.config = null;

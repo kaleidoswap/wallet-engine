@@ -7,6 +7,24 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- **Arkade Intents client manager** (`arkadeIntentsClientManager`, exported
+  from `adapters/arkade` and `adapters/native`): owns an `ArkadeIntentsVenue`
+  from `@kaleidorg/swap-sdk/arkade` (>= 0.3.0) — the Arkade Intents RFQ routes
+  (`arkade:BTC ↔ lightning:BTC` plus the intra-Arkade asset-swap covenant).
+  Host-initialized after the Arkade adapter connects (the RFQ transport comes
+  from the pinned solver's card, a product decision the engine doesn't own);
+  the adapter's `disconnect()` disposes it defensively before the wallet tears
+  down. The venue module resolves through the WDK module loader under the
+  subpath key `@kaleidorg/swap-sdk/arkade`, so the peer stays optional and RN
+  hosts can inject a static require. The venue requires the host's
+  `@arkade-os/sdk` to be on the >= 0.4.60 line (`VHTLC.ScriptV2`).
+- **`ArkadeIntentsStore`** (exported from `./swap`): the venue's
+  persist-before-fund record store over the platform `IStorageProvider` seam
+  (`arkade:intents:swap:*` keys), so corridor recovery records survive
+  service-worker eviction and app restarts on every host.
+- `@kaleidorg/swap-sdk` peer range widened to `^0.1.1 || ^0.3.0`.
+
 ### Changed
 - **`IProtocolAdapter` decomposed into capability-group interfaces.** The flat
   70-method contract is now `ICoreProtocolAdapter` (the ~24 universal members)
