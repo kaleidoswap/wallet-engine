@@ -29,6 +29,11 @@ export {
 } from './boltz-swap-store'
 
 export {
+  ArkadeIntentsStore,
+  type ArkadeIntentsRecord,
+} from './arkade-intents-store'
+
+export {
   boltzSwapClientManager,
   resolveBoltzBaseUrl,
   type BoltzClientConfig,
