@@ -383,7 +383,7 @@ export class NwcLightningPayments implements LightningPayments {
     } catch (error) {
       throw mapNwcError(error)
     }
-    if (raw.type != null && raw.type !== 'incoming') {
+    if (raw.type !== 'incoming') {
       throw new LightningPaymentError('PAYMENT_NOT_FOUND', 'NWC lookup did not return an incoming invoice')
     }
     if (typeof raw.invoice !== 'string') {
@@ -440,7 +440,7 @@ export class NwcLightningPayments implements LightningPayments {
     } catch (error) {
       throw mapNwcError(error)
     }
-    if (raw.type != null && raw.type !== 'outgoing') {
+    if (raw.type !== 'outgoing') {
       throw new LightningPaymentError('PAYMENT_NOT_FOUND', 'NWC lookup did not return an outgoing payment')
     }
 

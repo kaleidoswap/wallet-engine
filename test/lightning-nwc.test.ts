@@ -312,6 +312,29 @@ describe('NwcLightningPayments', () => {
       .rejects.toMatchObject({ code: 'PAYMENT_NOT_FOUND' })
   })
 
+  it('rejects a response with no transaction type, which would otherwise satisfy both lookups', async () => {
+    // Both lookups call NIP-47 lookup_invoice and are told apart only by
+    // `type`. Tolerating its absence let one untyped response be read as an
+    // incoming invoice and as a reconciled outgoing payment.
+    const invoice = bolt11Fixture({ hrp: 'lnbcrt10n' })
+    const untyped = () => ({
+      state: 'settled',
+      invoice,
+      payment_hash: TEST_PAYMENT_HASH,
+      preimage: TEST_PREIMAGE,
+    })
+    const payments = new NwcLightningPayments({
+      connectionUri: 'nostr+walletconnect://redacted',
+      clientFactory: () => nwcClient({ lookupInvoice: vi.fn(async () => untyped()) }),
+      nowUnixSeconds: () => 1_700_000_100,
+    })
+
+    await expect(payments.lookupPayment({ paymentHash: TEST_PAYMENT_HASH }))
+      .rejects.toMatchObject({ code: 'PAYMENT_NOT_FOUND' })
+    await expect(payments.lookupInvoice({ paymentHash: TEST_PAYMENT_HASH }))
+      .rejects.toMatchObject({ code: 'PAYMENT_NOT_FOUND' })
+  })
+
   it('rejects an outgoing lookup whose preimage does not match the requested payment hash', async () => {
     const invoice = bolt11Fixture({ hrp: 'lnbcrt10n' })
     const client = nwcClient({
