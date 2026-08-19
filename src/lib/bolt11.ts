@@ -173,6 +173,47 @@ function parseHrp(prefix: string): {
   }
 }
 
+/**
+ * Even feature bits this payer is prepared to honour.
+ *
+ * BOLT 9 splits the invoice feature vector by parity: an odd bit is optional
+ * and may be ignored, an even bit is mandatory and a payer that does not
+ * understand it MUST NOT pay. The three below are the ubiquitous modern
+ * invoice requirements — and `payment_secret` (14) is already enforced
+ * structurally, since a missing `s` field is rejected outright.
+ *
+ * Everything else is refused rather than delegated. The adapters here do not
+ * route; they hand the invoice to a provider (NWC, RLN). Paying an invoice
+ * whose mandatory requirement we cannot name means discovering the mismatch
+ * as an opaque provider failure after the money is in flight, so the
+ * conservative reading is the safe one. Extend this set deliberately, per bit.
+ */
+const SUPPORTED_EVEN_FEATURE_BITS: ReadonlySet<number> = new Set([
+  8, // var_onion_optin
+  14, // payment_secret
+  16, // basic_mpp
+])
+
+/**
+ * Reject an invoice that mandates a feature this payer cannot claim to support.
+ *
+ * The field is a big-endian bitvector packed into 5-bit words, so bit 0 is the
+ * low bit of the final word and bit numbering runs backwards from the end.
+ */
+function assertSupportedFeatures(words: readonly number[]): void {
+  const totalBits = words.length * 5
+  for (let index = 0; index < words.length; index += 1) {
+    for (let bit = 0; bit < 5; bit += 1) {
+      if ((words[index] & (1 << (4 - bit))) === 0) continue
+      const position = totalBits - 1 - (index * 5 + bit)
+      if (position % 2 !== 0) continue
+      if (!SUPPORTED_EVEN_FEATURE_BITS.has(position)) {
+        throw invalidInvoice(`BOLT11 requires unsupported mandatory feature bit ${position}`)
+      }
+    }
+  }
+}
+
 function decodePaymentHash(words: number[]): string {
   if (words.length !== 52) throw invalidInvoice('BOLT11 payment hash must contain 32 bytes')
   return bytesToHex(decodeFixedBytes(words, 32, 'payment hash'))
@@ -248,6 +289,7 @@ export function decodeBolt11Invoice(invoice: string): DecodedBolt11Invoice {
   let hasPaymentSecret = false
   let hasDescription = false
   let hasDescriptionHash = false
+  let hasFeatures = false
   let payeePubkey: Uint8Array | undefined
 
   for (let offset = 0; offset < taggedWords.length; ) {
@@ -292,6 +334,10 @@ export function decodeBolt11Invoice(invoice: string): DecodedBolt11Invoice {
       if (!secp256k1.utils.isValidPublicKey(payeePubkey, true)) {
         throw invalidInvoice('BOLT11 payee public key is invalid')
       }
+    } else if (tag === '9') {
+      if (hasFeatures) throw invalidInvoice('BOLT11 features field is duplicated')
+      hasFeatures = true
+      assertSupportedFeatures(data)
     } else if (tag === 'x') {
       if (hasExpiry || data.length === 0 || (data.length > 1 && data[0] === 0)) {
         throw invalidInvoice('BOLT11 expiry field is invalid, non-minimal, or duplicated')

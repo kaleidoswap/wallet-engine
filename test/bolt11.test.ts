@@ -275,3 +275,36 @@ describe('strict BOLT11 validation', () => {
     expectErrorCode(() => decodeBolt11Invoice(bolt11Fixture({ hrp: 'lnbc1p' })), 'INVALID_AMOUNT')
   })
 })
+
+describe('BOLT11 feature bits', () => {
+  // BOLT 9: even bits are mandatory, odd bits may be ignored. The spec's own
+  // test vector sets exactly bits 8 (var_onion_optin) and 14 (payment_secret).
+  const featureField = (bitvector: number | bigint) => taggedField('9', uintWords(bitvector))
+
+  it('accepts the mandatory features this payer supports', () => {
+    const invoice = bolt11Fixture({ extraFields: [featureField((1 << 8) | (1 << 14))] })
+    expect(validateBolt11Invoice(invoice, { allowExpired: true }).paymentHash).toBe(PAYMENT_HASH_HEX)
+  })
+
+  it('accepts the official test vector, which carries a features field', () => {
+    expect(isValidBolt11(OFFICIAL_BOLT11)).toBe(true)
+  })
+
+  it('rejects an unknown mandatory (even) feature bit', () => {
+    const invoice = bolt11Fixture({ extraFields: [featureField(1 << 20)] })
+    expectErrorCode(() => validateBolt11Invoice(invoice, { allowExpired: true }), 'INVALID_INVOICE')
+    expect(() => validateBolt11Invoice(invoice, { allowExpired: true })).toThrow(/feature bit 20/)
+  })
+
+  it('ignores an unknown optional (odd) feature bit', () => {
+    const invoice = bolt11Fixture({ extraFields: [featureField(1 << 21)] })
+    expect(validateBolt11Invoice(invoice, { allowExpired: true }).paymentHash).toBe(PAYMENT_HASH_HEX)
+  })
+
+  it('rejects a duplicated features field', () => {
+    const invoice = bolt11Fixture({
+      extraFields: [featureField(1 << 14), featureField(1 << 14)],
+    })
+    expectErrorCode(() => validateBolt11Invoice(invoice, { allowExpired: true }), 'INVALID_INVOICE')
+  })
+})
