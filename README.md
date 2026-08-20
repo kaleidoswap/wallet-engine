@@ -4,12 +4,6 @@
 > **Spark · RGB-LN · RGB-L1 · Liquid · Arkade** behind one `IProtocolAdapter` contract,
 > with a cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.
 
-> [!WARNING]
-> **Alpha — experimental, not production-ready.** This engine moves real funds across
-> Bitcoin L2s. APIs may change without notice, adapters are incomplete, and it has not
-> been independently audited. Do not use it with mainnet funds you cannot afford to lose.
-> Use at your own risk.
-
 `wallet-engine` is the headless core you build a multi-protocol Bitcoin wallet on.
 It hides the differences between Bitcoin L2s behind one interface, keeps the app code
 the same across React Native, browser extension, and Node hosts, and ships the hard
@@ -52,16 +46,41 @@ with `if (protocol === …)` smeared across every screen.
 
 ---
 
+## What you get
+
+The adapters are the part you could write yourself. These four are the part you'd
+rather not write twice:
+
+| | | |
+|---|---|---|
+| **`CrossProtocolRouter`** | Hand it `lnbc1…`, a BIP321 URI, or a receive layer — get back the ranked protocols that can settle it, filtered to what's registered and connected. `.best` is the auto-route. | [`src/router`](src/router/index.ts) |
+| **Unified receive** | **One** `bitcoin:` QR carrying on-chain + BOLT11/BOLT12 + Spark + Arkade + Liquid + RGB. Foreign wallets ignore the params they don't know. | [`src/receive`](src/receive/unifiedReceive.ts) |
+| **Capability manifest** | Every protocol's layers, quirks and limits as *data*. The router and your UI read it; nothing special-cases a protocol by name. | [`src/capabilities`](src/capabilities/index.ts) |
+| **Disclosure** | Lite vs advanced as one reversible setting rather than two codebases — lite collapses every BTC representation into "BTC". | [`src/disclosure`](src/disclosure/index.ts) |
+
+Add a protocol and all four pick it up with zero changes to existing protocol code.
+
+---
+
+> [!WARNING]
+> **Alpha — experimental, not production-ready.** This engine moves real funds across
+> Bitcoin L2s. APIs may change without notice, and it has not been independently
+> audited. Do not use it with mainnet funds you cannot afford to lose. Use at your own
+> risk.
+
 ## Supported protocols
 
-| Protocol | Layers | Assets | Swaps | Notable quirks | Backing module |
-|---|---|---|:---:|---|---|
-| **BTC**    | on-chain | — | — | base on-chain only | (native) |
-| **SPARK**  | Spark, LN, on-chain | Spark tokens | — | zero-fee, static receive addr | `@tetherto/wdk-wallet-spark` |
-| **RGB-LN** | RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
-| **RGB-L1** | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
-| **LIQUID** | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
-| **ARKADE** | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
+`Maturity` is the `maturity` field each protocol carries in the capability manifest —
+read it at runtime, don't hardcode it.
+
+| Protocol | Maturity | Layers | Assets | Swaps | Notable quirks | Backing module |
+|---|:---:|---|---|:---:|---|---|
+| **BTC**    | `stable` | on-chain | — | — | base on-chain only | (native) |
+| **SPARK**  | `beta` | Spark, LN, on-chain | Spark tokens | — | zero-fee, static receive addr | `@tetherto/wdk-wallet-spark` |
+| **RGB-LN** | `beta` | RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
+| **RGB-L1** | `beta` | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
+| **LIQUID** | `beta` | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
+| **ARKADE** | `beta` | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
 
 Each protocol is described once in [`src/capabilities/index.ts`](src/capabilities/index.ts).
 The router and UI read that manifest — they never special-case a protocol by name.
@@ -145,6 +164,24 @@ const uri = buildUnifiedReceiveURI({
   liquidAddress: 'lq1…',
 })
 ```
+
+---
+
+## Run it first
+
+The quickstart above needs a wallet behind it. This doesn't — it's the same
+router, manifest and unified receive against four in-memory stub adapters, so you
+can see the shape before you wire a single SDK:
+
+```bash
+git clone https://github.com/kaleidoswap/wallet-engine && cd wallet-engine
+npm install
+npm run example:tour
+```
+
+No node, no credentials, no network. See [`examples/tour`](examples/tour) for what
+each section demonstrates, and [`examples/minimal-adapter`](examples/minimal-adapter)
+for the whole contract in ~170 dependency-free lines.
 
 ---
 
@@ -274,9 +311,16 @@ consumers of `wallet-engine` never import `kaleido-sdk` directly.
 ## Status
 
 **Alpha — experimental.** Published under a `1.0.0-beta` version tag, but treat the
-project as alpha: interfaces are unstable, several adapters are partial, and nothing has
-been audited. WDK adapters are `beta` maturity (native fallbacks remain available); see
-the `maturity` field per protocol in the capability manifest.
+project as alpha: interfaces are unstable and nothing has been audited. Per-protocol
+readiness is not prose — it's the `maturity` field in the capability manifest, shown in
+[Supported protocols](#supported-protocols) and readable at runtime:
+
+```ts
+import { PROTOCOL_CAPABILITIES } from '@kaleidorg/wallet-engine'
+PROTOCOL_CAPABILITIES.RGB_LN.maturity   // 'beta'
+```
+
+Native fallback adapters remain available alongside the WDK-backed ones.
 
 ## License
 

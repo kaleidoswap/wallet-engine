@@ -36,15 +36,35 @@ import type {
   TransactionFilter,
 } from '../../src/types/base'
 import { PROTOCOL_OPERATIONS } from '../../src/capabilities/operations'
+import { PROTOCOL_CAPABILITIES } from '../../src/capabilities'
+
+export interface MemoAdapterOptions {
+  /** Which protocol this instance stands in for. Defaults to the on-chain base, `BTC`. */
+  protocol?: ProtocolType
+  /** Opening balance in sats, so aggregation/routing demos have something to show. */
+  balanceSat?: number
+}
 
 export class MemoAdapter implements IProtocolAdapter {
-  readonly protocolName: ProtocolType = 'BTC'
-  readonly supportedLayers: Layer[] = ['BTC_L1']
+  readonly protocolName: ProtocolType
+  readonly supportedLayers: Layer[]
   readonly version = '0.0.0-example'
-  readonly capabilities = PROTOCOL_OPERATIONS.BTC
+  readonly capabilities
 
   private connected = false
-  private balanceSat = 0
+  private balanceSat
+
+  /**
+   * Layers and capabilities are read from the manifest rather than restated here —
+   * the same rule real adapters follow, and what lets one stub stand in for any
+   * protocol the router knows about.
+   */
+  constructor(options: MemoAdapterOptions = {}) {
+    this.protocolName = options.protocol ?? 'BTC'
+    this.supportedLayers = [...PROTOCOL_CAPABILITIES[this.protocolName].layers]
+    this.capabilities = PROTOCOL_OPERATIONS[this.protocolName]
+    this.balanceSat = options.balanceSat ?? 0
+  }
 
   // --- Connection ---------------------------------------------------------
   async connect(_config: ProtocolConfig): Promise<void> {
@@ -133,8 +153,8 @@ export class MemoAdapter implements IProtocolAdapter {
       name: 'Bitcoin',
       ticker: 'BTC',
       precision: 8,
-      protocol: 'BTC',
-      layer: 'BTC_L1',
+      protocol: this.protocolName,
+      layer: this.supportedLayers[0],
       balance: {
         total: this.balanceSat,
         available: this.balanceSat,

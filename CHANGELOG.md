@@ -24,6 +24,14 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   (`arkade:intents:swap:*` keys), so corridor recovery records survive
   service-worker eviction and app restarts on every host.
 - `@kaleidorg/swap-sdk` peer range widened to `^0.1.1 || ^0.3.0`.
+- **`examples/tour` — a runnable five-minute tour** (`npm run example:tour`).
+  Drives the real router, capability manifest, unified receive and lite
+  aggregation against in-memory stub adapters: no node, no credentials, no
+  network, no protocol SDKs. `MemoAdapter` now takes an optional
+  `{ protocol, balanceSat }` so one stub can stand in for any protocol in the
+  manifest (default stays `BTC`, so existing use is unchanged).
+- **`AGENTS.md`** — the architectural invariants and the add-a-protocol recipe,
+  written for coding agents working in this repo.
 
 ### Changed
 - **`IProtocolAdapter` decomposed into capability-group interfaces.** The flat
