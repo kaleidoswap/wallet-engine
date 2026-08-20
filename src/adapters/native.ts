@@ -16,5 +16,10 @@ export {
   arkadeSwapsClientManager,
   type ArkadeSwapsInitOptions,
 } from '../lib/arkade-swaps-client-manager'
+export {
+  arkadeIntentsClientManager,
+  type ArkadeIntentsInitOptions,
+  type ArkadeIntentsVenueLike,
+} from '../lib/arkade-intents-client-manager'
 export { kaleidoClientManager, type KaleidoClientConfig } from '../lib/kaleido-client-manager'
 export { flashnetClientManager } from '../lib/flashnet-client-manager'

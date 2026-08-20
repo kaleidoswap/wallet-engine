@@ -15,3 +15,8 @@ export {
   arkadeSwapsClientManager,
   type ArkadeSwapsInitOptions,
 } from '../lib/arkade-swaps-client-manager'
+export {
+  arkadeIntentsClientManager,
+  type ArkadeIntentsInitOptions,
+  type ArkadeIntentsVenueLike,
+} from '../lib/arkade-intents-client-manager'
