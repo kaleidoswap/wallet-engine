@@ -28,6 +28,13 @@ jobs:
       - name: Test
         run: npm test
 
+      # The tour is the front door for anyone evaluating the engine, and it
+      # drives the real router and manifest rather than a transcript. Running it
+      # here means a change to those internals cannot quietly break the first
+      # thing a new developer executes. No node, credentials or network needed.
+      - name: Example tour runs
+        run: npm run example:tour
+
       # Audit only the engine's own runtime deps (@scure/*). The heavy protocol
       # SDKs are OPTIONAL and host-owned, so their transitive advisories are out
       # of scope here and must not break this repo's CI.
