@@ -7,6 +7,41 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+_Nothing yet._
+
+## [1.0.0-beta.64] - 2026-08-20
+
+### Added
+- **Transport-neutral Lightning payment contract** (`./lightning`) with two
+  optional adapters: `./lightning/nwc` over Nostr Wallet Connect and
+  `./lightning/rln` talking to an rgb-lightning-node directly. The contract
+  describes paying and looking up invoices without naming a transport, so a
+  host can swap providers without touching call sites. Both adapters are
+  separate entry points, so neither SDK is pulled into the root barrel.
+- **`examples/tour` — a runnable five-minute tour** (`npm run example:tour`).
+  Drives the real router, capability manifest, unified receive and lite
+  aggregation against in-memory stub adapters: no node, no credentials, no
+  network, no protocol SDKs. `MemoAdapter` now takes an optional
+  `{ protocol, balanceSat }` so one stub can stand in for any protocol in the
+  manifest (default stays `BTC`, so existing use is unchanged).
+- **`AGENTS.md`** — the architectural invariants and the add-a-protocol recipe,
+  written for coding agents working in this repo.
+
+### Fixed
+- **BOLT11 invoices declaring an unsupported mandatory feature are rejected.**
+  The `9` (features) field was parsed but its bits were never checked. BOLT 9
+  makes even bits mandatory — a payer that does not understand one must not
+  pay — so even bits outside a named allowlist (`var_onion_optin`,
+  `payment_secret`, `basic_mpp`) now fail validation instead of being handed to
+  a provider that would fail opaquely mid-payment. Odd bits stay ignorable, and
+  a duplicated `9` field is rejected like every other duplicated field.
+- **NWC lookups require an explicit transaction type.** `lookupInvoice` and
+  `lookupPayment` both call NIP-47 `lookup_invoice` and were distinguished only
+  by a `type` check that tolerated the field's absence, so one untyped response
+  satisfied both — an incoming transaction could be reported as a settled send.
+
+## [1.0.0-beta.63] - 2026-08-13
+
 ### Added
 - **Arkade Intents client manager** (`arkadeIntentsClientManager`, exported
   from `adapters/arkade` and `adapters/native`): owns an `ArkadeIntentsVenue`
@@ -24,14 +59,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   (`arkade:intents:swap:*` keys), so corridor recovery records survive
   service-worker eviction and app restarts on every host.
 - `@kaleidorg/swap-sdk` peer range widened to `^0.1.1 || ^0.3.0`.
-- **`examples/tour` — a runnable five-minute tour** (`npm run example:tour`).
-  Drives the real router, capability manifest, unified receive and lite
-  aggregation against in-memory stub adapters: no node, no credentials, no
-  network, no protocol SDKs. `MemoAdapter` now takes an optional
-  `{ protocol, balanceSat }` so one stub can stand in for any protocol in the
-  manifest (default stays `BTC`, so existing use is unchanged).
-- **`AGENTS.md`** — the architectural invariants and the add-a-protocol recipe,
-  written for coding agents working in this repo.
+- **BTC ↔ L-BTC chain swaps** over `@kaleidorg/swap-sdk`.
+
+### Changed
+- `kaleido-sdk` bumped to 0.1.18 (RLN 0.9.0 unlock change).
+
+## [1.0.0-beta.57] - 2026-07-15
 
 ### Changed
 - **`IProtocolAdapter` decomposed into capability-group interfaces.** The flat
