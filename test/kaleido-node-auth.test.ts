@@ -22,7 +22,8 @@ type SdkConfig = Parameters<typeof KaleidoClient.create>[0]
 /**
  * Compile-time assertion: the resolved SDK accepts the node-scoped credential.
  * `tsc` fails here on kaleido-sdk < 0.1.16 — which is exactly the resolution
- * the `^0.1.16` peer range exists to forbid.
+ * the SDK floor exists to forbid. The current 0.1.17 floor also supplies the
+ * opt-in `/nwc` and `/rln` exports.
  */
 const sdkSupportsNodeAuth: SdkConfig = { nodeApiKey: 'compile-time-probe' }
 
