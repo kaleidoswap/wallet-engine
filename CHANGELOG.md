@@ -9,6 +9,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 _Nothing yet._
 
+## [1.0.0-beta.65] - 2026-08-22
+
+### Added
+- **`LiquidAdapterConfig.secretsStore`** — forwards a host-supplied durable
+  store for confidential Liquid outputs' unblinding data through to
+  `wdk-wallet-liquid` (requires `@kaleidorg/wdk-wallet-liquid` 1.0.0-beta.8+).
+  A confidential output's asset, amount and blinding factors are not
+  determined by the descriptor, so restoring the mnemonic alone doesn't
+  reconstruct them — a host that can receive confidential outputs should
+  record what it unblinds. `LiquidSecretsStore` and
+  `LiquidOutputSecretsRecord` are exported from `./adapters/wdk`.
+
 ## [1.0.0-beta.64] - 2026-08-20
 
 ### Added

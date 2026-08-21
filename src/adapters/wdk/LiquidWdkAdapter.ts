@@ -63,6 +63,44 @@ export interface LiquidSyncWarning {
   details?: { reason?: 'waterfalls_failed' }
 }
 
+/** The unblinding data of a single confidential output, as observed. */
+export interface LiquidOutputSecretsRecord {
+  /** Funding transaction id, display (big-endian) order. */
+  txid: string
+  /** Output index within `txid`. */
+  vout: number
+  /** Unblinded asset id hex (64 chars). */
+  assetId: string
+  /** Unblinded amount in the asset's smallest unit, as a decimal string. */
+  value: string
+  /** Asset blinding factor hex (64 chars). */
+  assetBlindingFactor: string
+  /** Value blinding factor hex (64 chars). */
+  valueBlindingFactor: string
+}
+
+/**
+ * Host-supplied durable store for confidential outputs' unblinding data.
+ *
+ * A confidential output's asset, amount and blinding factors are not determined by the
+ * descriptor, so restoring the mnemonic re-derives every address without reconstructing
+ * those four values — they are read back out of the funding transaction, which is not the
+ * stable source one might assume. A wallet keeping no record of what it unblinded has no
+ * second source if that read ever stops working.
+ *
+ * The host owns durability, namespacing (per wallet and per network) and retention; a
+ * record stays relevant until its outpoint is spent. Treat the contents as key material
+ * rather than display data — the blinding factors are what make an output's amount and
+ * asset legible.
+ *
+ * Local mirror of the wdk-wallet-liquid contract, kept here so lwk/WDK types never cross
+ * the adapter boundary (same reason as `LiquidNetwork` below).
+ */
+export interface LiquidSecretsStore {
+  /** Persist a batch of newly observed records. Must be idempotent per outpoint. */
+  put(records: LiquidOutputSecretsRecord[]): void | Promise<void>
+}
+
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'
   /** BIP-39 mnemonic for this wallet. */
@@ -86,6 +124,12 @@ export interface LiquidAdapterConfig extends BaseProtocolConfig {
   waterfallsRecipient?: string
   /** Receives non-fatal sync warnings, including successful Waterfalls fallback. */
   onWarning?: (warning: LiquidSyncWarning) => void | Promise<void>
+  /**
+   * Durable sink for the unblinding data of confidential outputs this wallet receives.
+   * Strongly recommended for any host that can receive confidential outputs — a seed-only
+   * restore does not reconstruct it. See {@link LiquidSecretsStore}.
+   */
+  secretsStore?: LiquidSecretsStore
 }
 
 /** Local mirror of the lwk network union (kept here so WDK/lwk types never cross the contract). */
@@ -195,6 +239,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       allowDefaultEsploraFallback: cfg.allowDefaultEsploraFallback,
       waterfallsRecipient: cfg.waterfallsRecipient,
       onWarning: cfg.onWarning,
+      secretsStore: cfg.secretsStore,
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true

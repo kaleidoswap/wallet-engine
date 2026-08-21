@@ -3,7 +3,11 @@ import {
   LiquidWdkAdapter,
   type LiquidSyncWarning,
 } from '../src/adapters/wdk/LiquidWdkAdapter'
-import type { LiquidSyncWarning as PublicLiquidSyncWarning } from '../src/adapters/wdk'
+import type {
+  LiquidSyncWarning as PublicLiquidSyncWarning,
+  LiquidSecretsStore as PublicLiquidSecretsStore,
+  LiquidOutputSecretsRecord as PublicLiquidOutputSecretsRecord,
+} from '../src/adapters/wdk'
 import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { LIQUID_USDT_ASSET_ID } from '../src/constants'
 
@@ -73,6 +77,64 @@ describe('LiquidWdkAdapter', () => {
       details: { reason: 'waterfalls_failed' },
     })
     expect(receivedWarning?.code).toBe('LIQUID_WATERFALLS_FALLBACK')
+  })
+
+  it('forwards a configured secretsStore to the wallet manager', async () => {
+    let managerConfig: Record<string, unknown> | undefined
+    class FakeLiquidWalletManager {
+      constructor(_mnemonic: string, config: Record<string, unknown>) {
+        managerConfig = config
+      }
+      async getAccount() {
+        return {}
+      }
+    }
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => ({ default: FakeLiquidWalletManager }))
+
+    const put = vi.fn()
+    const secretsStore: PublicLiquidSecretsStore = { put }
+    const adapter = new LiquidWdkAdapter()
+    await adapter.connect({
+      protocol: 'LIQUID',
+      mnemonic: 'test mnemonic',
+      network: 'mainnet',
+      secretsStore,
+    })
+
+    // Identity, not shape: the host's store must reach lwk unwrapped, or the
+    // records go nowhere and the loss is silent.
+    expect(managerConfig?.secretsStore).toBe(secretsStore)
+
+    const records: PublicLiquidOutputSecretsRecord[] = [
+      {
+        txid: 'ab'.repeat(32),
+        vout: 0,
+        assetId: 'cd'.repeat(32),
+        value: '1000',
+        assetBlindingFactor: 'ef'.repeat(32),
+        valueBlindingFactor: '12'.repeat(32),
+      },
+    ]
+    await (managerConfig?.secretsStore as PublicLiquidSecretsStore).put(records)
+    expect(put).toHaveBeenCalledWith(records)
+  })
+
+  it('omits secretsStore when the host configures none', async () => {
+    let managerConfig: Record<string, unknown> | undefined
+    class FakeLiquidWalletManager {
+      constructor(_mnemonic: string, config: Record<string, unknown>) {
+        managerConfig = config
+      }
+      async getAccount() {
+        return {}
+      }
+    }
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => ({ default: FakeLiquidWalletManager }))
+
+    const adapter = new LiquidWdkAdapter()
+    await adapter.connect({ protocol: 'LIQUID', mnemonic: 'test mnemonic', network: 'mainnet' })
+
+    expect(managerConfig?.secretsStore).toBeUndefined()
   })
 
   it('lists L-BTC (policy asset) first, then other Liquid assets with known metadata', async () => {

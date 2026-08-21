@@ -11,6 +11,8 @@ export {
   LiquidWdkAdapter,
   type LiquidAdapterConfig,
   type LiquidSyncWarning,
+  type LiquidSecretsStore,
+  type LiquidOutputSecretsRecord,
   LIQUID_USDT_ASSET_ID,
 } from './LiquidWdkAdapter'
 export { RlnWdkAdapter, type RlnAdapterConfig } from './RlnWdkAdapter'
