@@ -4,6 +4,9 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+overrides:
+  postcss: 8.5.25
+
 importers:
 
   .:
@@ -52,8 +55,8 @@ importers:
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
       '@kaleidorg/wdk-wallet-liquid':
-        specifier: ^1.0.0-beta.6
-        version: 1.0.0-beta.7(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
+        specifier: 1.0.0-beta.8
+        version: 1.0.0-beta.8(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))
       '@kaleidorg/wdk-wallet-rln':
         specifier: ^1.0.0-beta.5
         version: 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))(typescript@5.9.3)
@@ -449,8 +452,8 @@ packages:
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
 
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.7':
-    resolution: {integrity: sha512-R5HFUUkpsGVcFknQSrqEDgetGPTBHT39eR6WX9/DtB0uTCWjTLV6My+Fs/5MGYjOC0XjZf8RZpxEKf4mnEgKHQ==}
+  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.8':
+    resolution: {integrity: sha512-HR0QRUFC9+ZwP3sibUR/1H/hbHmOKPjCJ/4JiDuKEcfxoxLkTmslIOhQwpLNSJbR8W9vOvRVywdHBQvQEKGsnw==}
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
       lwk-rn: ^0.9.0-2.0.3
@@ -2639,7 +2642,7 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.7(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))':
+  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.8(@tetherto/wdk-wallet@1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))))':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.13(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1))(bare-tcp@2.5.1(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)(bare-pipe@4.2.2(bare-abort-controller@1.1.2)(bare-buffer@3.6.1)))
       lwk_node: 0.18.0
