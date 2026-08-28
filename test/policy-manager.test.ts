@@ -4,8 +4,8 @@ import { PolicyError, type SigningPolicy } from '../src/policy'
 import { MemoAdapter } from '../examples/minimal-adapter/MemoAdapter'
 
 /**
- * ProtocolManager gates fund-moving ops through the policy when one is
- * configured, and is fully backward-compatible when it is not.
+ * ProtocolManager gates fund-moving ops through the policy when one is configured,
+ * and is fully backward-compatible when it is not.
  */
 async function managerWith(policy?: SigningPolicy) {
   const m = new ProtocolManager({ defaultProtocol: 'BTC', policy })

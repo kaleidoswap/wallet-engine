@@ -1,19 +1,17 @@
 /**
  * KaleidoswapSwap
  * ---------------
- * Wraps the WDK Kaleidoswap swap protocol module (@kaleidorg/wdk-protocol-swap-kaleidoswap)
- * behind domain `Quote`/`SwapResult` types. This is the cross-asset swap path (RFQ via the
- * maker, settled as an atomic HTLC swap over Lightning) — distinct from the lower-level
- * cross-L2 atomic (VHTLC/Boltz) layer in types/cross-l2.
+ * Wraps the WDK Kaleidoswap swap module behind domain `Quote`/`SwapResult` types:
+ * the cross-asset path (RFQ via the maker, settled as an atomic HTLC swap over
+ * Lightning), distinct from the cross-L2 VHTLC/Boltz layer in types/cross-l2.
  *
- * The swap module is bound to an account (the taker's RLN account, which whitelists the
- * HTLC) + a baseUrl. No WDK/kaleido-sdk types cross this boundary.
+ * The module is bound to the taker's RLN account (which whitelists the HTLC) plus a
+ * baseUrl. No WDK/kaleido-sdk types cross this boundary.
  *
- * UNITS: every amount on this boundary is in RAW base units (satoshis for BTC, the
- * asset's smallest unit for RGB assets) — the module rejects fractional inputs, so a
- * display-unit caller fails loudly instead of creating an order scaled by 10^precision.
- * Execution passes the approved quote's rfqId and exact raw amounts to the maker, so a
- * fill can never diverge from what the user approved on either leg.
+ * UNITS: RAW base units throughout. The module rejects fractional inputs, so a
+ * display-unit caller fails loudly instead of creating an order scaled by
+ * 10^precision. Execution passes the approved quote's rfqId and exact raw amounts,
+ * so a fill can never diverge from what the user approved.
  */
 
 import { Quote, QuoteRequest, SwapResult, ProtocolError } from '../types/base'
@@ -21,12 +19,9 @@ import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 
 /**
  * Coerce an SDK money field to a number, failing CLOSED on values that would
- * silently corrupt: `NaN`/`Infinity` (a renamed/missing field), a negative
- * value (a hostile/buggy maker returning a negative fee/amount/price that would
- * poison downstream net-amount math), or magnitudes past `Number.MAX_SAFE_INTEGER`
- * where JS would lose integer precision. Every field this coerces — amounts,
- * fees, price, expiry timestamp — is non-negative by definition. Money must
- * never flow through as a quietly-wrong number.
+ * silently corrupt: NaN/Infinity (a renamed field), negatives (a hostile maker
+ * poisoning net-amount math), or magnitudes past `Number.MAX_SAFE_INTEGER`. Every
+ * field coerced is non-negative by definition.
  */
 function toAmount(value: unknown, field: string): number {
   const n = Number(value)
@@ -54,9 +49,8 @@ export interface SwapQuoteRequest extends QuoteRequest {
 }
 
 /**
- * Thin response shapes for the swap module's calls. These are NOT the
- * module's own types (it stays `any` at construction) — they exist so a
- * renamed/missing money field is a compile error here, not a silent `NaN`.
+ * Thin response shapes for the swap module's calls — NOT the module's own types.
+ * They exist so a renamed/missing money field is a compile error, not a silent NaN.
  */
 interface RawQuote {
   rfqId: string
@@ -86,15 +80,14 @@ interface RawAtomicSwap {
 export class KaleidoswapSwap {
   private proto: any = null
   /**
-   * In-memory fallback for per-swap status access tokens (paymentHash → token).
-   * Hosts should persist `SwapResult.accessToken` themselves — this map does
-   * not survive process/service-worker restarts.
+   * In-memory fallback for per-swap status tokens (paymentHash → token). Hosts
+   * should persist `SwapResult.accessToken`; this map does not survive restarts.
    */
   private accessTokens = new Map<string, string>()
 
   /**
    * @param account a connected WDK RLN account (whitelists the swap HTLC on the
-   *        taker's node). Passed straight through to the swap module; held as `any`.
+   *        taker's node). Passed through to the swap module; held as `any`.
    */
   constructor(private account: any, private config: KaleidoswapSwapConfig) {}
 
@@ -133,10 +126,9 @@ export class KaleidoswapSwap {
   }
 
   /**
-   * Execute an approved quote as an atomic swap. The maker binds execution to
-   * the quote's rfqId and the exact raw amounts passed here — there is no
-   * server-side re-quote, so both legs settle at what the user approved or
-   * the swap fails/expires with no funds moved.
+   * Execute an approved quote as an atomic swap. The maker binds execution to the
+   * rfqId and exact raw amounts passed here — no server-side re-quote, so both legs
+   * settle at what the user approved or the swap fails with no funds moved.
    */
   async executeSwap(quote: Quote): Promise<SwapResult> {
     if (!quote?.id) {
@@ -197,9 +189,8 @@ export class KaleidoswapSwap {
 }
 
 /**
- * Atomic swap statuses: Waiting → Pending → Succeeded | Expired | Failed.
- * Anything unrecognized maps to 'pending' (fail-safe: never report success
- * for a status we don't know).
+ * Atomic swap statuses: Waiting → Pending → Succeeded | Expired | Failed. Anything
+ * unrecognized maps to 'pending' — never report success for an unknown status.
  */
 function mapAtomicStatus(s?: string): SwapResult['status'] {
   switch (s) {

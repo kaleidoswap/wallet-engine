@@ -1,33 +1,20 @@
 /**
  * Arkade Intents Client Manager
  *
- * Singleton that owns an `ArkadeIntentsVenue` from `@kaleidorg/swap-sdk/arkade`
- * — the Arkade Intents RFQ routes (arkade:BTC ↔ lightning:BTC, plus the
- * intra-Arkade asset-swap covenant). Mirrors `arkadeSwapsClientManager`'s
- * lifecycle exactly: non-blocking init, generation-counted dispose.
+ * Singleton owning an `ArkadeIntentsVenue` from `@kaleidorg/swap-sdk/arkade` — the
+ * Arkade Intents RFQ routes plus the intra-Arkade asset-swap covenant. Mirrors
+ * `arkadeSwapsClientManager`: non-blocking init, generation-counted dispose.
  *
- * Differences from the Boltz manager, all deliberate:
- *  - The venue module is resolved through the WDK module loader under the
- *    subpath key `@kaleidorg/swap-sdk/arkade`, with a non-literal dynamic
- *    import fallback: the subpath ships in swap-sdk >= 0.3.0 while the peer
- *    range still admits older versions, so a literal specifier would break
- *    `tsc` against them. Hosts (extension, RN) should register a loader.
- *  - The RFQ `transport` is host-supplied and opaque. Building one requires
- *    the solver's card (relays + discovery pubkey) and a Nostr stack, which
- *    are product decisions the engine doesn't own. The manager closes it
- *    best-effort on dispose.
- *  - The venue owns no timers: the host drives `getVenue().reconcile()` from
- *    its own scheduler (MV3 alarms, RN background task).
+ * Deliberate differences from the Boltz manager:
+ *  - The venue resolves through the WDK module loader with a non-literal dynamic
+ *    import fallback: the subpath ships in swap-sdk >= 0.3.0 while the peer range
+ *    still admits older versions, so a literal specifier would break `tsc`.
+ *  - The RFQ `transport` is host-supplied and opaque — building one needs the
+ *    solver's card and a Nostr stack, product decisions the engine doesn't own.
+ *  - The venue owns no timers: the host drives `getVenue().reconcile()`.
  *
- * Lifecycle:
- *   - host initializes after the Arkade adapter connects, passing
- *     `arkadeClientManager.getWallet()` and its transport
- *   - Arkade adapter disconnect → `dispose()` (wired defensively, before the
- *     wallet is torn down)
- *
- * Version note: the venue requires the `@arkade-os/sdk` >= 0.4.60 line (the
- * `VHTLC.ScriptV2` era). The engine only passes the wallet through — the pin
- * is the host's to own.
+ * The venue requires `@arkade-os/sdk` >= 0.4.60 (the `VHTLC.ScriptV2` era); the
+ * engine only passes the wallet through, so the pin is the host's to own.
  */
 
 import type { IWallet } from "@arkade-os/sdk";
@@ -39,9 +26,8 @@ import { log } from "./log";
 const VENUE_MODULE = "@kaleidorg/swap-sdk/arkade";
 
 /**
- * Structural view of the venue the engine relies on. Canonical types
- * (parameters, records, reports) live in `@kaleidorg/swap-sdk/arkade`;
- * hosts wanting full typing import them from there and cast `getVenue()`.
+ * Structural view of the venue the engine relies on. Canonical types live in
+ * `@kaleidorg/swap-sdk/arkade`; hosts wanting full typing import and cast.
  */
 export interface ArkadeIntentsVenueLike {
   prepareLightningSend(params: Record<string, unknown>): Promise<Record<string, unknown>>;
@@ -66,15 +52,15 @@ export interface ArkadeIntentsInitOptions {
   /** The Arkade server the venue derives contracts against. */
   arkServerUrl: string;
   /**
-   * RFQ transport from the pinned solver's card (`nostrRfqTransport`, HTTP,
-   * …). Opaque to the engine; closed best-effort on dispose.
+   * RFQ transport from the pinned solver's card. Opaque to the engine; closed
+   * best-effort on dispose.
    */
   transport: unknown;
   /** Override the platform-storage-backed record store. */
   store?: unknown;
   /**
-   * Ecosystem `AssetSwapRepository` enabling the intra-Arkade asset-swap
-   * route (e.g. `IndexedDbAssetSwapRepository` from `@arkade-os/swap`).
+   * Ecosystem `AssetSwapRepository` enabling the intra-Arkade asset-swap route
+   * (e.g. `IndexedDbAssetSwapRepository` from `@arkade-os/swap`).
    */
   assetSwapRepository?: unknown;
 }
@@ -90,9 +76,9 @@ class ArkadeIntentsClientManager {
   private _generation = 0;
 
   /**
-   * Initialize the venue with a connected Arkade wallet. Concurrent calls of
-   * the same generation share the in-flight promise; a dispose() between
-   * calls bumps the generation so a stale init is discarded, not adopted.
+   * Initialize the venue with a connected Arkade wallet. Concurrent calls of the
+   * same generation share the in-flight promise; a dispose() bumps the generation so
+   * a stale init is discarded.
    */
   async initialize(wallet: IWallet, options: ArkadeIntentsInitOptions): Promise<void> {
     if (this.venue) return;

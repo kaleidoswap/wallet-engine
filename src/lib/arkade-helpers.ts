@@ -1,17 +1,12 @@
 /**
- * Pure helpers for the Arkade adapter.
- *
- * Every function here is side-effect free, has no `this` dependencies, and is
- * covered by test/arkade-helpers.test.ts. Keep helpers pure (no class state,
- * no SDK calls). Anything that needs the @arkade-os/sdk client or the adapter's
- * config belongs in ArkadeAdapter.ts.
+ * Pure helpers for the Arkade adapter — side-effect free, no `this`, no SDK calls.
+ * Anything needing the @arkade-os/sdk client or adapter config belongs in
+ * ArkadeAdapter.ts.
  */
 
 // ── Type coercion ──────────────────────────────────────────────────────────
-// The Arkade SDK is loose about numeric types in some response shapes
-// (bigint, number, numeric string). These helpers normalize without
-// throwing — the alternative is sprinkling defensive `if (typeof …)` checks
-// across the adapter.
+// The Arkade SDK is loose about numeric types (bigint, number, numeric string);
+// these normalize without throwing.
 
 /** Coerce a value to a finite number. Returns 0 for anything unparseable. */
 export function toNumber(value: unknown): number {
@@ -25,10 +20,9 @@ export function toNumber(value: unknown): number {
 }
 
 /**
- * Coerce a value to a strictly-positive bigint. Returns 0n for
- * non-positive / unparseable input. Used where the SDK demands a
- * bigint quantity (e.g. asset send amounts) and we don't want to
- * silently send zero on a malformed numeric input.
+ * Coerce to a strictly-positive bigint, 0n for non-positive/unparseable input.
+ * Used where the SDK demands a bigint quantity and silently sending zero on a
+ * malformed input would be wrong.
  */
 export function toPositiveIntegerBigInt(value: unknown): bigint {
   if (typeof value === "bigint") return value > 0n ? value : 0n;
@@ -50,9 +44,8 @@ export function toStringValue(value: unknown): string {
 }
 
 // ── Arkade asset metadata accessors ───────────────────────────────────────
-// `details` shape comes from `wallet.assetManager.getAssetDetails(assetId)`.
-// We defensively unwrap so the adapter doesn't have to spread type checks
-// across every consumer.
+// `details` comes from `wallet.assetManager.getAssetDetails(assetId)`; unwrapped
+// defensively so consumers don't each spread type checks.
 
 /** Pull the metadata sub-object out of an asset-details response. */
 export function getAssetMetadata(
@@ -65,10 +58,9 @@ export function getAssetMetadata(
 }
 
 /**
- * Asset display precision (number of decimal places). Reads `metadata.decimals`,
- * accepting both numeric and stringy values. Falls back to 0 (integer asset)
- * when absent / negative / non-finite — Arkade assets without an explicit
- * decimals field are integer-quantity tokens by convention.
+ * Asset display precision, accepting numeric and stringy `metadata.decimals`.
+ * Falls back to 0 — Arkade assets without the field are integer-quantity by
+ * convention.
  */
 export function getAssetPrecision(metadata: Record<string, unknown> | undefined): number {
   const decimals = metadata?.decimals;
@@ -85,10 +77,8 @@ export function getAssetPrecision(metadata: Record<string, unknown> | undefined)
 }
 
 /**
- * Asset ticker for display. Uses `metadata.ticker` when present (uppercased,
- * trimmed); falls back to the first 6 chars of the asset id, uppercased —
- * this is the "best effort label" path for newly-issued or partially-
- * documented assets.
+ * Asset ticker for display: `metadata.ticker` uppercased/trimmed, else the first
+ * 6 chars of the asset id — best-effort label for newly-issued assets.
  */
 export function getAssetTicker(
   assetId: string,
@@ -102,9 +92,8 @@ export function getAssetTicker(
 }
 
 /**
- * Asset display name. Uses `metadata.name` when present, otherwise builds a
- * synthetic `"Arkade Asset <TICKER>"` label so the UI never has to render
- * an empty string.
+ * Asset display name, falling back to a synthetic `"Arkade Asset <TICKER>"` so
+ * the UI never renders an empty string.
  */
 export function getAssetName(
   assetId: string,
@@ -127,13 +116,9 @@ export { formatAmount as formatUnits, formatSats } from "./amount";
 // ── VTXO selection (expiry-first) ──────────────────────────────────────────
 
 /**
- * Sort VTXOs by batchExpiry ascending (expiry-first coin selection).
- * VTXOs expiring soonest are consumed first, maximizing the lifetime
- * of remaining VTXOs and reducing the need for auto-renewal rounds.
- *
- * Stable secondary sort on `value` (descending) so when two VTXOs share
- * the same batch expiry we prefer the larger one — fewer inputs in the
- * resulting transaction means a smaller fee.
+ * Sort VTXOs by batchExpiry ascending (expiry-first coin selection), maximizing
+ * the lifetime of what remains. Secondary sort on `value` descending, so equal
+ * expiries prefer the larger VTXO — fewer inputs, smaller fee.
  */
 export function sortVtxosByExpiry<
   T extends { virtualStatus?: { batchExpiry?: number }; value?: number | bigint },
@@ -149,11 +134,9 @@ export function sortVtxosByExpiry<
 }
 
 /**
- * Pure expiry-first selector. Picks the minimum set of VTXOs (sorted by
- * expiry, value-desc tiebreaker) whose summed value covers `targetSats`.
- * Returns `null` when the available VTXOs can't cover the target — the
- * caller should let the SDK error so the user gets a real "insufficient
- * funds" message rather than a half-formed selection.
+ * Pure expiry-first selector: the minimum set of VTXOs covering `targetSats`.
+ * Returns `null` when they can't cover it, so the caller lets the SDK raise a
+ * real "insufficient funds" rather than acting on a half-formed selection.
  */
 export function selectVtxosByExpiry<
   T extends { virtualStatus?: { batchExpiry?: number }; value?: number | bigint },
@@ -184,18 +167,11 @@ export interface NormalizedVtxo {
 }
 
 /**
- * Coerce the SDK's loose `getVtxos()` response shape into the strict
- * `NormalizedVtxo[]` the adapter consumes elsewhere.
- *
- *  - Accepts both a bare array and `{ vtxos: [...] }` wrapper (the SDK
- *    has shipped both shapes across versions).
- *  - Pulls fields from the outer entry and, when missing, falls back to
- *    `entry.outpoint.{txid,vout}` — older shapes nested those.
- *  - Resolves `state` from `virtualStatus.state`, then `isSwept` /
- *    `isPreconfirmed` / `isSpent` flags, defaulting to "settled".
- *  - Drops zero-value entries, spent entries, and entries with no txid —
- *    callers can rely on the returned array containing only spendable-
- *    looking VTXOs.
+ * Coerce the SDK's loose `getVtxos()` response into strict `NormalizedVtxo[]`:
+ * accepts a bare array or `{ vtxos: [...] }` (both have shipped), falls back to
+ * `entry.outpoint.{txid,vout}` for older shapes, resolves `state` from
+ * `virtualStatus.state` then the isSwept/isPreconfirmed/isSpent flags, and drops
+ * zero-value, spent and txid-less entries.
  */
 export function normalizeVtxos(raw: unknown): NormalizedVtxo[] {
   const entries = Array.isArray(raw)

@@ -45,10 +45,9 @@ export interface Bolt11ValidationPolicy {
 }
 
 /**
- * Compatibility summary used by existing adapters.
- *
- * Exact string fields are authoritative. Legacy number fields are populated only
- * when conversion is safe; `amountSat` remains a rounded display-only value.
+ * Compatibility summary used by existing adapters. Exact string fields are
+ * authoritative; legacy number fields are populated only when conversion is safe,
+ * and `amountSat` stays a rounded display-only value.
  */
 export interface Bolt11Summary {
   amountMsatString?: string
@@ -176,17 +175,15 @@ function parseHrp(prefix: string): {
 /**
  * Even feature bits this payer is prepared to honour.
  *
- * BOLT 9 splits the invoice feature vector by parity: an odd bit is optional
- * and may be ignored, an even bit is mandatory and a payer that does not
- * understand it MUST NOT pay. The three below are the ubiquitous modern
- * invoice requirements — and `payment_secret` (14) is already enforced
+ * BOLT 9 splits the feature vector by parity: an odd bit is optional, an even bit
+ * is mandatory and a payer that does not understand it MUST NOT pay. These are the
+ * ubiquitous modern requirements; `payment_secret` (14) is already enforced
  * structurally, since a missing `s` field is rejected outright.
  *
- * Everything else is refused rather than delegated. The adapters here do not
- * route; they hand the invoice to a provider (NWC, RLN). Paying an invoice
- * whose mandatory requirement we cannot name means discovering the mismatch
- * as an opaque provider failure after the money is in flight, so the
- * conservative reading is the safe one. Extend this set deliberately, per bit.
+ * Everything else is refused rather than delegated: these adapters do not route,
+ * they hand the invoice to a provider, so paying an invoice whose mandatory
+ * requirement we cannot name means discovering the mismatch as an opaque provider
+ * failure after the money is in flight. Extend deliberately, per bit.
  */
 const SUPPORTED_EVEN_FEATURE_BITS: ReadonlySet<number> = new Set([
   8, // var_onion_optin
@@ -195,10 +192,9 @@ const SUPPORTED_EVEN_FEATURE_BITS: ReadonlySet<number> = new Set([
 ])
 
 /**
- * Reject an invoice that mandates a feature this payer cannot claim to support.
- *
- * The field is a big-endian bitvector packed into 5-bit words, so bit 0 is the
- * low bit of the final word and bit numbering runs backwards from the end.
+ * Reject an invoice mandating a feature this payer cannot claim to support. The
+ * field is a big-endian bitvector packed into 5-bit words, so bit 0 is the low bit
+ * of the final word and numbering runs backwards from the end.
  */
 function assertSupportedFeatures(words: readonly number[]): void {
   const totalBits = words.length * 5
@@ -421,8 +417,8 @@ export function isValidBolt11(invoice: string, policy?: Bolt11ValidationPolicy):
 }
 
 /**
- * Parse a BOLT11 HRP for compatibility with existing invoice display helpers.
- * Use `decodeBolt11Invoice`/`validateBolt11Invoice` before authorizing payment.
+ * Parse a BOLT11 HRP for compatibility with existing display helpers. Use
+ * `decodeBolt11Invoice`/`validateBolt11Invoice` before authorizing payment.
  */
 export function decodeBolt11(invoice: string): Bolt11Summary {
   const value = (invoice ?? '').trim().toLowerCase()

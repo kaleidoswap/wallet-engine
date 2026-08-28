@@ -1,12 +1,10 @@
 /**
  * Settlement polling for Spark Lightning sends.
  *
- * `payLightningInvoice` only DISPATCHES a payment to the SSP; settlement is
- * asynchronous and can still fail (no route, fee cap, refund path). Reporting
- * 'confirmed' on dispatch makes WebLN/NWC callers believe zaps succeeded when
- * they never settled, and denies them the preimage NIP-47 requires. Both the
- * native SparkAdapter and the SparkWdkAdapter poll here until the send
- * request reaches a terminal state.
+ * `payLightningInvoice` only DISPATCHES to the SSP; settlement is async and can
+ * still fail. Reporting 'confirmed' on dispatch makes WebLN/NWC callers believe
+ * zaps succeeded when they never settled, and denies them the preimage NIP-47
+ * requires — so both Spark adapters poll here until a terminal state.
  */
 
 import { log } from './log'
@@ -57,13 +55,12 @@ export function readLightningSettlement(req: Record<string, unknown>): Lightning
 }
 
 /**
- * Poll the SSP until the lightning send request reaches a terminal state.
- * Returns 'pending' (never throws) when the deadline passes or the lookup is
- * unavailable — the payment may still settle, so we must not report failure.
+ * Poll the SSP until the lightning send request reaches a terminal state. Returns
+ * 'pending' (never throws) when the deadline passes or the lookup is unavailable —
+ * the payment may still settle, so failure must not be reported.
  *
- * `wallet` is any object exposing the native SDK's
- * `getLightningSendRequest(id)`; `id` accepts both a bare uuid and the
- * WDK-style `SparkLightningSendRequest:uuid` entity id.
+ * `wallet` is any object exposing `getLightningSendRequest(id)`; `id` accepts a bare
+ * uuid or the WDK-style `SparkLightningSendRequest:uuid` entity id.
  */
 export async function waitForLightningSendSettlement(
   wallet: unknown,

@@ -2,18 +2,14 @@
  * MemoAdapter — a minimal, dependency-free reference adapter.
  * ----------------------------------------------------------
  * Implements the full `IProtocolAdapter` contract against an in-memory BTC-only
- * "wallet". It is NOT a real protocol — it exists to show the shape every adapter
- * must satisfy and to serve as a copy-paste starting point for a new protocol.
+ * "wallet". Not a real protocol — it shows the shape every adapter must satisfy and
+ * is a copy-paste starting point.
  *
- * To add a REAL protocol you would, in addition:
- *   1. Translate your SDK's responses into the domain types in `src/types`.
- *   2. Add one entry to the capability manifest (`src/capabilities`) describing
- *      your protocol's layers + quirks — never add a method to the contract for
- *      a single protocol.
- *   3. Register your adapter with a `ProtocolManager`.
- *
- * The router, unified receive, lite aggregation, and every screen then pick it
- * up with no further changes.
+ * A REAL protocol would additionally translate its SDK's responses into the domain
+ * types in `src/types`, add one entry to the capability manifest
+ * (`src/capabilities`) rather than a contract method, and register with a
+ * `ProtocolManager`. The router, unified receive and lite aggregation then pick it
+ * up unchanged.
  */
 
 import type {
@@ -56,8 +52,7 @@ export class MemoAdapter implements IProtocolAdapter {
 
   /**
    * Layers and capabilities are read from the manifest rather than restated here —
-   * the same rule real adapters follow, and what lets one stub stand in for any
-   * protocol the router knows about.
+   * the rule real adapters follow, and what lets one stub stand in for any protocol.
    */
   constructor(options: MemoAdapterOptions = {}) {
     this.protocolName = options.protocol ?? 'BTC'

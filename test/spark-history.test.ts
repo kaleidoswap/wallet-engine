@@ -12,9 +12,9 @@ import {
 } from './fixtures/spark'
 
 /**
- * Build a connected SparkWdkAdapter backed by a fake account that returns the
- * given transfers from getTransfers(). No WDK module is loaded — we inject the
- * internal state the adapter would otherwise set during connect().
+ * Build a connected SparkWdkAdapter backed by a fake account returning the given
+ * transfers from getTransfers(). No WDK module is loaded — the internal state
+ * connect() would set is injected directly.
  */
 function adapterWith(transfers: any[], identityPubKeyHex: string | null = ME): SparkWdkAdapter {
   const adapter = new SparkWdkAdapter()

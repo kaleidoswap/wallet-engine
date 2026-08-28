@@ -1,18 +1,14 @@
 /**
  * Operation-level capability manifest.
- * --------------------------------------
- * Distinct from the differences-as-data `PROTOCOL_CAPABILITIES` record in
- * `./index.ts` (which the router and lite/advanced UI read). This manifest is
- * the list of concrete *operations* each protocol natively supports, exposed on
- * every adapter via `IProtocolAdapter.capabilities` so the UI can gate actions
- * before an adapter connects — without per-call-site network checks.
+ * ------------------------------------
+ * Distinct from the differences-as-data `PROTOCOL_CAPABILITIES` in `./index.ts`:
+ * this is the list of concrete *operations* each protocol natively supports,
+ * exposed via `IProtocolAdapter.capabilities` so the UI can gate actions before an
+ * adapter connects.
  *
- * Naming: `ProtocolCapability` / `PROTOCOL_OPERATIONS` here vs
- * `ProtocolCapabilities` / `PROTOCOL_CAPABILITIES` in `./index.ts`. The two are
- * deliberately different shapes; see the wallet-engine integration spec (A5).
- *
- * Provider-routed features (swaps) live outside this manifest — a swap venue
- * may run over multiple protocols without each adapter implementing it.
+ * The two are deliberately different shapes, hence the near-identical names.
+ * Provider-routed features (swaps) live outside this manifest — a venue may run
+ * over multiple protocols without each adapter implementing it.
  */
 
 import type { ProtocolType } from '../types/base'
@@ -68,11 +64,10 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
     'asset-receive',
     'rgb-invoice',
   ],
-  // Experimental PSET/Simplicity operations (`liquid-pset-inspect`,
-  // `liquid-pset-sign`, `simplicity-compile`) are NOT listed here: their real
-  // availability depends on the resolved LWK binding at runtime, so the Liquid
-  // adapter derives them from `account.getSimplicityCapabilities()` and appends
-  // them to this base only when the binding actually supports them (fail closed).
+  // Experimental PSET/Simplicity operations are NOT listed here: their real
+  // availability depends on the resolved LWK binding, so the Liquid adapter derives
+  // them from `account.getSimplicityCapabilities()` and appends them only when the
+  // binding supports them (fail closed).
   LIQUID: [
     'onchain-send',
     'onchain-receive',

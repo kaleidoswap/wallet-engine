@@ -2,10 +2,9 @@ import { describe, it, expect } from 'vitest'
 import { classifyDestination } from '../src/router/destination'
 
 /**
- * The destination classifier is the cross-protocol routing brain: it decides
- * which adapter(s) can pay an arbitrary string. Because it directs funds, it
- * must fail CLOSED (UNKNOWN / no candidates) on anything it can't positively
- * identify — never guess a protocol from a loose prefix.
+ * The destination classifier decides which adapter(s) can pay an arbitrary string.
+ * Because it directs funds it must fail CLOSED (UNKNOWN / no candidates) on anything
+ * it can't positively identify — never guessing from a loose prefix.
  */
 describe('classifyDestination', () => {
   it('classifies a BOLT11 invoice as Lightning', () => {

@@ -1,15 +1,11 @@
 /**
  * Route preference + rail priority
  * --------------------------------
- * A unified payment URI (BIP21/BIP321) can carry several rails at once — a
- * BOLT12 offer, a BOLT11 invoice, Spark/Arkade addresses, an RGB invoice, a
- * Liquid address, an on-chain address. When more than one is payable, the
- * engine has to pick. This module is the *data* that drives that choice:
- *
- *  - a DEFAULT rail ordering (Lightning-first), used when the user expresses no
- *    preference, and
- *  - a `RoutePreference` the host can supply: an ordered list of layers, with
- *    optional per-asset overrides.
+ * A unified payment URI can carry several payable rails at once, so the engine has
+ * to pick. This module is the *data* driving that choice: a default rail ordering
+ * (Lightning-first) for when the user expresses no preference, and a
+ * `RoutePreference` the host can supply — an ordered list of layers with optional
+ * per-asset overrides.
  *
  * Pure + dependency-free; the router consumes it.
  */
@@ -21,9 +17,9 @@ import { DestinationKind } from './destination'
 export type Rail = 'lno' | 'lightning' | 'spark' | 'ark' | 'rgb' | 'liquid' | 'onchain'
 
 /**
- * Default rail priority — **Lightning-first**: BOLT12 offer, then BOLT11, then
- * the off-chain instant rails (Spark, Arkade), then on-chain (RGB-L1, Liquid,
- * bare BTC). Used when no user preference applies. Lower index = higher priority.
+ * Default rail priority — Lightning-first: BOLT12, BOLT11, the off-chain instant
+ * rails (Spark, Arkade), then on-chain (RGB-L1, Liquid, bare BTC). Lower index =
+ * higher priority.
  */
 export const DEFAULT_RAIL_ORDER: readonly Rail[] = [
   'lno',
@@ -37,8 +33,8 @@ export const DEFAULT_RAIL_ORDER: readonly Rail[] = [
 
 /**
  * The user's routing preference. `layers` is a global ranking (highest first);
- * `perAsset` overrides it for a specific asset id (e.g. prefer Liquid for USDt,
- * Lightning for BTC). When neither resolves a tie, the DEFAULT rail order wins.
+ * `perAsset` overrides it for a specific asset id. When neither resolves a tie, the
+ * default rail order wins.
  */
 export interface RoutePreference {
   /** Global ordered layer ranking, highest priority first. */
@@ -63,9 +59,9 @@ function indexOrLast<T>(list: readonly T[] | undefined, item: T): number {
 }
 
 /**
- * Comparator for two rail/layer routes given a resolved layer preference.
- * Primary key: the user's layer ranking (if the route's layer appears in it).
- * Tiebreak: the default rail ordering. Routes neither side ranks compare equal.
+ * Comparator for two rail/layer routes under a resolved layer preference. Primary
+ * key is the user's ranking; tiebreak is the default rail ordering. Routes neither
+ * side ranks compare equal.
  */
 export function compareByPreference(
   a: { rail: Rail; layer: Layer | null },

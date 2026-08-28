@@ -1,9 +1,6 @@
 /**
- * Pure helpers for the Spark adapter.
- *
- * Extracted from the extension's spark adapter so the adapter file can stay
- * focused on the IProtocolAdapter surface + RPC orchestration. Everything in
- * this module is side-effect free.
+ * Pure, side-effect-free helpers for the Spark adapter, so the adapter file stays
+ * focused on the IProtocolAdapter surface and RPC orchestration.
  */
 
 import { bech32m } from '@scure/base'
@@ -14,18 +11,12 @@ import { normalizeTxHash } from './spark-sent-token-records'
 export { formatAmount } from './amount'
 
 /**
- * Map a Spark transfer status string to our unified TransactionStatus.
+ * Map a Spark transfer status to our unified TransactionStatus.
  *
- * The Spark SDK ships two related but distinct status vocabularies:
- *  1. Native transfers use the `TRANSFER_STATUS_*` enum from the SDK
- *     (COMPLETED / EXPIRED / RETURNED / SENDER_INITIATED /
- *     RECEIVER_KEY_TWEAKED).
- *  2. Lightning send requests use a looser lowercase vocabulary
- *     (`completed` / `complete` / `succeeded` / `success` / `failed` /
- *     `error`) which has drifted across SDK versions.
- *
- * Both are mapped here so callers don't need to know which vocabulary a
- * given record came from.
+ * The SDK ships two vocabularies: the `TRANSFER_STATUS_*` enum for native
+ * transfers, and a looser lowercase set for Lightning send requests
+ * (completed/succeeded/failed/…) that has drifted across versions. Both are mapped
+ * here so callers need not know which a record came from.
  */
 export function mapTransferStatus(status?: string): TransactionStatus {
   if (!status) return 'pending'
@@ -53,8 +44,8 @@ export function mapTransferStatus(status?: string): TransactionStatus {
 }
 
 /**
- * Wrap a promise with a rejection timeout. Used to fail fast on slow Spark
- * RPC calls; the SDK's own 30 s ceiling is too long for popup UI.
+ * Wrap a promise with a rejection timeout, to fail fast on slow Spark RPCs — the
+ * SDK's own 30s ceiling is too long for popup UI.
  */
 export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
   return Promise.race([
@@ -66,10 +57,9 @@ export function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: st
 }
 
 /**
- * True when a Spark balance snapshot represents a fresh / still-syncing
- * wallet — zero sats AND no token balances. The adapter applies a shorter
- * TTL to empty snapshots so the UI doesn't get stuck on "0 sats" while the
- * Spark wallet syncs.
+ * True when a balance snapshot is a fresh / still-syncing wallet: zero sats AND no
+ * token balances. Empty snapshots get a shorter cache TTL so the UI doesn't stick
+ * on "0 sats" mid-sync.
  */
 export function isEmptyBalance(value: {
   balance?: bigint | number | string
@@ -106,10 +96,9 @@ export function rawTokenIdFromBytes(bytes: Uint8Array | undefined): string {
 }
 
 /**
- * Decode a bech32m-encoded Spark token id (e.g. `btkn1…`) back to its
- * normalized raw hex form. Returns `""` for falsy input or decode failures —
- * tokens that aren't bech32m-encoded simply round-trip through the empty
- * string and fall back to the caller's other matchers.
+ * Decode a bech32m Spark token id (`btkn1…`) to normalized raw hex. Returns `""`
+ * on falsy input or decode failure, so non-bech32m tokens fall through to the
+ * caller's other matchers.
  */
 export function rawTokenIdFromBech32mTokenId(tokenId: string | undefined): string {
   if (!tokenId) return ''
@@ -122,9 +111,8 @@ export function rawTokenIdFromBech32mTokenId(tokenId: string | undefined): strin
 }
 
 /**
- * Cross-format token id comparison: matches identical strings directly,
- * otherwise decodes both via bech32m / normalizeTxHash and compares the
- * raw forms. Returns false when either side is empty.
+ * Cross-format token id comparison: direct string match, else decode both via
+ * bech32m / normalizeTxHash and compare raw forms. False when either is empty.
  */
 export function tokenRefsMatch(left: string | undefined, right: string | undefined): boolean {
   const normalizedLeft = left?.trim()
@@ -139,9 +127,8 @@ export function tokenRefsMatch(left: string | undefined, right: string | undefin
 }
 
 /**
- * Parse one of the SDK's polymorphic expiry shapes (Date | number | ISO
- * string) into a finite millisecond timestamp. Returns undefined for
- * unparseable / falsy / Infinity values so callers can branch on absence.
+ * Parse one of the SDK's polymorphic expiry shapes (Date | number | ISO string)
+ * into a finite ms timestamp; undefined when unparseable so callers can branch.
  */
 export function parseSdkExpiryMs(expiry: unknown): number | undefined {
   if (!expiry) return undefined

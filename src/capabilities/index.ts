@@ -1,13 +1,11 @@
 /**
  * Protocol Capability Manifest
  * ----------------------------
- * The backbone of the plugin architecture: protocol *differences* are expressed
- * here as DATA, never as new methods on `IProtocolAdapter`. The cross-protocol
- * router and the lite/advanced UI read this manifest to decide behaviour, so
- * adding or changing one protocol never edits another protocol's code.
+ * The backbone of the plugin architecture: protocol *differences* are DATA here,
+ * never new methods on `IProtocolAdapter`. The router and the lite/advanced UI read
+ * this manifest, so adding or changing one protocol never edits another's code.
  *
- * Rule: when you're tempted to add a method to the contract for a single
- * protocol, add a capability flag here instead.
+ * When tempted to add a contract method for a single protocol, add a flag here.
  */
 
 import { ProtocolType, Layer } from '../types/base'
@@ -45,8 +43,8 @@ export interface ProtocolCapabilities {
 }
 
 /**
- * Single source of truth for what each protocol can do.
- * Keyed by ProtocolType. 'BTC' is the abstract on-chain-only base.
+ * Single source of truth for what each protocol can do, keyed by ProtocolType.
+ * 'BTC' is the abstract on-chain-only base.
  */
 export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> = {
   BTC: {

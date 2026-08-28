@@ -1,14 +1,11 @@
 /**
  * WDK Registry Factory
  * --------------------
- * Convenience: build a `ProtocolAdapterRegistry` populated with the WDK-backed
- * adapters. Opt-in — apps may instead register adapters selectively to keep bundles
- * lean. Importing this pulls only the thin adapter wrappers; the heavy WDK modules
- * are loaded lazily inside each adapter's `connect()` (dynamic import), so this does
- * NOT eagerly bundle the WDK modules.
+ * Builds a `ProtocolAdapterRegistry` populated with the WDK-backed adapters.
+ * Opt-in — apps may register selectively to keep bundles lean. This pulls only the
+ * thin wrappers; the heavy WDK modules load lazily inside each `connect()`.
  *
- * Adapters are constructed but NOT connected — call `connect(config)` per protocol
- * (each adapter's config carries its mnemonic + protocol-specific endpoints).
+ * Adapters are constructed but NOT connected — call `connect(config)` per protocol.
  */
 
 import { ProtocolAdapterRegistry } from '../adapters/IProtocolAdapter'
@@ -24,11 +21,9 @@ export interface WdkRegistryOptions {
   /** Which protocols to register (default: all four). */
   enabled?: ProtocolType[]
   /**
-   * Which RGB_L1 backing to register when `RGB_L1` is enabled:
-   *  - `'native'` (default): `RgbLibWdkAdapter` (native rgb-lib + filesystem
-   *    dataDir; Node/RN/desktop only).
-   *  - `'wasm'`: `RgbLibWasmAdapter` (browser/WASM rgb-lib + IndexedDB; runs
-   *    node-less in an MV3 service worker).
+   * Which RGB_L1 backing to register: `'native'` (default) is `RgbLibWdkAdapter`
+   * (native rgb-lib + filesystem dataDir; Node/RN/desktop only); `'wasm'` is
+   * `RgbLibWasmAdapter` (browser/WASM + IndexedDB, node-less in an MV3 worker).
    */
   rgbL1Backing?: 'native' | 'wasm'
 }

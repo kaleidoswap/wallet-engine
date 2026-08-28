@@ -1,21 +1,12 @@
 /**
  * Arkade VTXO Lifecycle + Delegator management (platform-agnostic core).
  *
- * This module is deliberately free of any platform API (`chrome.*`, timers,
- * notifications, storage). Consumers drive it:
- *   - The browser extension runs `runArkadeVtxoLifecycle()` from a
- *     `chrome.alarms` tick and maps the result to `chrome.notifications` +
- *     runtime broadcasts via the `callbacks`.
- *   - React Native schedules it however it prefers.
+ * Deliberately free of any platform API (`chrome.*`, timers, notifications,
+ * storage) — consumers drive it and map the result through `callbacks`.
  *
- * It covers:
- *   - VTXO auto-renewal      — renew VTXOs approaching expiry
- *   - Orphan VTXO recovery   — surface recoverable (swept/expired) balance
- *   - Boarding UTXO expiry   — surface expired boarding UTXOs
- *   - VTXO delegation        — delegate spendable VTXOs when enabled
- *
- * @arkade-os/sdk is referenced by TYPE only (erased at compile time), so this
- * module is safe to export from the engine's root barrel.
+ * Covers VTXO auto-renewal, orphan VTXO recovery, boarding-UTXO expiry, and VTXO
+ * delegation. @arkade-os/sdk is referenced by TYPE only, so this module is safe to
+ * export from the root barrel.
  */
 
 import type { VtxoManager, Wallet, ContractVtxo } from "@arkade-os/sdk";
@@ -44,8 +35,8 @@ export interface ArkadeLifecycleSettings {
 }
 
 /**
- * Coerce a raw delegator URL to a safe HTTPS URL, falling back to the
- * network default when missing / non-HTTPS / unparseable.
+ * Coerce a raw delegator URL to a safe HTTPS URL, falling back to the network
+ * default when missing / non-HTTPS / unparseable.
  */
 export function sanitizeDelegatorUrl(rawUrl: unknown, network: ArkadeNetwork = "mainnet"): string {
   const defaultUrl = ARKADE_DELEGATOR_URLS[network];
@@ -84,9 +75,8 @@ export function sanitizeVtxoThresholdSeconds(rawValue: unknown): number {
 }
 
 /**
- * Sanitize a raw lifecycle-settings object into a clean `ArkadeLifecycleSettings`.
- * Consumers read platform storage into a raw object and pass it here — storage
- * key naming stays consumer-side; the normalized shape + validation lives here.
+ * Sanitize a raw settings object into a clean `ArkadeLifecycleSettings`. Storage
+ * key naming stays consumer-side; normalization and validation live here.
  */
 export function resolveArkadeLifecycleSettings(raw: {
   delegatorUrl?: unknown;
@@ -117,9 +107,8 @@ export interface ArkadeDelegateInfo {
 }
 
 /**
- * Delegate all currently-spendable (settled/preconfirmed) VTXOs to the
- * configured delegator. Returns `{ delegated: 0, failed: 0 }` when delegation
- * is not configured or there is nothing to delegate.
+ * Delegate all currently-spendable (settled/preconfirmed) VTXOs to the configured
+ * delegator. `{ delegated: 0, failed: 0 }` when unconfigured or nothing to do.
  */
 export async function delegateSpendableVtxos(wallet: Wallet): Promise<ArkadeDelegateResult> {
   const delegatorManager = await wallet.getDelegatorManager();
@@ -144,7 +133,7 @@ export async function delegateSpendableVtxos(wallet: Wallet): Promise<ArkadeDele
 }
 
 /**
- * Resolve delegate info from the wallet's delegator manager. Returns
+ * Resolve delegate info from the wallet's delegator manager.
  * `{ configured: false }` when delegation is not configured.
  */
 export async function getArkadeDelegateInfo(wallet: Wallet): Promise<ArkadeDelegateInfo> {
@@ -190,9 +179,8 @@ export interface ArkadeVtxoLifecycleResult {
 }
 
 /**
- * Run one pass of the VTXO lifecycle. Every stage is best-effort and isolated:
- * a failure in one stage is recorded in `result.errors` (and reported via
- * `callbacks.onError`) but never aborts the remaining stages.
+ * Run one pass of the VTXO lifecycle. Every stage is best-effort and isolated: a
+ * failure is recorded in `result.errors` but never aborts the remaining stages.
  */
 export async function runArkadeVtxoLifecycle(args: {
   vtxoManager: VtxoManager;

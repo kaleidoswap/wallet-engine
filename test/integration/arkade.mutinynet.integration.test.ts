@@ -1,10 +1,8 @@
 /**
  * Arkade · mutinynet (signet) — live integration
  * ----------------------------------------------
- * Connects Alice and Bob to Arkade on Mutinynet (a custom signet) and checks
- * their pre-funded VTXO balances, Ark + boarding addresses. Includes an opt-in
- * Alice→Bob Ark transfer.
- *
+ * Connects Alice and Bob to Arkade on Mutinynet and checks their pre-funded VTXO
+ * balances and Ark + boarding addresses, plus an opt-in Alice→Bob transfer.
  * Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
@@ -51,10 +49,9 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
 
   it('sends an Arkade transfer Alice → Bob', async () => {
     const to = await bob.getReceiveAddress()
-    // Send from Alice's SPENDABLE VTXO balance (getBtcBalance().confirmed =
-    // settled + preconfirmed). If Alice's funds are still in on-chain boarding
-    // (total > 0 but confirmed == 0) this fails with an actionable message —
-    // the boarding UTXOs must be onboarded into VTXOs first.
+    // Send from Alice's SPENDABLE VTXO balance (settled + preconfirmed). If her
+    // funds are still in on-chain boarding (total > 0 but confirmed == 0) this fails
+    // with an actionable message — boarding UTXOs must be onboarded first.
     const spendable = (await alice.getBtcBalance()).confirmed
     const amount = spendableSend(spendable, 'Alice/Arkade (spendable VTXOs — onboard boarding funds if 0)')
     const res = await alice.sendPayment({ invoice: to.address, amount })

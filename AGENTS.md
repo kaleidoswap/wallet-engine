@@ -79,7 +79,9 @@ unprompted, and never with mainnet funds.
 ## Repo conventions
 
 - ESM only, `.js` extensions in relative imports (the build rewrites them).
-- Comments explain *why*, not *what*. Match the density of the file you're in;
-  don't narrate obvious code.
+- Comments explain *why*, not *what*, and stay terse — a line or two. Don't
+  narrate obvious code, restate the SDK's own docs, or inline API listings that
+  drift; a load-bearing quirk or a fail-closed rationale is worth keeping, at
+  the shortest length that still carries it.
 - Releases: tag → `publish.yml`. Moving a dist-tag is a separate manual
   `dist-tag.yml` dispatch, never `npm publish`.

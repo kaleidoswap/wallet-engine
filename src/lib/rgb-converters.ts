@@ -1,12 +1,6 @@
 /**
- * SDK ↔ unified-shape converters for the RGB adapter.
- *
- * Extracted from src/protocols/rgb/adapter.ts so the conversion logic lives
- * in one place and the adapter is closer to "what RPCs do I call". Every
- * function here is side-effect free, has no `this` dependencies, and only
- * imports types — no SDK client, no module state.
- *
- * Covered by tests/unit/rgb-converters.test.ts.
+ * SDK ↔ unified-shape converters for the RGB adapter. Every function is
+ * side-effect free, has no `this` dependencies, and imports types only.
  */
 
 import type { AssetBalanceResponse, BtcBalanceResponse } from "kaleido-sdk/rln";
@@ -20,17 +14,13 @@ import {
 } from "./rgb-helpers";
 
 // ── Balance shape converters ──────────────────────────────────────────────
-// Three slightly different upstream shapes; the unified `UnifiedAsset["balance"]`
-// is the projection we render. Each converter is the *only* place that
-// knows the field names of its specific SDK response — anything downstream
-// reads the unified shape.
+// Three upstream shapes project into `UnifiedAsset["balance"]`. Each converter is
+// the only place that knows its SDK response's field names.
 
 /**
- * `wallet.getBtcBalance()` returns BTC split into "vanilla" (regular) and
- * "colored" (RGB-allocated) sub-balances. The wallet UI only surfaces the
- * vanilla portion as the BTC asset's balance — colored sats are accounted
- * for under each RGB asset's own balance. Locks the policy: don't show
- * colored sats as spendable BTC.
+ * `wallet.getBtcBalance()` splits BTC into vanilla and colored (RGB-allocated)
+ * sub-balances. Only the vanilla portion is the BTC asset's balance — colored sats
+ * are accounted under each RGB asset, and must never show as spendable BTC.
  */
 export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset["balance"] {
   const vanilla = btcBalance.vanilla ?? { settled: 0, future: 0, spendable: 0 };
@@ -44,10 +34,9 @@ export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset[
 }
 
 /**
- * `wallet.getAssetBalance(assetId)` returns the per-asset SDK balance.
- * Exposes the off-chain inbound/outbound capacities — both shown in the
- * channel-aware balance breakdown — and treats `offchain_outbound` as
- * `locked` for legacy callers that don't know about the off-chain split.
+ * `wallet.getAssetBalance(assetId)`: exposes the off-chain inbound/outbound
+ * capacities for the channel-aware breakdown, and treats `offchain_outbound` as
+ * `locked` for legacy callers unaware of the off-chain split.
  */
 export function convertSdkBalance(
   balance: AssetBalanceResponse,
@@ -66,9 +55,9 @@ export function convertSdkBalance(
 }
 
 /**
- * `client.rln.listAssets()` returns balance as a plain `Record<string, number>`
- * — same field names as the SDK shape but flatter and `undefined`-safe.
- * Same projection as `convertSdkBalance` but no required-field assumptions.
+ * `client.rln.listAssets()` returns balance as a flat, `undefined`-safe
+ * `Record<string, number>`. Same projection as `convertSdkBalance` without the
+ * required-field assumptions.
  */
 export function convertNodeBalance(
   balance: Record<string, number> | undefined,
@@ -93,9 +82,8 @@ export function convertNodeBalance(
 // ── Asset converter ──────────────────────────────────────────────────────
 
 /**
- * Build a `UnifiedAsset` from the raw `client.rln.listAssets()` payload.
- * Precision defaults to 8 (BTC convention) when the node omits it —
- * legacy assets pre-RGB20 sometimes don't carry an explicit precision.
+ * Build a `UnifiedAsset` from the raw `client.rln.listAssets()` payload. Precision
+ * defaults to 8 when the node omits it — pre-RGB20 assets sometimes do.
  */
 export function convertNodeAssetToUnified(asset: Record<string, unknown>): UnifiedAsset {
   const precision = (asset.precision as number) ?? 8;
@@ -118,14 +106,12 @@ export function convertNodeAssetToUnified(asset: Record<string, unknown>): Unifi
 }
 
 // ── Transaction converters ───────────────────────────────────────────────
-// Three sources of RGB activity — on-chain transfers, lightning payments,
-// and maker/taker swaps — project into the same `UnifiedTransaction` shape
-// so the activity view doesn't have to render-switch on protocol details.
+// On-chain transfers, lightning payments and maker/taker swaps all project into
+// `UnifiedTransaction`, so the activity view need not switch on protocol.
 
 /**
- * On-chain RGB transfer from `client.rln.listTransfers()`. `asset` is left
- * as an empty placeholder; the caller (Activity view) joins on `asset_id`
- * to populate it via the asset inventory.
+ * On-chain RGB transfer from `client.rln.listTransfers()`. `asset` is left empty;
+ * the caller joins on `asset_id` against the asset inventory.
  */
 export function convertTransferToTransaction(
   transfer: Record<string, unknown>,
@@ -147,12 +133,9 @@ export function convertTransferToTransaction(
 }
 
 /**
- * Maker/taker swap entry from `client.rln.listSwaps()`. The same swap
- * appears once per side — `side` distinguishes them in the rendered id
- * so a maker and taker view of the same swap don't collide.
- *
- * Timestamp resolution: prefer `completed_at`, then `initiated_at`, then
- * `requested_at` (all in seconds — converted to ms here).
+ * Maker/taker swap from `client.rln.listSwaps()`. The same swap appears once per
+ * side, so `side` distinguishes them in the rendered id. Timestamp prefers
+ * `completed_at`, then `initiated_at`, then `requested_at` (seconds → ms).
  */
 export function convertSwapToTransaction(
   swap: Record<string, unknown>,
@@ -180,10 +163,8 @@ export function convertSwapToTransaction(
 }
 
 /**
- * Lightning payment entry from `client.rln.listPayments()`. Inbound vs
- * outbound is determined by the `inbound` flag (we render as receive vs
- * send). Amount resolution prefers `asset_amount` (for RGB-asset payments)
- * then falls back to converting the BTC msat figure to sats.
+ * Lightning payment from `client.rln.listPayments()`. Direction comes from the
+ * `inbound` flag; amount prefers `asset_amount`, else the BTC msat figure as sats.
  */
 export function convertPaymentToTransaction(payment: Record<string, unknown>): UnifiedTransaction {
   const inbound = Boolean(payment.inbound);

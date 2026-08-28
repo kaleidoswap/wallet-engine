@@ -2,10 +2,8 @@
  * Spark · regtest — live integration
  * ----------------------------------
  * Connects Alice and Bob to Spark regtest and exercises the read paths against
- * their pre-funded balances, plus an opt-in Alice→Bob native transfer.
- *
- * Skips entirely unless ALICE_MNEMONIC + BOB_MNEMONIC are set. Run with:
- *   npm run test:integration
+ * their pre-funded balances, plus an opt-in Alice→Bob native transfer. Skips unless
+ * ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'

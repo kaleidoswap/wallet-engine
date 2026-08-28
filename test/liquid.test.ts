@@ -13,10 +13,8 @@ import { LIQUID_USDT_ASSET_ID } from '../src/constants'
 
 /**
  * Fast unit tests for the Liquid (lwk) backing. They inject a fake `account` +
- * `manager` directly (bypassing connect()) so the ~10 MB lwk wasm never loads in
- * CI — the goal is to pin the adapter's translation onto the IProtocolAdapter
- * contract (asset mapping, send param shaping, tx mapping, on-chain-only guards),
- * not lwk internals (those are validated on-device + upstream).
+ * `manager` directly (bypassing connect()) so the ~10 MB lwk wasm never loads in CI.
+ * The goal is to pin the adapter's translation onto the contract, not lwk internals.
  */
 describe('LiquidWdkAdapter', () => {
   const POLICY = 'aaaa1111'.repeat(8).slice(0, 64) // L-BTC policy asset id (mainnet-ish)
@@ -302,9 +300,9 @@ describe('LiquidWdkAdapter', () => {
 
   it('serializes concurrent lwk operations (no re-entrant wasm access)', async () => {
     // lwk's Wollet panics ("recursive use of an object") if a second call enters
-    // while the first is mid-flight. Simulate that: the fake account throws if any
-    // method is invoked while another is still running. The adapter's opLock must
-    // prevent overlap even when the dashboard fires balance + assets + address at once.
+    // mid-flight. The fake account throws if any method is invoked while another
+    // runs, so the adapter's opLock must prevent overlap even when the dashboard
+    // fires balance + assets + address at once.
     let inFlight = 0
     const guard = async <T>(value: T): Promise<T> => {
       if (inFlight > 0) throw new Error('recursive use of an object detected')
@@ -385,11 +383,10 @@ describe('LiquidWdkAdapter', () => {
     })
   })
 
-  // In real @kaleidorg/wdk-wallet-liquid beta.7 the PSET/Simplicity methods are
-  // ALWAYS present on LiquidAccount; whether they actually work is decided at
-  // runtime by getSimplicityCapabilities() probing the LWK binding. So the
-  // `capabilities` manifest — which the UI reads to gate actions — must be
-  // derived from that runtime probe, never statically claimed.
+  // In real wdk-wallet-liquid the PSET/Simplicity methods are ALWAYS present on
+  // LiquidAccount; whether they work is decided at runtime by
+  // getSimplicityCapabilities(). So the `capabilities` manifest the UI gates on must
+  // be derived from that probe, never statically claimed.
   it('does not advertise experimental PSET/Simplicity capabilities without runtime support (fail closed)', () => {
     const without = connected({}) // pre-Simplicity account: no capability probe
     expect(without.capabilities).not.toContain('liquid-pset-inspect')

@@ -47,8 +47,8 @@ export function msatToSat(value: MillisatoshiAmount): SatoshiAmount {
 }
 
 /**
- * Explicit adapter-boundary conversion for SDKs that require `number`.
- * Values that JavaScript cannot represent exactly are rejected before conversion.
+ * Explicit adapter-boundary conversion for SDKs that require `number`. Values JS
+ * cannot represent exactly are rejected before conversion.
  */
 export function toSafeAmountNumber(value: string, unit: 'msat' | 'sat'): number {
   const amount = unit === 'msat' ? parseMsat(value) : parseSat(value)

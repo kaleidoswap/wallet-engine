@@ -6,10 +6,10 @@ import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 import { signPsbt } from '../src/lib/psbt-signer'
 
 /**
- * The dApp-facing PSBT signer must sign a normal owned input, but must NOT sign
- * an input whose sighash flag would let a counterparty rewrite the transaction
- * (SIGHASH_NONE/SINGLE/ANYONECANPAY). @scure/btc-signer enforces this by default
- * (it only permits each input's default sighash); these tests lock that in.
+ * The dApp-facing PSBT signer must sign a normal owned input, but must NOT sign an
+ * input whose sighash flag would let a counterparty rewrite the transaction
+ * (SIGHASH_NONE/SINGLE/ANYONECANPAY). @scure/btc-signer enforces this by default;
+ * these tests lock it in.
  */
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'

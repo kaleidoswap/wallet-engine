@@ -1,23 +1,17 @@
 /**
  * Boltz Swap Client Manager
  *
- * Singleton that owns the `@kaleidorg/swap-sdk` wasm module and one `BoltzClient`
- * pointed at a KaleidoSwap maker (`/v2`, Boltz protocol). This is the cross-chain
- * rail — BTC <-> L-BTC chain swaps — distinct from the RFQ rail in
- * `swap/KaleidoswapSwap` (maker `/api/v1`, settled over RLN).
+ * Singleton owning the `@kaleidorg/swap-sdk` wasm module and one `BoltzClient`
+ * pointed at a KaleidoSwap maker (`/v2`). This is the cross-chain rail — BTC <->
+ * L-BTC — distinct from the RFQ rail in `swap/KaleidoswapSwap`.
  *
- * Initialization is non-blocking: callers should attempt to use the client via
- * `getClient()` and fall back gracefully when `isInitialized()` is false (the
- * wasm blob is ~5MB, so cold-start init is not instant).
+ * Init is non-blocking (the wasm blob is ~5MB): callers use `getClient()` and fall
+ * back when `isInitialized()` is false. Lifecycle: `initialize(config)` on unlock,
+ * `dispose()` on lock.
  *
- * Lifecycle:
- *   - post-unlock / Liquid adapter connect → `initialize(config)`
- *   - lock / disconnect                    → `dispose()`
- *
- * The SDK's WebSocket status stream is deliberately NOT wired here. Its loop
- * holds a long-lived connection that an evicted MV3 service worker drops without
- * notice, so `BoltzChainSwap` reconciles by polling instead — a host alarm can
- * drive it, and it behaves identically on React Native.
+ * The SDK's WebSocket status stream is deliberately NOT wired: its long-lived
+ * connection is dropped without notice when an MV3 service worker is evicted, so
+ * `BoltzChainSwap` reconciles by polling instead.
  */
 
 import { loadWdkModule } from "../adapters/wdk/moduleLoader";
@@ -26,28 +20,26 @@ import { log } from "./log";
 /**
  * Chain identity for swap keys, scripts and Esplora access.
  *
- * "signet" is the KaleidoSwap maker's network and settles on Mutinynet — pair it
- * with Mutinynet chain access, never a testnet3 endpoint. The two encode
- * addresses identically, so a mismatch raises no error: swaps are simply created
- * on one chain and funded on another.
+ * "signet" is the maker's network and settles on Mutinynet — pair it with
+ * Mutinynet chain access, never testnet3. Both encode addresses identically, so a
+ * mismatch raises no error: swaps are created on one chain and funded on another.
  */
 export type BoltzNetwork = "mainnet" | "testnet" | "signet" | "regtest";
 
 export interface BoltzClientConfig {
   network: BoltzNetwork;
   /**
-   * Maker base URL. Omit to use the SDK's default for `network` — which is
-   * defined for "signet" and "regtest" only, and throws for the others rather
-   * than falling back to a third-party maker.
+   * Maker base URL. Omit for the SDK's default for `network` — defined for
+   * "signet" and "regtest" only, and throwing otherwise rather than falling back
+   * to a third-party maker.
    */
   baseUrl?: string;
   /** Request timeout in seconds, passed to the SDK client. */
   timeoutSecs?: number;
   /**
    * Input for the SDK's `init()`: a URL/Response/BufferSource for the .wasm.
-   * Browsers may omit it. Node hosts MUST pass the packaged bytes because
-   * Node's `fetch` does not load `file:` URLs; React Native hosts must supply
-   * whatever their bundler exposes for the asset.
+   * Browsers may omit it; Node hosts MUST pass the packaged bytes (Node's `fetch`
+   * does not load `file:` URLs).
    */
   wasmInput?: unknown;
 }
@@ -108,12 +100,11 @@ export interface SwapMasterKeyLike {
 const PACKAGE_NAME = "@kaleidorg/swap-sdk";
 
 /**
- * Default maker per network, mirroring the SDK's own `BoltzClient.forNetwork`.
- * Duplicated here because claim/refund `TxParams` require the base URL as a
- * string — the client instance does not expose the one it resolved.
- *
- * "mainnet" and "testnet" are absent on purpose: no KaleidoSwap maker runs on
- * either, and a default must never silently fall back to a third-party one.
+ * Default maker per network, mirroring the SDK's `BoltzClient.forNetwork`.
+ * Duplicated because claim/refund `TxParams` need the base URL as a string and the
+ * client does not expose the one it resolved. "mainnet"/"testnet" are absent on
+ * purpose: no KaleidoSwap maker runs there, and a default must never fall back to
+ * a third-party one.
  */
 const DEFAULT_BASE_URL: Partial<Record<BoltzNetwork, string>> = {
   signet: "https://maker.signet.kaleidoswap.com/v2",
@@ -145,8 +136,8 @@ class BoltzSwapClientManager {
 
   /**
    * Load the wasm module and construct the maker client. Concurrent calls of the
-   * same generation share the in-flight promise; a dispose() in between bumps the
-   * generation so the stale in-flight result is discarded.
+   * same generation share the in-flight promise; a dispose() bumps the generation
+   * so the stale result is discarded.
    */
   initialize(config: BoltzClientConfig): Promise<void> {
     if (this.client) return Promise.resolve();
@@ -228,10 +219,8 @@ class BoltzSwapClientManager {
   }
 
   /**
-   * Release the client. Safe when never initialized.
-   *
-   * NOTE: this does not abandon in-flight swaps — those live in the store and are
-   * resumed by `BoltzChainSwap.listPending()` after the next initialize().
+   * Release the client. Safe when never initialized. Does not abandon in-flight
+   * swaps — those live in the store and resume via `BoltzChainSwap.listPending()`.
    */
   dispose(): void {
     this._generation++;

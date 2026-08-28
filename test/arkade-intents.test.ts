@@ -6,13 +6,10 @@ import { getPlatform, setPlatform } from '../src/ports'
 import type { IStorageProvider } from '../src/ports'
 
 /**
- * Arkade Intents wiring. Under test: the store's persistence contract (the
- * venue writes records BEFORE funding, so a lossy store is stranded funds),
- * and the manager's generation-counted lifecycle (a dispose() during a slow
- * init must discard the stale venue, not adopt it).
- *
- * The venue module itself is faked through the WDK module-loader registry —
- * the real one lives in `@kaleidorg/swap-sdk/arkade` and has its own suite.
+ * Arkade Intents wiring: the store's persistence contract (the venue writes records
+ * BEFORE funding, so a lossy store is stranded funds) and the manager's
+ * generation-counted lifecycle (a dispose() during a slow init must discard the
+ * stale venue). The venue module itself is faked through the module-loader registry.
  */
 
 class MemoryStorage implements IStorageProvider {

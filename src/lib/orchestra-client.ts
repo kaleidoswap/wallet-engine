@@ -1,16 +1,13 @@
 /**
  * Flashnet Orchestra REST API Client
  *
- * Cross-chain swap orchestration: stablecoins (USDC/USDT) and native assets
- * (ETH/SOL/TRX) on EVM/Solana/Tron ↔ BTC/USDB on Spark.
+ * Cross-chain swap orchestration: stablecoins and native assets on
+ * EVM/Solana/Tron ↔ BTC/USDB on Spark.
  *
- * API docs: https://docs.flashnet.xyz/products/orchestration/overview
- * Base URL: https://orchestration.flashnet.xyz
+ * Docs: https://docs.flashnet.xyz/products/orchestration/overview
  *
- * Ported from rate-extension/src/protocols/spark/orchestra-client.ts. The API
- * key is NOT read from a build-time env var here — the engine is platform-
- * agnostic, so the consumer injects it once at startup via `setOrchestraApiKey()`
- * (the extension supplies its inlined `VITE_FLASHNET_ORCHESTRA_KEY`).
+ * The API key is not read from a build-time env var — the engine is
+ * platform-agnostic, so the consumer injects it via `setOrchestraApiKey()`.
  */
 
 import { log } from './log'
@@ -18,18 +15,15 @@ import { log } from './log'
 const BASE_URL = 'https://orchestration.flashnet.xyz'
 
 /**
- * Orchestra API key, injected by the consumer. PUBLIC-by-design in the
- * extension (shipped in the bundle) — the seam simply keeps the build-time
- * env-var read out of the engine. Empty until `setOrchestraApiKey()` runs;
- * every authed endpoint (createQuote/getOrder/submitOrder/getStatus) 401s
- * without it.
+ * Orchestra API key, injected by the consumer. PUBLIC-by-design in the extension;
+ * the seam just keeps the build-time env read out of the engine. Every authed
+ * endpoint 401s until `setOrchestraApiKey()` runs.
  */
 let apiKey = ''
 
 /**
- * Register the Orchestra API key. Call once at startup. Warns if given an
- * empty value so a misconfigured build is obvious instead of surfacing as a
- * runtime 401 that looks like a network failure.
+ * Register the Orchestra API key, once at startup. Warns on an empty value so a
+ * misconfigured build is obvious rather than surfacing as a runtime 401.
  */
 export function setOrchestraApiKey(key: string | null | undefined): void {
   apiKey = key ?? ''
@@ -42,17 +36,15 @@ export function setOrchestraApiKey(key: string | null | undefined): void {
 }
 
 /**
- * Stable marker embedded in the auth-error message. Only `Error.message`
- * survives the background-SW → UI message boundary (see background-protocol.ts:
- * `sendResponse({ error: error?.message })`), so the UI matches on this token
- * rather than `instanceof OrchestraAuthError`.
+ * Stable marker embedded in the auth-error message. Only `Error.message` survives
+ * the background-SW → UI boundary, so the UI matches on this token rather than
+ * `instanceof OrchestraAuthError`.
  */
 export const ORCHESTRA_AUTH_ERROR_CODE = 'ORCHESTRA_AUTH_FAILED'
 
 /**
- * Thrown when an authed Orchestra call fails due to a missing/invalid API key
- * (HTTP 401/403). Callers can detect this to show a "Bridge unavailable /
- * not configured" message instead of a generic "Quote failed".
+ * Thrown when an authed Orchestra call fails on a missing/invalid API key (401/403),
+ * so callers can show "Bridge unavailable" instead of a generic "Quote failed".
  */
 export class OrchestraAuthError extends Error {
   readonly status: number
@@ -289,13 +281,10 @@ export async function submitOrder(
 /**
  * Check order status by ID, quoteId, or txHash.
  *
- * The Flashnet orchestration `/v1/orchestration/status` endpoint historically
- * returned a flat `OrchestraOrder`, but the live API now wraps the response
- * as `{ order: OrchestraOrder, stages?: OrchestraOrderStage[] }` (same shape
- * as `/order`). Both forms have been observed in the wild — we unwrap defensively
- * so the bridge tracking poller sees a real `status` field either way.
- * Without this, `status` is `undefined`, the poller silently keeps showing
- * the stale local status (e.g. "swapping") even after the order completes.
+ * `/v1/orchestration/status` historically returned a flat `OrchestraOrder`, but the
+ * live API now wraps it as `{ order, stages? }`. Both forms occur in the wild, so
+ * unwrap defensively — otherwise `status` is undefined and the poller keeps showing
+ * the stale local status after the order completes.
  */
 export async function getStatus(query: {
   id?: string

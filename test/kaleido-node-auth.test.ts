@@ -1,17 +1,14 @@
 /**
  * Pins the RLN node-auth contract with the resolved kaleido-sdk.
  *
- * The node credential is a full-custody bearer token: whoever holds it can
- * move funds on the RLN node. It reaches the node only if the SDK carries it,
- * and the SDK's config for that is `nodeApiKey`, which exists from 0.1.16.
+ * The node credential is a full-custody bearer token, and it reaches the node only
+ * if the SDK carries it — via `nodeApiKey`, which exists from 0.1.16.
  *
- * The failure this guards is silent. An unknown extra property on a JS object
- * literal is dropped at runtime with no error and no log, so against an older
- * SDK every RLN request would go out with no `Authorization` header while
- * `KaleidoClientManager.initialize` still reported a healthy client — the only
- * way to notice is to inspect the wire. `sdkSupportsNodeAuth` below turns that
- * into a compile error, and the runtime case asserts the manager actually
- * forwards the credential rather than swallowing it.
+ * The failure this guards is silent: an unknown extra property on an object literal
+ * is dropped at runtime with no error, so against an older SDK every RLN request
+ * would go out with no `Authorization` header while `initialize` still reported a
+ * healthy client. `sdkSupportsNodeAuth` turns that into a compile error, and the
+ * runtime case asserts the manager actually forwards the credential.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { KaleidoClient } from 'kaleido-sdk'
@@ -21,9 +18,8 @@ type SdkConfig = Parameters<typeof KaleidoClient.create>[0]
 
 /**
  * Compile-time assertion: the resolved SDK accepts the node-scoped credential.
- * `tsc` fails here on kaleido-sdk < 0.1.16 — which is exactly the resolution
- * the SDK floor exists to forbid. The current 0.1.17 floor also supplies the
- * opt-in `/nwc` and `/rln` exports.
+ * `tsc` fails here on kaleido-sdk < 0.1.16, exactly the resolution the SDK floor
+ * exists to forbid.
  */
 const sdkSupportsNodeAuth: SdkConfig = { nodeApiKey: 'compile-time-probe' }
 

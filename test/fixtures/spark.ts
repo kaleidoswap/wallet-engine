@@ -1,22 +1,10 @@
 /**
- * Spark WDK transfer fixtures.
+ * Spark WDK transfer fixtures, mirroring the spark-sdk Transfer proto shape the WDK
+ * module surfaces via `account.getTransfers()` — id/sparkId, the type and
+ * userRequest variants, receiver/sender identity keys, value, status, timestamps.
  *
- * These mirror the spark-sdk Transfer proto shape that the WDK Spark module
- * surfaces via `account.getTransfers()`, as consumed by
- * `SparkWdkAdapter.toUnifiedTx()`:
- *
- *   {
- *     id, sparkId,
- *     type | transferType | sparkTransactionType,   // 'TRANSFER' for direct
- *     userRequest | userRequestId,                   // present for LN / on-chain
- *     receiverIdentityPublicKey, senderIdentityPublicKey,  // hex or bytes
- *     totalValue | value,
- *     status,                                        // TRANSFER_STATUS_* / LN vocab
- *     createdTime | updatedTime | createdAt,
- *   }
- *
- * Identity keys decide direction: the wallet is the receiver iff its identity
- * key equals `receiverIdentityPublicKey`.
+ * Identity keys decide direction: the wallet is the receiver iff its identity key
+ * equals `receiverIdentityPublicKey`.
  */
 
 /** Our wallet's identity pubkey (hex). */
@@ -25,9 +13,9 @@ export const ME = '02aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 export const OTHER = '03bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 
 /**
- * Direct Spark receive still sitting in the intermediate key-tweak state.
- * The raw status is "pending", but a direct transfer is already spendable, so
- * the adapter must surface it as `confirmed` (issue #3).
+ * Direct Spark receive still in the intermediate key-tweak state. The raw status is
+ * "pending", but a direct transfer is already spendable, so the adapter must surface
+ * it as `confirmed` (issue #3).
  */
 export const directReceiveKeyTweaked = {
   id: 'transfer-direct-receive',
@@ -51,8 +39,8 @@ export const directSendInitiated = {
 }
 
 /**
- * Lightning receive carrying a userRequest, still in flight. NOT a direct
- * transfer, so its real pending status must be preserved (issue #3).
+ * Lightning receive carrying a userRequest, still in flight. NOT a direct transfer,
+ * so its real pending status must be preserved (issue #3).
  */
 export const lightningReceivePending = {
   id: 'ln-receive-pending',
@@ -87,8 +75,8 @@ export const lightningSendFailed = {
 }
 
 /**
- * A transfer with NO identity keys and only the legacy direction field.
- * Exercises the fallback path used when the cached identity key is unknown.
+ * A transfer with NO identity keys and only the legacy direction field — exercises
+ * the fallback used when the cached identity key is unknown.
  */
 export const legacyDirectionReceive = {
   id: 'legacy-incoming',

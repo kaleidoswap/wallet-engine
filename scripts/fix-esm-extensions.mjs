@@ -1,12 +1,11 @@
 /**
- * Post-build: rewrite extensionless relative imports/exports in the emitted
- * dist to explicit `.js` (or `/index.js`) specifiers.
+ * Post-build: rewrite extensionless relative imports/exports in the emitted dist to
+ * explicit `.js` (or `/index.js`) specifiers.
  *
- * tsc with moduleResolution:"bundler" emits relative specifiers exactly as
- * written (extensionless), which Node's ESM resolver rejects. Bundlers (Vite/
- * esbuild/Metro) infer extensions, but Node and vitest's externalized-dep path
- * do not — so the package must ship valid ESM. This makes it consumable
- * everywhere without forcing a NodeNext migration of the source tree.
+ * tsc with moduleResolution:"bundler" emits relative specifiers as written, which
+ * Node's ESM resolver rejects. Bundlers infer extensions but Node and vitest's
+ * externalized-dep path do not, so this makes the package valid ESM everywhere
+ * without a NodeNext migration of the source tree.
  */
 import { readdirSync, readFileSync, writeFileSync, existsSync, statSync } from 'fs'
 import { join, resolve, dirname } from 'path'

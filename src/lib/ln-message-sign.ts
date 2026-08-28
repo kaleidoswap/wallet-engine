@@ -3,17 +3,15 @@ import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
 import { zbase32Encode, zbase32Decode } from "./zbase32";
 
-// LND-style signMessage / verifyMessage.
-//
+// LND-style signMessage / verifyMessage:
 //   prefix = "Lightning Signed Message:"
 //   hash   = sha256(sha256(prefix + message))
 //   sig    = recoverable ECDSA over secp256k1, 65 bytes (recid+31 || r || s)
 //   text   = zbase32(sig)
 //
-// This is the format Alby's LND/lndhub/LNbits connectors return and is
-// what LNURL-auth-style verifyMessage callers expect. The non-recoverable
-// hex/DER form some other wallets emit cannot be verified without knowing
-// the signing pubkey out-of-band.
+// This is what Alby's LND/lndhub/LNbits connectors return and what LNURL-auth-style
+// verifyMessage callers expect. The non-recoverable hex/DER form other wallets emit
+// cannot be verified without knowing the signing pubkey out-of-band.
 
 const LN_MSG_PREFIX = new TextEncoder().encode("Lightning Signed Message:");
 
@@ -29,8 +27,8 @@ function lnMessageHash(message: string): Uint8Array {
 }
 
 /**
- * Reject phishing-style messages that match the canonical LNURL-auth
- * disclaimer. Signing one would expose the LNURL-auth identity.
+ * Reject phishing-style messages matching the canonical LNURL-auth disclaimer —
+ * signing one would expose the LNURL-auth identity.
  */
 export function assertSafeToSign(message: string): void {
   if (message.trim() === LNURL_AUTH_CANONICAL_PHRASE.trim()) {
@@ -39,8 +37,8 @@ export function assertSafeToSign(message: string): void {
 }
 
 /**
- * Sign a message with the LND `signmessage` algorithm and return the
- * zbase32-encoded recoverable signature.
+ * Sign a message with the LND `signmessage` algorithm, returning the zbase32
+ * recoverable signature.
  */
 export function signLnMessage(message: string, privateKey: Uint8Array): string {
   assertSafeToSign(message);
@@ -64,8 +62,8 @@ export function signLnMessage(message: string, privateKey: Uint8Array): string {
 }
 
 /**
- * Verify a zbase32-encoded LND signature against the supplied message.
- * Returns the recovered compressed pubkey (hex) on success, or throws.
+ * Verify a zbase32 LND signature against a message, returning the recovered
+ * compressed pubkey (hex), or throwing.
  */
 export function verifyLnMessage(message: string, zbase32Signature: string): string {
   const bytes = zbase32Decode(zbase32Signature, 65);

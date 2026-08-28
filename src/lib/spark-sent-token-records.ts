@@ -1,21 +1,16 @@
 /**
  * Spark sent-token-transaction outbox.
  *
- * The Spark SDK exposes no direction for token transactions — a
- * `queryTokenTransactions*` response cannot tell a send apart from a receive
- * (both leave the wallet owning an output: the received amount, or the change
- * of a send). A send with no change output is not returned at all.
+ * The Spark SDK exposes no direction for token transactions: a
+ * `queryTokenTransactions*` response cannot tell a send from a receive (both leave
+ * the wallet owning an output), and a send with no change output is not returned at
+ * all. So every send the wallet performs is recorded here to make outgoing
+ * transfers visible in history.
  *
- * To make outgoing token transfers visible in history we persist a record of
- * every send the wallet performs. This module is the single source of truth
- * for that outbox; it is intentionally dependency-light so it can be used both
- * by the SparkAdapter and by the low-level `transferTokens` wrapper in
- * `spark-client-manager.ts` without import cycles.
- *
- * Storage is platform-agnostic: it uses the engine's ports storage
- * (`getPlatform()?.storage`, an `IStorageProvider`), persisting the whole
- * record array as a JSON string under a single key. When no platform is set it
- * degrades to an in-module in-memory Map so callers never crash.
+ * Intentionally dependency-light so both the SparkAdapter and the low-level
+ * `transferTokens` wrapper can use it without import cycles. Storage goes through
+ * the engine's ports (`IStorageProvider`), persisting the record array as JSON under
+ * one key, degrading to an in-memory Map when no platform is set.
  */
 
 import { log } from './log'
@@ -103,9 +98,8 @@ export async function loadSentTokenRecords(): Promise<SentTokenTxRecord[]> {
 }
 
 /**
- * Persist a send record. Records are keyed by hash — re-saving the same hash
- * replaces the earlier entry, so a richer record (with token metadata) written
- * after a minimal one supersedes it.
+ * Persist a send record. Records are keyed by hash, so re-saving the same hash
+ * replaces the earlier entry and a richer record supersedes a minimal one.
  */
 export async function saveSentTokenRecord(record: SentTokenTxRecord): Promise<void> {
   try {

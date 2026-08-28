@@ -1,9 +1,6 @@
 /**
- * Swap venues.
- *
- * Opt-in sub-path export: `@kaleidorg/wallet-engine/swap`. Both venues load their
- * SDK through the WDK module loader, so they are kept out of the adapter-free
- * main barrel.
+ * Swap venues — sub-path export `@kaleidorg/wallet-engine/swap`. Both load their SDK
+ * through the WDK module loader, so they stay out of the adapter-free main barrel.
  *
  *  - `KaleidoswapSwap`  — RFQ rail (maker `/api/v1`, settled over RLN). Owns RGB.
  *  - `BoltzChainSwap`   — BTC <-> L-BTC chain swaps (maker `/v2`, Boltz protocol).

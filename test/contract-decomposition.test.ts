@@ -12,8 +12,8 @@ import { MemoAdapter } from '../examples/minimal-adapter/MemoAdapter'
 
 /**
  * The contract decomposition (Core + Partial<capability groups>) must stay
- * structurally identical to the historical flat interface, and the narrowing
- * helpers must gate on actual method presence.
+ * structurally identical to the historical flat interface, and the narrowing helpers
+ * must gate on actual method presence.
  */
 describe('IProtocolAdapter decomposition', () => {
   it('a core-only adapter satisfies IProtocolAdapter and narrows to no groups', () => {

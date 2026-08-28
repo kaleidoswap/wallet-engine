@@ -106,10 +106,9 @@ describe('Simplicity capability routing', () => {
 
 /**
  * Fail-closed guarantees for the Liquid PSET manager routes. Until an exact-byte
- * `LiquidSpendAuthorization` contract exists, finalize/broadcast must never reach
- * the adapter; every mutation (blind/sign) must pass the policy gate; and all
- * Liquid PSET operations must route to the *registered LIQUID adapter*, never to
- * whichever protocol happens to be active.
+ * `LiquidSpendAuthorization` exists, finalize/broadcast must never reach the
+ * adapter; every mutation must pass the policy gate; and all Liquid PSET operations
+ * must route to the *registered LIQUID adapter*, never to whichever is active.
  */
 describe('ProtocolManager Liquid PSET fail-closed + routing', () => {
   function liquidAdapter(overrides: Record<string, unknown> = {}) {
