@@ -16,8 +16,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # pnpm before setup-node: `cache: pnpm` needs the binary to already exist.
-      # The version comes from the "packageManager" field in package.json.
       - uses: pnpm/action-setup@v4
 
       - uses: actions/setup-node@v4
@@ -25,10 +23,6 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
 
-      # --frozen-lockfile is the point: CI fails on a stale pnpm-lock.yaml rather
-      # than silently resolving whatever satisfies the ranges, so what CI proves
-      # green is what a developer actually installs. --ignore-scripts skips the
-      # WDK SDKs' native postinstalls; the build and unit suite only need types.
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Type-check + build (tsc)
