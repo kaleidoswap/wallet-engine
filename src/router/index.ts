@@ -1,13 +1,12 @@
 /**
  * CrossProtocolRouter
  * -------------------
- * Sits ON TOP of the adapters and chooses BETWEEN protocols. Given a send
- * destination or a receive intent, it returns the protocol(s) that can fulfil it,
- * filtered to what's actually registered and connected. This is the layer that
- * makes lite mode possible: it auto-selects the route so the UI never has to.
+ * Sits ON TOP of the adapters and chooses BETWEEN protocols: given a destination
+ * or receive intent, returns the protocol(s) that can fulfil it, filtered to what
+ * is registered and connected. This is what makes lite mode possible.
  *
- * It reads the capability manifest (differences-as-data) + the destination
- * classifier — never the adapters' internals.
+ * Reads the capability manifest and the destination classifier — never adapter
+ * internals.
  */
 
 import { ProtocolAdapterRegistry, IProtocolAdapter } from '../adapters/IProtocolAdapter'
@@ -25,9 +24,9 @@ import {
 
 /**
  * Whether `protocol` can pay `dest` DIRECTLY (no swap), per the capability
- * manifest. Reads capability flags rather than exact layer strings so a protocol
- * that reaches a surface by a different path (e.g. Spark paying on-chain via a
- * deposit/exit) is still recognised.
+ * manifest. Reads capability flags rather than exact layer strings, so a protocol
+ * reaching a surface by another path (Spark paying on-chain via a deposit/exit) is
+ * still recognised.
  */
 function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination): boolean {
   const caps = getCapabilities(protocol)
@@ -101,8 +100,8 @@ export class CrossProtocolRouter {
   }
 
   /**
-   * Resolve how to SEND to a destination string.
-   * Lite mode uses `.best`; advanced mode can offer the full `.routes` list.
+   * Resolve how to SEND to a destination string. Lite mode uses `.best`; advanced
+   * mode can offer the full `.routes` list.
    */
   resolveSend(destination: string): SendResolution {
     const classified = classifyDestination(destination)
@@ -111,10 +110,9 @@ export class CrossProtocolRouter {
     for (const protocol of classified.candidates) {
       const adapter = this.connected(protocol)
       if (!adapter) continue
-      // `direct` is verified against the capability manifest, not assumed: a
-      // candidate is only a direct route if its protocol actually supports the
-      // surface this destination settles on. Lite mode's auto-route (`best`)
-      // must never claim a protocol can pay directly when the manifest disagrees.
+      // `direct` is verified against the capability manifest, not assumed: lite
+      // mode's auto-route must never claim a protocol can pay directly when the
+      // manifest disagrees.
       const direct = canSettleDirectly(protocol, classified)
       routes.push({ protocol, adapter, layer: classified.layer, direct })
     }
@@ -125,20 +123,16 @@ export class CrossProtocolRouter {
   }
 
   /**
-   * Resolve how to SEND to a UNIFIED payment URI (BIP21 / BIP321) that may carry
-   * several rails at once — a BOLT12 offer, a BOLT11 invoice, Spark/Arkade/Liquid
-   * addresses, an RGB invoice, an on-chain address. Each present rail is matched
-   * to the registered+connected protocols that can settle it, then the whole set
-   * is ranked by the user's `preference` (per-asset layer ranking) falling back to
-   * the Lightning-first default. `.best` is the auto-route for lite mode; advanced
-   * mode can present the full ranked `.routes` list.
+   * Resolve how to SEND to a UNIFIED payment URI (BIP21/BIP321) carrying several
+   * rails at once. Each present rail is matched to the registered+connected
+   * protocols that can settle it, then ranked by the user's `preference`, falling
+   * back to Lightning-first. `.best` is lite mode's auto-route.
    *
-   * A plain (non-`bitcoin:`) string is handled too: it falls back to a single-rail
-   * `resolveSend`, so callers can use one entry point for any pasted destination.
+   * A plain (non-`bitcoin:`) string falls back to `resolveSend`, so one entry
+   * point handles any pasted destination.
    *
-   * NOTE: BIP353 (₿user@domain) is intentionally out of scope here — it needs a
-   * DNS-over-HTTPS lookup the dependency-free engine doesn't perform; resolve it
-   * to a BIP321 URI in the host, then pass the result in.
+   * BIP353 (₿user@domain) is out of scope: it needs a DNS-over-HTTPS lookup the
+   * dependency-free engine doesn't perform. Resolve it to a BIP321 URI in the host.
    */
   resolveUnifiedSend(uri: string, opts?: { preference?: RoutePreference }): UnifiedSendResolution {
     const parsed = parseUnifiedReceiveURI(uri)
@@ -194,8 +188,8 @@ export class CrossProtocolRouter {
   }
 
   /**
-   * Resolve which protocols can RECEIVE on a given layer (e.g. show the user
-   * the available "receive over Lightning / Spark / on-chain" options).
+   * Which protocols can RECEIVE on a given layer, e.g. to show the available
+   * "receive over Lightning / Spark / on-chain" options.
    */
   resolveReceive(layer: Layer): ReceiveRoute[] {
     const out: ReceiveRoute[] = []
@@ -211,7 +205,7 @@ export class CrossProtocolRouter {
 
   /**
    * Which registered+connected protocols hold/transfer a given asset family.
-   * `assetFamily`: 'BTC' or a specific asset id resolved by the caller to a protocol.
+   * `assetFamily`: 'BTC' or a caller-resolved asset id.
    */
   resolveByCapability(predicate: (protocol: ProtocolType) => boolean): IProtocolAdapter[] {
     return this.registry

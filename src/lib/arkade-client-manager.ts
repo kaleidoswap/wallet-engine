@@ -1,21 +1,16 @@
 /**
  * Arkade Client Manager
  *
- * Manages the lifecycle of an Arkade wallet (`@arkade-os/sdk` v0.4.x).
- * The SDK is pure TypeScript — no WASM, no dynamic import() restrictions —
- * so it runs directly inside an MV3 service worker.
+ * Lifecycle of an Arkade wallet (`@arkade-os/sdk` v0.4.x). Pure TypeScript — no
+ * WASM — so it runs directly inside an MV3 service worker.
  *
- * Platform-agnostic: storage repositories and network providers are injected
- * by consumers via `setPlatformProviders()`. The extension supplies the SDK's
- * IndexedDB repositories (the default when a browser host provides none);
- * React Native injects AsyncStorage-backed repositories. No `chrome.*` /
- * platform globals are referenced here.
+ * Platform-agnostic: storage repositories and network providers are injected via
+ * `setPlatformProviders()` (extension: the SDK's IndexedDB repos; React Native:
+ * AsyncStorage-backed). No `chrome.*` globals here.
  *
- * Wallet-secret handling: new wallets use an nsec root secret. A 64-char hex
- * private key and BIP39 mnemonics (BIP86 Taproot derivation) are also accepted
- * so developer/test imports behave predictably. Deriving nsec-rooted keys
- * directly (rather than via BIP39 `mnemonicToSeedSync`) avoids the
- * "Invalid mnemonic" failure mode nsec-rooted wallets otherwise hit.
+ * Secrets: nsec root by default; 64-char hex and BIP39 mnemonics (BIP86 Taproot)
+ * are accepted too. nsec-rooted keys are derived directly rather than through
+ * `mnemonicToSeedSync`, which otherwise fails with "Invalid mnemonic".
  */
 
 import type { ArkadeConfig } from "../types/arkade";
@@ -42,11 +37,9 @@ import type { IncomingFunds, WalletConfig } from "@arkade-os/sdk";
 // ---------------------------------------------------------------------------
 
 /**
- * Platform-specific providers injected by consumers. When a factory is absent
- * the manager falls back to the SDK's browser-native implementation
- * (IndexedDB repositories, `RestDelegatorProvider`), which is correct for the
- * extension. Non-browser hosts (React Native) must inject every provider they
- * rely on.
+ * Platform providers injected by consumers. Absent a factory the manager falls
+ * back to the SDK's browser-native implementation (IndexedDB,
+ * `RestDelegatorProvider`); non-browser hosts must inject what they rely on.
  */
 export interface ArkadePlatformProviders {
   createWalletRepository?: (dbName: string) => unknown;
@@ -77,8 +70,8 @@ function nsecToPrivateKeyHex(input: string): string | null {
 
 /**
  * Resolve a wallet secret to the 32-byte private key hex the Arkade identity
- * needs. Accepts (in order): an `nsec1…` root secret, a 64-char hex private
- * key, or a BIP39 mnemonic (BIP86 Taproot `m/86'/{coinType}'/0'/0/0`).
+ * needs: `nsec1…`, 64-char hex, or BIP39 mnemonic (BIP86
+ * `m/86'/{coinType}'/0'/0/0`).
  */
 export function resolveArkadePrivateKeyHex(walletSecret: string, isMainnet: boolean): string {
   const trimmed = walletSecret.trim();
@@ -113,9 +106,8 @@ export function resolveArkadePrivateKeyHex(walletSecret: string, isMainnet: bool
 }
 
 /**
- * True when the secret is a BIP39 mnemonic (i.e. not an `nsec1…` root secret or
- * a raw 64-char hex private key). HD rotation requires a mnemonic-backed,
- * HD-capable identity (`MnemonicIdentity`); nsec/hex secrets stay single-key.
+ * True when the secret is a BIP39 mnemonic. HD rotation needs a mnemonic-backed
+ * `MnemonicIdentity`; nsec/hex secrets stay single-key.
  */
 function isBip39Secret(walletSecret: string): boolean {
   const trimmed = walletSecret.trim();
@@ -149,10 +141,9 @@ class ArkadeClientManager {
   }
 
   /**
-   * Initialize the Arkade wallet.
-   * Concurrent calls share the same in-flight promise to prevent races.
-   * Throws if called while already initializing with a different identity or
-   * network — the caller must call dispose() first.
+   * Initialize the Arkade wallet. Concurrent calls share the in-flight promise;
+   * throws if already initializing with a different identity or network (call
+   * dispose() first).
    */
   initialize(config: ArkadeConfig): Promise<void> {
     if (this._initPromise) {
@@ -191,12 +182,9 @@ class ArkadeClientManager {
 
     try {
       const isMainnet = config.network === "mainnet";
-      // HD mode (rotating receive addresses) requires an HD-capable,
-      // mnemonic-backed identity so the SDK can walk `…/0/N` indices. It is the
-      // address model the reference arkade-os wallet uses in "rotate addresses"
-      // mode; the extension's historical default is a single static key
-      // (index 0). Only enable HD when explicitly requested AND the secret is a
-      // BIP39 mnemonic (nsec/hex secrets are single-key).
+      // HD mode needs a mnemonic-backed identity so the SDK can walk `…/0/N`.
+      // The extension's historical default is a single static key (index 0), so
+      // only enable HD when requested AND the secret is a mnemonic.
       const hdMode = config.walletMode === "hd" && isBip39Secret(config.mnemonic);
       const identity = hdMode
         ? MnemonicIdentity.fromMnemonic(config.mnemonic.trim(), { isMainnet })
@@ -240,12 +228,9 @@ class ArkadeClientManager {
 
       this.wallet = await Wallet.create(walletConfig);
 
-      // HD wallets hold funds across rotated `…/0/N` addresses. A fresh client
-      // (e.g. restore on a new device) knows none of them until it runs the
-      // gap-limit scan, so without this it would show a 0 balance even though
-      // the funds exist. `restore()` walks HD indices from 0 and discovers every
-      // used address; it is a no-op cost for static wallets so we only run it in
-      // HD mode. Best-effort: a scan failure must not block the wallet coming up.
+      // HD funds live across rotated `…/0/N` addresses that a fresh client knows
+      // nothing about until the gap-limit scan, so it would show 0 balance.
+      // Best-effort: a scan failure must not block the wallet coming up.
       if (hdMode) {
         try {
           await (this.wallet as Wallet & { restore?: () => Promise<void> }).restore?.();
@@ -255,10 +240,9 @@ class ArkadeClientManager {
         }
       }
 
-      // Reuse the wallet's own VtxoManager rather than creating a second one.
-      // Wallet.create() already initialises an internal VtxoManager with the
-      // same settlementConfig; constructing another would register a duplicate
-      // contract-event subscription and a second boarding-UTXO poll loop.
+      // Reuse the wallet's own VtxoManager: Wallet.create() already made one with
+      // this settlementConfig, and a second would duplicate the contract-event
+      // subscription and the boarding-UTXO poll loop.
       this._vtxoManager = await this.wallet.getVtxoManager();
 
       await this.refreshVtxoState();
@@ -284,10 +268,8 @@ class ArkadeClientManager {
   ): Promise<string> {
     const pubKey = await identity.xOnlyPublicKey();
     const pubKeyHex = bytesToHex(pubKey);
-    // HD and static wallets share the same index-0 pubkey but track a different
-    // address set, so they must not share an IndexedDB store — otherwise a mode
-    // switch would read the other mode's cached state. Static keeps the legacy
-    // (mode-less) name for backward compatibility.
+    // HD and static share the index-0 pubkey but track different address sets, so
+    // they must not share an IndexedDB store. Static keeps the legacy name.
     const modeSuffix = config.walletMode === "hd" ? "-hd" : "";
     return `arkade-wallet-${config.network}-${pubKeyHex.slice(0, 16)}${modeSuffix}`;
   }
@@ -305,10 +287,7 @@ class ArkadeClientManager {
     }
   }
 
-  /**
-   * Return the active wallet instance.
-   * Throws if not initialized.
-   */
+  /** Return the active wallet instance. Throws if not initialized. */
   getWallet(): Wallet {
     if (!this.wallet) {
       throw new Error("Arkade wallet not initialized. Call initialize() first.");
@@ -316,10 +295,7 @@ class ArkadeClientManager {
     return this.wallet;
   }
 
-  /**
-   * Return the VtxoManager for VTXO lifecycle operations.
-   * Throws if not initialized.
-   */
+  /** Return the VtxoManager for VTXO lifecycle ops. Throws if not initialized. */
   getVtxoManager(): VtxoManager {
     if (!this._vtxoManager) {
       throw new Error("VtxoManager not initialized. Call initialize() first.");
@@ -332,9 +308,8 @@ class ArkadeClientManager {
   }
 
   /**
-   * Connected config with the mnemonic REDACTED — getConfig() is read for
-   * network/settings lookups, and returning the seed here would let one
-   * careless `log(getConfig())` in a host leak it.
+   * Connected config with the mnemonic REDACTED — one careless
+   * `log(getConfig())` in a host would otherwise leak the seed.
    */
   getConfig(): ArkadeConfig | null {
     return this.config ? { ...this.config, mnemonic: "" } : null;
@@ -375,8 +350,8 @@ class ArkadeClientManager {
 
   /**
    * Start listening for incoming VTXOs and boarding UTXOs.
-   * @param onIncoming  Callback fired per notification; receives the raw SDK payload.
-   * @returns Stop function (also called automatically on disconnect/reset)
+   * @param onIncoming  Fired per notification with the raw SDK payload.
+   * @returns Stop function (also called on disconnect/reset)
    */
   startIncomingFundsListener(onIncoming: (notification: IncomingFunds) => void): void {
     if (this._listenerStarted) {

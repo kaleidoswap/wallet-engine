@@ -1,12 +1,11 @@
 /**
  * Disclosure Level (Lite / Advanced)
  * ----------------------------------
- * Lite and Advanced are NOT a code fork — they are one setting that controls how
- * much the UI reveals and how much the auto-router decides vs. the user. The engine
- * is identical underneath. This module is the single source of truth for what each
- * level exposes, so neither the apps nor the adapters branch on "mode" ad-hoc.
- *
- * Default is chosen at wallet creation but is REVERSIBLE in settings.
+ * Not a code fork — one setting controlling how much the UI reveals and how much
+ * the auto-router decides. The engine is identical underneath, and this module is
+ * the single source of truth for what each level exposes, so neither apps nor
+ * adapters branch on "mode" ad-hoc. The default is set at wallet creation but is
+ * reversible in settings.
  */
 
 import { ProtocolType, UnifiedAsset } from '../types/base'
@@ -50,8 +49,8 @@ export function policyFor(level: DisclosureLevel): DisclosurePolicy {
 }
 
 /**
- * Lite-mode "USD" = USDt on Liquid (locked product decision).
- * Used to relabel/aggregate the user-facing "USD" balance.
+ * Lite-mode "USD" = USDt on Liquid (locked product decision), used to
+ * relabel/aggregate the user-facing "USD" balance.
  */
 export const LITE_USD = {
   protocol: 'LIQUID' as ProtocolType,
@@ -63,21 +62,19 @@ export const LITE_USD = {
 export type LiteBucket = 'BTC' | 'USD' | 'OTHER'
 
 export function liteBucketOf(asset: UnifiedAsset): LiteBucket {
-  // Bucket by adapter-assigned identity only — id and layer come from our
-  // adapters, while tickers are issuer-controlled metadata, so a scam token
-  // tickered "BTC" or "USDt" must never inflate the displayed totals.
-  // 'BTC' is the native-BTC id in every adapter; BTC_LIQUID marks the Liquid
-  // policy asset (L-BTC), whose id is the network-dependent policy asset id.
+  // Bucket by adapter-assigned identity only: ids and layers come from our
+  // adapters, while tickers are issuer-controlled, so a scam token tickered "BTC"
+  // must never inflate displayed totals. BTC_LIQUID marks the Liquid policy asset.
   if (asset.id === 'BTC' || asset.layer === 'BTC_LIQUID') return 'BTC'
   if (asset.id === LITE_USD.assetId) return 'USD'
   return 'OTHER'
 }
 
 /**
- * Aggregate per-protocol assets into the lite-mode view: a single BTC number,
- * a single USD number, and any other assets — hiding which network each lives on.
- * NOTE: callers should surface spendability constraints just-in-time (a unified BTC
- * total can hide that a given route needs a swap); this only aggregates display balances.
+ * Aggregate per-protocol assets into the lite-mode view — one BTC number, one USD
+ * number, and any others — hiding which network each lives on. Callers should
+ * surface spendability constraints just-in-time; this only aggregates display
+ * balances.
  */
 export interface LiteBalances {
   btc: number

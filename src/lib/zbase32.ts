@@ -1,10 +1,6 @@
-// zbase32 — Phil Zimmermann's human-friendly base32 alphabet, used by LND
-// for `signmessage` / `verifymessage` outputs.
-//
-//   alphabet = "ybndrfg8ejkmcpqxot1uwisza345h769"
-//
-// Encoding is the same shape as base32 (5 bits per char), but the alphabet
-// is reordered so the resulting strings are easier to read and transcribe.
+// zbase32 — Phil Zimmermann's human-friendly base32 alphabet
+// ("ybndrfg8ejkmcpqxot1uwisza345h769"), used by LND for signmessage/verifymessage.
+// Same shape as base32 (5 bits per char), reordered for readability.
 
 const ALPHABET = "ybndrfg8ejkmcpqxot1uwisza345h769";
 

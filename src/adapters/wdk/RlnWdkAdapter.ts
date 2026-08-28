@@ -2,19 +2,12 @@
  * RlnWdkAdapter
  * -------------
  * Wraps the WDK RGB-Lightning module (@kaleidorg/wdk-wallet-rln, over kaleido-sdk)
- * onto the stable `IProtocolAdapter` contract. This is the RGB path: BTC on-chain,
- * BTC Lightning, RGB assets (USDT/XAUT) on-chain and over Lightning, plus channels
- * and atomic swaps.
+ * onto the `IProtocolAdapter` contract: BTC on-chain and Lightning, RGB assets
+ * on-chain and over Lightning, plus channels and atomic swaps. The RLN account
+ * talks to a remote RGB-Lightning node over HTTP (nodeUrl).
  *
- * The RLN account talks to a remote RGB-Lightning node over HTTP (nodeUrl).
- *
- * Discipline: no WDK/kaleido-sdk types cross the contract — domain types only;
- * node responses are read as `any` and translated.
- *
- * WDK RLN surface (from types/index.d.ts): getAddress, getBalance, getBtcBalance,
- * sendBtc, listAssets({nia,uda,cfa}), getAssetBalance, sendRgb, createLNInvoice,
- * createRgbInvoice, sendPayment, getInvoiceStatus, decodeLNInvoice/decodeRgbInvoice,
- * listChannels/openChannel/closeChannel, listPeers/connectPeer, atomicTaker/listSwaps.
+ * No WDK/kaleido-sdk types cross the contract — node responses are read as `any`
+ * and translated.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -60,28 +53,23 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   /** BIP-44 account index (default 0). */
   accountIndex?: number
   /**
-   * Bearer token for a multi-tenant RLN node — required whenever `nodeUrl`
-   * is shared across wallets/tenants, since the node has no other way to
-   * tell requests apart. `jwt` is accepted as an alias for callers that
-   * already carry the token under that name.
+   * Bearer token for a multi-tenant RLN node — required whenever `nodeUrl` is
+   * shared across tenants. `jwt` is accepted as an alias.
    */
   apiKey?: string
   jwt?: string
   /**
-   * Opt-in gate for fund-moving node operations on the escape hatch
-   * (`executeProtocolOperation`): keysend, channel open/close, createUtxos,
-   * maker/taker swap primitives, backup. Off by default because `operation`
-   * may be influenced by callers (deep links, chat/MCP tool args) and these
-   * ops move funds with no policy gate or confirmation hook. Hosts that
-   * expose channel management or node tooling UIs set this explicitly.
+   * Opt-in gate for fund-moving node ops on `executeProtocolOperation`. Off by
+   * default because `operation` may be caller-influenced (deep links, chat/MCP
+   * args) and these ops move funds with no policy gate or confirmation hook.
    */
   allowPrivilegedOps?: boolean
 }
 
 /**
- * Allowlist of RLN account methods reachable via `executeProtocolOperation`.
- * Only RLN-specific operations not already exposed as typed adapter methods.
- * Anything not listed here is rejected — see the method's SECURITY note.
+ * Allowlist of RLN account methods reachable via `executeProtocolOperation` —
+ * RLN-specific ops not already typed adapter methods. Anything unlisted is
+ * rejected; see the method's SECURITY note.
  */
 const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
   'getChannelId',
@@ -99,16 +87,14 @@ const RLN_ALLOWED_OPS: ReadonlySet<string> = new Set([
   'getSwap',
   'signMessage',
   // 'restore' / 'changePassword' are deliberately NOT allowlisted: they are
-  // wallet-lifecycle operations, and `operation` may be influenced by callers
-  // (deep links, chat/MCP tool args). Hosts that need them must call the
-  // account directly behind their own gating UI.
+  // wallet-lifecycle ops and `operation` may be caller-influenced. Hosts needing
+  // them must call the account directly behind their own gating UI.
 ])
 
 /**
- * Fund-moving / custody-relevant node operations, reachable only when the
- * host opts in via `allowPrivilegedOps`. Each of these can move funds (or,
- * for backup, exfiltrate wallet state) with no policy gate and no
- * confirmation hook, so they must never be callable from an
+ * Fund-moving / custody-relevant node ops, reachable only when the host opts in
+ * via `allowPrivilegedOps`. Each can move funds (or, for backup, exfiltrate
+ * wallet state) with no policy gate, so they must never be reachable from an
  * attacker-influenced `operation` string by default.
  */
 const RLN_PRIVILEGED_OPS: ReadonlySet<string> = new Set([
@@ -211,11 +197,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RLN_PROFILE)]
 
-    // Fungible RGB schemas: NIA (USDT/XAUT) + IFA (inflatable fungible).
-    // rgbNiaAsset is a generic fungible mapper (id/name/ticker/precision/balance),
-    // so it covers both. Older RLN nodes' rgb-lib doesn't know the IFA schema and
-    // can reject it as a filter value, so fall back to NIA only; either way we
-    // map whatever fungible arrays the node returns.
+    // Fungible RGB schemas: NIA (USDT/XAUT) + IFA. rgbNiaAsset is a generic
+    // fungible mapper so it covers both. Older nodes' rgb-lib rejects IFA as a
+    // filter value, so fall back to NIA only.
     let res: any
     try {
       res = await this.account.listAssets(['Nia', 'Ifa'])
@@ -347,10 +331,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     this.assertConnected()
     // An RLN node exposes invoice-status only for INBOUND invoices (keyed by
-    // bolt11); the status of an OUTBOUND payment we sent lives in list_payments,
-    // keyed by payment_hash. Querying getInvoiceStatus({ paymentHash }) never
-    // resolves for a sent payment, so a withdraw poll would time out even after
-    // the payment settled. Look the payment up in list_payments instead.
+    // bolt11); an OUTBOUND payment's status lives in list_payments, keyed by
+    // payment_hash. getInvoiceStatus({ paymentHash }) never resolves for a sent
+    // payment, so a withdraw poll would time out after it settled.
     try {
       const r: any = await this.account.listPayments()
       const list: any[] = (r && r.payments) ?? (Array.isArray(r) ? r : [])
@@ -525,9 +508,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Quote a cross-asset swap via the KaleidoSwap maker RFQ. The core `QuoteRequest`
-   * carries no layer hints, so callers pass `fromLayer`/`toLayer` as extra fields
-   * (the extension's swap-model does); they default to the RGB-LN layers.
+   * Quote a cross-asset swap via the KaleidoSwap maker RFQ. `QuoteRequest` carries
+   * no layer hints, so callers pass `fromLayer`/`toLayer` as extra fields;
+   * they default to the RGB-LN layers.
    */
   async getSwapQuote(request: QuoteRequest): Promise<Quote> {
     const req = request as SwapQuoteRequest
@@ -539,9 +522,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Execute an approved quote as an atomic swap. The maker binds execution
-   * to the quote's rfq id and exact raw amounts; settlement is an HTLC to
-   * this adapter's own node — no receiver address, no deposit leg.
+   * Execute an approved quote as an atomic swap. The maker binds execution to the
+   * quote's rfq id and exact raw amounts; settlement is an HTLC to this adapter's
+   * own node — no receiver address, no deposit leg.
    */
   async executeSwap(quote: Quote): Promise<SwapResult> {
     return this.ensureSwap().executeSwap(quote)

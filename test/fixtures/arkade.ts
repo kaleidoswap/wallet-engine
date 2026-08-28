@@ -1,17 +1,12 @@
 /**
- * Arkade WDK transaction-history fixtures.
+ * Arkade WDK transaction-history fixtures, mirroring the @arkade-os/sdk
+ * `ArkTransaction` shape from `account.getTransactionHistory()`:
  *
- * These mirror the @arkade-os/sdk `ArkTransaction` shape returned by
- * `account.getTransactionHistory()`, as consumed by
- * `ArkadeWdkAdapter.listTransactions()`:
- *
- *   {
- *     key: { arkTxid, commitmentTxid, boardingTxid },  // unused fields are ''
+ *   { key: { arkTxid, commitmentTxid, boardingTxid },  // unused fields are ''
  *     type: 'SENT' | 'RECEIVED',
- *     amount: number,        // net sats, reported as a signed magnitude
+ *     amount: number,      // net sats, signed magnitude
  *     settled: boolean,
- *     createdAt: number,     // milliseconds since epoch (NOT seconds)
- *   }
+ *     createdAt: number }  // ms since epoch (NOT seconds)
  */
 
 /** Fixed timestamps (ms) so tests stay deterministic. */
@@ -40,8 +35,8 @@ export const sentSettled = {
 }
 
 /**
- * Received off-chain VTXO that is not L1-settled. Spendable in Arkade UX, so
- * it must surface as `confirmed`, not generic pending (issue #6).
+ * Received off-chain VTXO that is not L1-settled. Spendable in Arkade UX, so it must
+ * surface as `confirmed`, not generic pending (issue #6).
  */
 export const receivedOffchainUnsettled = {
   key: { arkTxid: 'c'.repeat(64), commitmentTxid: '', boardingTxid: '' },
@@ -52,9 +47,8 @@ export const receivedOffchainUnsettled = {
 }
 
 /**
- * Boarding (on-chain → Ark) row, not yet settled. Boarding funds are genuinely
- * pending until confirmed, so this must stay `pending`. Its id comes from
- * `boardingTxid` since arkTxid/commitmentTxid are empty.
+ * Boarding (on-chain → Ark) row, not yet settled — genuinely pending until
+ * confirmed. Its id comes from `boardingTxid`, the others being empty.
  */
 export const boardingUnsettled = {
   key: { arkTxid: '', commitmentTxid: '', boardingTxid: 'd'.repeat(64) },
@@ -65,8 +59,8 @@ export const boardingUnsettled = {
 }
 
 /**
- * Row whose arkTxid is empty but commitmentTxid is set — exercises the
- * non-empty id fallback (`||`, not `??`, since empty fields are '').
+ * Row whose arkTxid is empty but commitmentTxid is set — exercises the non-empty id
+ * fallback (`||`, not `??`, since empty fields are '').
  */
 export const commitmentIdRow = {
   key: { arkTxid: '', commitmentTxid: 'e'.repeat(64), boardingTxid: '' },

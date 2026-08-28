@@ -3,9 +3,8 @@ import { ProtocolManager } from '../src/manager/ProtocolManager'
 import { MemoAdapter } from '../examples/minimal-adapter/MemoAdapter'
 
 /**
- * Exercises the documented minimal-adapter example end-to-end through the
- * ProtocolManager. Doubles as a guard so the example cannot rot out of sync with
- * the contract.
+ * Exercises the minimal-adapter example end-to-end through the ProtocolManager.
+ * Doubles as a guard so the example cannot rot out of sync with the contract.
  */
 describe('examples/minimal-adapter (MemoAdapter)', () => {
   it('registers, connects, and lists assets through the manager', async () => {

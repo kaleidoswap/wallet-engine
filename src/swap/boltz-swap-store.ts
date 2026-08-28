@@ -1,21 +1,19 @@
 /**
  * Boltz chain-swap store
  * ----------------------
- * Persists every swap this wallet creates, through the platform `IStorageProvider`
- * seam so it survives a service-worker eviction or an app restart. This is not a
- * cache: a chain swap whose record is lost is funds locked in a script the wallet
- * can no longer rebuild, so records are written BEFORE the lockup is funded and
- * kept until the swap is claimed, refunded, or provably expired unfunded.
+ * Persists every swap through the `IStorageProvider` seam so it survives a
+ * service-worker eviction. Not a cache: a swap whose record is lost is funds locked
+ * in a script the wallet can no longer rebuild, so records are written BEFORE the
+ * lockup is funded and kept until claimed, refunded, or provably expired unfunded.
  *
  * Two things must round-trip exactly:
- *  - the **swap index**, which seeds BIP85 key + preimage derivation. Reusing one
- *    makes the maker reject the create with `swap_already_exists` (409) until the
- *    previous swap expires, so indices are allocated monotonically and persisted
- *    before use.
- *  - the **create response**, which `SwapScript.fromChain` re-parses to rebuild the
- *    claim/refund scripts. Its 64-bit amounts arrive as `bigint`, which plain
+ *  - the swap index, seeding BIP85 key + preimage derivation. Reuse makes the maker
+ *    reject the create with `swap_already_exists` (409), so indices are allocated
+ *    monotonically and persisted before use.
+ *  - the create response, which `SwapScript.fromChain` re-parses to rebuild the
+ *    claim/refund scripts. Its 64-bit amounts arrive as `bigint`, which
  *    `JSON.stringify` throws on, so it is stored through a tagged encoding rather
- *    than coerced to `number` (a lossy round-trip here is a malformed script).
+ *    than coerced to `number` — a lossy round-trip is a malformed script.
  */
 
 import { getPlatform, type IStorageProvider } from '../ports'
@@ -29,9 +27,9 @@ export type BoltzChainSwapPhase =
   | 'lockup_funded'
   /**
    * The maker's lockup is in the mempool but UNCONFIRMED — deliberately not
-   * claimable. Claiming here is a zero-conf bet: the maker can replace an
-   * RBF-signalling lockup after our claim reveals the preimage, so we would give
-   * up the secret for a transaction that never confirms.
+   * claimable. Claiming is a zero-conf bet: the maker can replace an RBF-signalling
+   * lockup after our claim reveals the preimage, so we would give up the secret for
+   * a transaction that never confirms.
    */
   | 'server_locking'
   /** The maker's lockup is confirmed — the claim is available. */
@@ -59,15 +57,14 @@ export interface BoltzChainSwapRecord {
   /** Sats the maker locks for us — the binding figure from the create response. */
   serverLockAmount: number
   /**
-   * Block height on the destination chain after which the maker can reclaim its
-   * lockup. Claims are refused as this approaches: a claim that lands after the
-   * timeout races the maker's refund and can reveal the preimage for nothing.
+   * Height on the destination chain after which the maker can reclaim its lockup.
+   * Claims are refused as this approaches: a late claim races the maker's refund and
+   * can reveal the preimage for nothing.
    */
   claimTimeoutBlockHeight: number
   /**
-   * The maker has spent our lockup, which it can only do with the preimage our
-   * claim revealed. Once set, claims bypass the timeout guard — the secret is
-   * already out, so claiming late strictly beats not claiming.
+   * The maker has spent our lockup, only possible with the preimage our claim
+   * revealed. Once set, claims bypass the timeout guard — the secret is already out.
    */
   userLockupSpent?: boolean
   /** Address we must fund with `userLockAmount`. */
@@ -95,9 +92,9 @@ const BIGINT_TAG = '__bigint__'
 
 /**
  * `JSON.stringify` that survives the wasm boundary's `bigint` amounts by tagging
- * them, so `decode` restores the exact same type. Coercing to `number` would
- * round-trip most values silently and corrupt the rest — and the output feeds
- * script reconstruction, not a display field.
+ * them, so `decode` restores the exact type. Coercing to `number` would round-trip
+ * most values silently and corrupt the rest, and the output feeds script
+ * reconstruction rather than a display field.
  */
 export function encode(value: unknown): string {
   return JSON.stringify(value, (_key, v: unknown) =>
@@ -135,9 +132,8 @@ export class BoltzChainSwapStore {
   }
 
   /**
-   * Reserve the next derivation index. Persisted before it is handed out, so a
-   * crash between reservation and swap creation burns an index rather than
-   * risking a reuse that the maker would reject.
+   * Reserve the next derivation index, persisted before it is handed out, so a
+   * crash burns an index rather than risking a reuse the maker would reject.
    */
   async nextIndex(): Promise<number> {
     const run = this.indexLock.then(async () => {
@@ -182,8 +178,8 @@ export class BoltzChainSwapStore {
   }
 
   /**
-   * Drop a record. Only safe once the swap is settled — a funded swap without its
-   * record cannot be claimed or refunded.
+   * Drop a record. Only safe once settled — a funded swap without its record cannot
+   * be claimed or refunded.
    */
   async remove(swapId: string): Promise<void> {
     await this.storage.remove(KEY_PREFIX + swapId)

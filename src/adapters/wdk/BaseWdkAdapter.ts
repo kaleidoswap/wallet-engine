@@ -1,18 +1,14 @@
 /**
  * BaseWdkAdapter
  * --------------
- * Shared base for the WDK-backed adapters (Spark, Liquid, RGB/RLN, RGB-L1,
- * Arkade). Every WDK adapter wraps a lazily-loaded `manager` + `account` pair
- * and repeats the same connection bookkeeping; this class owns that once so the
- * adapters only implement what's genuinely protocol-specific.
+ * Shared base for the WDK-backed adapters. Every one wraps a lazily-loaded
+ * `manager` + `account` pair and repeats the same connection bookkeeping, so this
+ * class owns that once.
  *
- * It deliberately does NOT implement the data methods (listAssets, sendPayment,
- * …) — those differ per protocol. It only provides the connection lifecycle,
- * the connected-guard, the swap-capability lookup, and the allowlisted escape
- * hatch. Subclasses set `this.manager`/`this.account`/`this.connected` in their
- * own `connect()`.
- *
- * The native (non-WDK) adapters are intentionally left untouched.
+ * It deliberately does NOT implement the data methods — those differ per protocol.
+ * It provides the connection lifecycle, the connected-guard, the swap-capability
+ * lookup, and the allowlisted escape hatch; subclasses set
+ * `this.manager`/`this.account`/`this.connected` in their own `connect()`.
  */
 
 import { ProtocolType, ProtocolError } from '../../types/base'
@@ -27,9 +23,8 @@ export abstract class BaseWdkAdapter {
   protected connected = false
   protected network: string = 'mainnet'
   /**
-   * BIP-39 mnemonic, retained by adapters that sign messages/PSBTs locally.
-   * Held here so disconnect() reliably clears it — a locked wallet must not
-   * be able to keep signing.
+   * BIP-39 mnemonic, retained by adapters that sign locally. Held here so
+   * disconnect() reliably clears it — a locked wallet must not keep signing.
    */
   protected mnemonic: string | null = null
 
@@ -70,11 +65,10 @@ export abstract class BaseWdkAdapter {
   }
 
   /**
-   * Dispatch a caller-supplied operation to the account ONLY if it is on the
-   * adapter's allowlist. `operation` may be influenced by callers (deep links,
-   * chat/MCP tool args), so it is never used to index the account directly —
-   * this blocks reaching meta members (`constructor`, `__proto__`, prototype
-   * methods) or any non-whitelisted method.
+   * Dispatch a caller-supplied operation to the account ONLY if allowlisted.
+   * `operation` may be caller-influenced (deep links, chat/MCP args), so it never
+   * indexes the account directly — blocking meta members (`constructor`,
+   * `__proto__`, prototype methods) and any non-whitelisted method.
    */
   protected async runAllowlistedOp(
     allowed: ReadonlySet<string>,

@@ -1,14 +1,6 @@
 /**
- * Pure helpers for the RGB adapter.
- *
- * Extracted from src/protocols/rgb/adapter.ts so the adapter file can stay
- * focused on the IProtocolAdapter surface + SDK orchestration. Everything in
- * this module is side-effect free, has no `this` dependencies, and is
- * covered by tests/unit/rgb-helpers.test.ts.
- *
- * Adding to this module: keep helpers pure (no class state, no SDK calls).
- * Anything that needs the kaleido SDK client or the adapter's own config
- * belongs in adapter.ts.
+ * Pure helpers for the RGB adapter — side-effect free, no `this` dependencies.
+ * Anything needing the kaleido SDK client or adapter config belongs in adapter.ts.
  */
 
 import type { TransactionStatus, TransactionType } from "../types/base";
@@ -17,12 +9,9 @@ import type { TransactionStatus, TransactionType } from "../types/base";
 export { formatAmount } from "./amount";
 
 /**
- * Map the SDK's transfer `kind` field to our unified TransactionType.
- *
- * The SDK is inconsistent about case + naming — both raw lowercase strings
- * and PascalCase ("ReceiveAsset", "SendAsset") have been observed. Defaults
- * to "send" for unknown / undefined input so legacy entries don't display
- * as a confusing third state.
+ * Map the SDK's transfer `kind` to our unified TransactionType. The SDK is
+ * inconsistent about case and naming (raw lowercase and PascalCase both observed);
+ * unknown input defaults to "send" rather than a confusing third state.
  */
 export function mapTransferType(kind?: string): TransactionType {
   if (!kind) return "send";
@@ -32,12 +21,9 @@ export function mapTransferType(kind?: string): TransactionType {
 }
 
 /**
- * Map the SDK's transfer status string to our unified TransactionStatus.
- *
- * SDK casing has drifted between releases; we accept both. "WaitingCounterparty"
- * is RGB-specific (lightning transfer waiting on the receiver) and maps to
- * pending so the UI keeps showing the spinner rather than green-checking too
- * early.
+ * Map the SDK's transfer status to our unified TransactionStatus, accepting both
+ * casings. "WaitingCounterparty" is RGB-specific and maps to pending, so the UI
+ * keeps its spinner rather than green-checking early.
  */
 export function mapTransferStatus(status?: string): TransactionStatus {
   if (!status) return "pending";
@@ -48,10 +34,8 @@ export function mapTransferStatus(status?: string): TransactionStatus {
 }
 
 /**
- * Map a Lightning-payment status string to our unified TransactionStatus.
- *
- * Three variants of "succeeded" have shown up in the SDK across versions —
- * we accept all three to insulate the wallet UI from upstream churn.
+ * Map a Lightning-payment status to our unified TransactionStatus. Three variants
+ * of "succeeded" have appeared across SDK versions; all are accepted.
  */
 export function mapPaymentStatus(status?: string): TransactionStatus {
   if (!status) return "pending";
@@ -61,12 +45,9 @@ export function mapPaymentStatus(status?: string): TransactionStatus {
 }
 
 /**
- * Map a maker/taker swap status string to our unified TransactionStatus.
- *
- * The SDK historically returned PascalCase ("Completed") and lowercase
- * ("completed", "success", "error") interchangeably depending on whether
- * the response came from the maker or taker side. The mapper accepts both
- * so a refactor of the SDK doesn't quietly flip swaps to "pending".
+ * Map a maker/taker swap status to our unified TransactionStatus. The SDK has
+ * returned PascalCase and lowercase interchangeably depending on side, so both are
+ * accepted — otherwise an SDK refactor quietly flips swaps to "pending".
  */
 export function mapSwapStatus(status?: string): TransactionStatus {
   if (!status) return "pending";

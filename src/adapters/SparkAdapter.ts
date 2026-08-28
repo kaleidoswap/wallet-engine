@@ -1,21 +1,8 @@
 /**
  * Spark Protocol Adapter
- * Implements IProtocolAdapter using @buildonspark/spark-sdk (native Spark SDK).
+ * Implements IProtocolAdapter using @buildonspark/spark-sdk.
  *
- * Native SDK API reference:
- *  - SparkWallet.initialize({ mnemonicOrSeed, options: { network } })
- *  - wallet.getBalance()               → { balance: bigint }
- *  - wallet.getSparkAddress()          → SparkAddressFormat (string)
- *  - wallet.getSingleUseDepositAddress() → string (BTC on-chain)
- *  - wallet.createLightningInvoice({ amountSats, memo? }) → { invoice: { encodedInvoice } }
- *  - wallet.payLightningInvoice({ invoice, maxFeeSats }) → LightningSendRequest | WalletTransfer
- *  - wallet.transfer({ receiverSparkAddress, amountSats }) → WalletTransfer
- *  - wallet.withdraw({ onchainAddress, amountSats, exitSpeed }) → withdrawal result
- *  - wallet.getTransfers(limit?, offset?, createdAfter?, createdBefore?) → { transfers: WalletTransfer[], offset: number }
- *  - wallet.getTransfer(id)            → WalletTransfer | undefined
- *  - wallet.cleanupConnections()       → void
- *
- * Amounts in the SDK are in SATS. Balance is returned as bigint.
+ * SDK amounts are in SATS; balance comes back as bigint.
  */
 
 import { ExitSpeed } from "@buildonspark/spark-sdk/types";
@@ -68,11 +55,8 @@ const DEFAULT_MAX_FEE_SATS = 1000;
 
 import { waitForLightningSendSettlement } from "../lib/spark-lightning-settlement";
 
-// Pure helpers — timeout wrapper, byte/hex/token utilities, expiry parsing,
-// isEmptyBalance — live in ./helpers.ts. Balance cache state +
-// getSparkBalanceCached / invalidateSparkBalanceCache live in
-// ./balance-cache.ts. Both are re-exported here so existing call sites
-// that import isEmptyBalance / invalidateSparkBalanceCache keep working.
+// Pure helpers live in ./helpers.ts; balance cache state in ./balance-cache.ts.
+// Both are re-exported here so existing call sites keep working.
 import {
   formatAmount,
   mapTransferStatus,
@@ -296,10 +280,9 @@ export class SparkAdapter implements IProtocolAdapter {
           ? rawTokenIdFromBech32mTokenId(requestedAsset)
           : "";
 
-      // Fetch BTC transfers — best effort. A gateway/auth failure here must
-      // not hide token activity, and especially not the offline send-record
-      // fallback below. Runs CONCURRENTLY with the token block below — the
-      // two share nothing, and serializing them doubled activity latency.
+      // Best effort: a gateway/auth failure must not hide token activity, nor the
+      // offline send-record fallback below. Runs CONCURRENTLY with the token block
+      // — they share nothing, and serializing doubled activity latency.
       const btcTxsPromise = (async (): Promise<UnifiedTransaction[]> => {
         if (!shouldFetchBtc) return [];
         try {
@@ -332,10 +315,9 @@ export class SparkAdapter implements IProtocolAdapter {
         }
       })();
 
-      // Fetch token transactions. Every Spark RPC below is best-effort and
-      // isolated — a transport/auth failure must never hide locally-recorded
-      // sends, which are the only reliable record of an outgoing token
-      // transfer (a withdrawal with no change output is invisible to the
+      // Every Spark RPC below is best-effort and isolated: a transport failure must
+      // never hide locally-recorded sends, the only reliable record of an outgoing
+      // token transfer (a withdrawal with no change output is invisible to the
       // owner-filtered server query).
       const tokenTxsPromise = (async (): Promise<UnifiedTransaction[]> => {
         const tokenTxs: UnifiedTransaction[] = [];
@@ -405,12 +387,9 @@ export class SparkAdapter implements IProtocolAdapter {
             sentRecords.map((r) => [normalizeTxHash(r.hash), BigInt(Math.round(r.amount || 0))]),
           );
 
-          // Server-side history — best effort, isolated from the fallback.
-          // Uses the owner-keyed `queryTokenTransactions`, which returns
-          // complete output owners and amounts. That lets the converter
-          // derive direction from output ownership (see
-          // convertTokenTransactionToUnified) — the protocol exposes no
-          // direction field for token transactions.
+          // Owner-keyed `queryTokenTransactions` returns complete output owners and
+          // amounts, letting the converter derive direction from output ownership —
+          // the protocol exposes no direction field for token transactions.
           const txsWithStatus: Array<{
             tokenTransaction?: unknown;
             status: number;
@@ -677,17 +656,14 @@ export class SparkAdapter implements IProtocolAdapter {
       const lower = destination.toLowerCase();
 
       if (lower.startsWith("ln")) {
-        // Lightning payment — payLightningInvoice only DISPATCHES the payment
-        // to the SSP; settlement is asynchronous and can still fail (no route,
-        // fee cap, …). Reporting 'confirmed' on dispatch made WebLN/NWC
-        // callers believe zaps succeeded when they never settled, and denied
-        // them the preimage NIP-47 requires — so poll the send request until
-        // it reaches a terminal state.
+        // payLightningInvoice only DISPATCHES to the SSP; settlement is async and
+        // can still fail. Reporting 'confirmed' on dispatch made WebLN/NWC callers
+        // believe zaps succeeded when they never settled, and denied them the
+        // preimage NIP-47 requires — so poll until a terminal state.
         const extReq = request as PaymentRequest & { maxFee?: number };
-        // For amountless ("0-sat") BOLT-11 invoices the Spark SDK requires
-        // `amountSatsToSend` to be passed explicitly — and rejects it on
-        // amount-bearing ones, so gate on the invoice itself rather than on
-        // whether the caller supplied an amount.
+        // Amountless ("0-sat") BOLT-11 invoices require `amountSatsToSend`
+        // explicitly, and it is rejected on amount-bearing ones — so gate on the
+        // invoice, not on whether the caller supplied an amount.
         const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null;
         const result = await wallet.payLightningInvoice({
           invoice: destination,
@@ -934,13 +910,11 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Sweep every previously-generated single-use deposit address that is still
-   * unclaimed and credit any confirmed UTXOs paid to them. Each call to
-   * `getSingleUseDepositAddress()` returns a *new* address, so a deposit sent
-   * to an address from a previous session would otherwise stay stranded:
-   * the deposit-screen poller only watches the address currently on screen.
-   * Run this on unlock (after SPARK connects) and when the user opens the
-   * deposit screen so stuck deposits surface as soon as possible.
+   * Sweep every previously-generated single-use deposit address still unclaimed and
+   * credit confirmed UTXOs paid to them. Each `getSingleUseDepositAddress()` call
+   * returns a NEW address, so a deposit to an earlier session's address would
+   * otherwise stay stranded — the deposit-screen poller only watches the current
+   * one. Run on unlock and when the deposit screen opens.
    */
   async sweepSparkL1Deposits(): Promise<{
     addressesChecked: number;
@@ -1352,11 +1326,6 @@ export class SparkAdapter implements IProtocolAdapter {
     throw new ProtocolError("Swap operations not supported by Spark", "SPARK", "NOT_SUPPORTED");
   }
 
-  // ========================================================================
-  // Helper Methods
-  // ========================================================================
-  // Pure helpers (mapTransferStatus, formatAmount, byte/hex/token utilities)
-  // live in ./helpers.ts; SDK↔unified converters live in ./converters.ts.
-  // Covered by tests/unit/spark-helpers.test.ts +
-  // tests/unit/spark-converters.test.ts.
+  // --- Helper methods -----------------------------------------------------
+  // Pure helpers live in ./helpers.ts; SDK↔unified converters in ./converters.ts.
 }

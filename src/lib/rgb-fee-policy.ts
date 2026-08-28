@@ -1,19 +1,16 @@
 /**
- * Pure fee-rate policy for RGB on-chain operations.
- *
- * Extracted from `RgbAdapter#resolveFeeRate` so the priority order +
- * mainnet floors are unit-testable without a live RGB client.
+ * Pure fee-rate policy for RGB on-chain operations, extracted from
+ * `RgbAdapter#resolveFeeRate` so the priority order and mainnet floors are
+ * unit-testable without a live client.
  *
  * The policy ([GL #26]):
- *   1. If the caller passed a positive `provided` rate, honour it. The
- *      advanced UI can override the floor when the user knows what they
- *      want.
- *   2. Non-mainnet networks (regtest/signet/testnet/null/unknown):
- *      return `1 sat/vB`. Cheap, always confirms locally.
- *   3. Mainnet: ask the node for an estimate at the urgency-mapped block
- *      target, floor at `MAINNET_FEE_FLOOR[urgency]` so a cold-started
- *      node returning `1 sat/vB` doesn't strand mainnet transactions.
- *   4. Mainnet + estimate failure: return the floor.
+ *   1. A positive caller-`provided` rate is honoured — the advanced UI can
+ *      override the floor.
+ *   2. Non-mainnet networks: `1 sat/vB`.
+ *   3. Mainnet: ask the node at the urgency-mapped block target, floored at
+ *      `MAINNET_FEE_FLOOR[urgency]` so a cold-started node returning `1 sat/vB`
+ *      doesn't strand transactions.
+ *   4. Mainnet + estimate failure: the floor.
  */
 
 export type FeeUrgency = "low" | "normal" | "high";
@@ -26,10 +23,9 @@ const URGENCY_BLOCKS: Record<FeeUrgency, number> = {
 };
 
 /**
- * Conservative mainnet floors (sat/vB). Well above the dust-attack rate
- * but still cheap relative to any user-facing payment. Tuned for a
- * typical 10-min-block target at "normal" urgency. Adjust here if
- * mainnet conditions shift — every call site reads from this table.
+ * Conservative mainnet floors (sat/vB) — well above the dust-attack rate but cheap
+ * relative to any user-facing payment, tuned for a 10-min-block target at "normal"
+ * urgency. Every call site reads from this table.
  */
 export const MAINNET_FEE_FLOOR: Record<FeeUrgency, number> = {
   low: 5,
@@ -45,9 +41,9 @@ export interface ResolveRgbFeeRateInput {
   /** Active network from the adapter config. `null` = unknown / not connected. */
   network: string | null;
   /**
-   * Async estimator. Receives the urgency-mapped block target. Should return
-   * the node's `fee_rate` in sat/vB, or `null` on failure. Failures must
-   * not throw — the policy needs a value to fall back on.
+   * Async estimator, receiving the urgency-mapped block target. Returns the node's
+   * `fee_rate` in sat/vB, or `null` on failure. Must not throw — the policy needs a
+   * value to fall back on.
    */
   estimateFn: (blocks: number) => Promise<number | null>;
 }

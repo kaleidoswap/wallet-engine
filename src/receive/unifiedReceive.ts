@@ -1,19 +1,15 @@
 /**
  * Unified Receive URI (BIP321)
  * ----------------------------
- * Builds ONE QR payload that any wallet can pay, while Kaleido-aware wallets get the
- * richer multi-protocol options. The base is a **BIP321** `bitcoin:` URI — the
- * generalized successor to BIP21: an optional on-chain address in the path plus
- * payment methods as query params (`lightning=` BOLT11, `lno=` BOLT12), and unknown
- * params are ignored by other wallets. It stays backward-compatible with BIP21
- * (the `bitcoin:` scheme + `amount`/`label`/`lightning` are understood by BIP21 wallets).
+ * Builds ONE QR payload any wallet can pay, while Kaleido-aware wallets get the
+ * richer multi-protocol options. The base is a BIP321 `bitcoin:` URI — an optional
+ * on-chain address in the path plus payment methods as query params (`lightning=`,
+ * `lno=`), with unknown params ignored by other wallets, so it stays
+ * backward-compatible with BIP21.
  *
- * Per BIP321 the address MAY be omitted (`bitcoin:?lightning=...&spark=...`), so a
- * lite wallet with no on-chain address can still publish one QR. Ark / Spark / Liquid
- * / RGB ride as extra (non-standard) params that only Kaleido wallets read.
- *
- * This is the "single QR with embedded LN, Ark, Spark addresses" the lite-mode
- * receive flow needs. Pure + dependency-free.
+ * Per BIP321 the address MAY be omitted, so a lite wallet with no on-chain address
+ * can still publish one QR. Ark / Spark / Liquid / RGB ride as extra params only
+ * Kaleido wallets read. Pure + dependency-free.
  */
 
 export interface UnifiedReceiveParams {
@@ -54,13 +50,12 @@ const K = {
 } as const
 
 /**
- * Build a single BIP321 `bitcoin:` URI carrying every available receive method.
- * The address is optional; at least one of (address | lightning | lno | spark | ark |
+ * Build a single BIP321 `bitcoin:` URI carrying every available receive method. The
+ * address is optional; at least one of (address | lightning | lno | spark | ark |
  * liquid | rgb) must be present.
  *
- * Examples:
- *   bitcoin:bc1q...?amount=0.001&lightning=lnbc...&spark=spark1...&ark=ark1...
- *   bitcoin:?lightning=lnbc...&liquid=lq1...           (BIP321: address omitted)
+ * e.g. `bitcoin:bc1q...?amount=0.001&lightning=lnbc...&spark=spark1...`
+ *      `bitcoin:?lightning=lnbc...&liquid=lq1...`  (address omitted)
  */
 export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   const hasMethod =
@@ -76,10 +71,9 @@ export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   }
 
   const params = new URLSearchParams()
-  // Only emit `amount` for a finite, strictly-positive value. A 0, negative, or
-  // non-finite input (or a dust amount that rounds to "0" at 8 decimals) would
-  // otherwise produce a meaningless `amount=0` / `amount=-0.001` in the QR that
-  // a payer's wallet reads literally. Mirrors the parse-side non-negative guard.
+  // Only emit `amount` for a finite, strictly-positive value: a 0, negative or
+  // non-finite input (or dust rounding to "0" at 8 decimals) would otherwise put a
+  // meaningless `amount=0` in the QR that a payer's wallet reads literally.
   if (p.amountBtc != null && Number.isFinite(p.amountBtc) && p.amountBtc > 0) {
     const amount = formatBtc(p.amountBtc)
     if (amount !== '0') params.set('amount', amount)
@@ -142,13 +136,10 @@ function formatBtc(amountBtc: number): string {
 /**
  * The distinct payment methods present in a parsed unified URI.
  *
- * A unified `bitcoin:` URI may carry several independent payment methods (an
- * on-chain address AND a `lightning=` invoice AND an asset invoice). They are
- * NOT cryptographically bound to one another — a scanned QR could pair an
- * address with an unrelated invoice. Consumers MUST present the methods and let
- * the user/router choose one explicitly; they must not silently auto-pay a
- * different method than the one the user intended. This helper enumerates what's
- * on offer so the UI can do that.
+ * A unified URI may carry several independent methods, and they are NOT
+ * cryptographically bound to each other — a scanned QR could pair an address with
+ * an unrelated invoice. Consumers MUST present the methods and let the user/router
+ * choose explicitly, never silently auto-paying a different method than intended.
  */
 export function receiveMethodsOf(p: UnifiedReceiveParams): Array<keyof UnifiedReceiveParams> {
   const keys: Array<keyof UnifiedReceiveParams> = [

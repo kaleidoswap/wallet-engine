@@ -5,11 +5,10 @@ import { boltzSwapClientManager } from '../src/lib/boltz-swap-client-manager'
 import type { IStorageProvider } from '../src/ports'
 
 /**
- * BTC <-> L-BTC chain swaps. The invariants under test are the ones that decide
- * whether a funded swap stays recoverable: exact bigint round-tripping of the
- * create response (it is re-parsed into a swap script), monotonic index
- * allocation (a reused index is rejected by the maker as a duplicate), and a
- * phase machine that never walks a settled swap backwards.
+ * BTC <-> L-BTC chain swaps. The invariants under test decide whether a funded swap
+ * stays recoverable: exact bigint round-tripping of the create response (re-parsed
+ * into a swap script), monotonic index allocation (a reused index is rejected as a
+ * duplicate), and a phase machine that never walks a settled swap backwards.
  */
 
 class MemoryStorage implements IStorageProvider {

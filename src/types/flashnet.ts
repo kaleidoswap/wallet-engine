@@ -2,10 +2,8 @@
  * Flashnet Protocol Types
  * Ported from rate-extension/src/protocols/types/flashnet.ts
  *
- * Re-exports the @flashnet/sdk types we lean on so call sites have a single
- * import surface. These are type-only re-exports — erased at compile time — so
- * the SDK-free root barrel stays runtime-clean even though it does
- * `export * from './types/flashnet'`.
+ * Type-only re-exports of the @flashnet/sdk types we lean on, so call sites have one
+ * import surface and the SDK-free root barrel stays runtime-clean.
  */
 export type { FlashnetClient, WalletBalance, TokenBalance } from '@flashnet/sdk'
 export type {

@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { RlnWdkAdapter } from '../src/adapters/wdk/RlnWdkAdapter'
 
 /**
- * getPaymentStatus resolves the status of an OUTBOUND payment we sent. An RLN
- * node only exposes invoice-status for INBOUND invoices (keyed by bolt11), so
- * the status of a sent payment must be read from list_payments (keyed by
- * payment_hash) — otherwise a withdraw poll times out even after settlement.
+ * getPaymentStatus resolves the status of an OUTBOUND payment. An RLN node exposes
+ * invoice-status only for INBOUND invoices (keyed by bolt11), so a sent payment must
+ * be read from list_payments (keyed by payment_hash) — otherwise a withdraw poll
+ * times out even after settlement.
  */
 function connectedRln(account: any) {
   const adapter = new RlnWdkAdapter()

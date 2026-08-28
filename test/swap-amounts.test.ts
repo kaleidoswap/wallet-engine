@@ -2,13 +2,13 @@ import { describe, it, expect } from 'vitest'
 import { KaleidoswapSwap } from '../src/swap/KaleidoswapSwap'
 
 /**
- * Money fields coming back from the swap module must fail CLOSED on values that
- * would silently corrupt (missing/renamed field → NaN, or magnitude past
- * Number.MAX_SAFE_INTEGER). See S4.
+ * Money fields from the swap module must fail CLOSED on values that would silently
+ * corrupt (missing/renamed field → NaN, or magnitude past Number.MAX_SAFE_INTEGER).
+ * See S4.
  *
- * UNITS: everything on this boundary is raw base units — the quote's amounts
- * pass straight through to execution, so there is no display/raw conversion
- * for these tests to model (that mismatch was CVE-grade: audit C1).
+ * UNITS: raw base units throughout — the quote's amounts pass straight through to
+ * execution, so there is no display/raw conversion here (that mismatch was
+ * CVE-grade: audit C1).
  */
 function swapWithQuoteResponse(q: any) {
   const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
@@ -91,10 +91,10 @@ describe('KaleidoswapSwap.getQuote amount guards', () => {
 })
 
 /**
- * Quote binding: execution passes the approved quote's rfqId and exact raw
- * amounts to the maker — there is no server-side re-quote, so the fill cannot
- * diverge from the approval on either leg. executeSwap must refuse quotes
- * that are expired or missing their id/amounts.
+ * Quote binding: execution passes the approved quote's rfqId and exact raw amounts
+ * to the maker, so there is no server-side re-quote and the fill cannot diverge from
+ * the approval. executeSwap must refuse quotes that are expired or missing their
+ * id/amounts.
  */
 function swapWithSwapResponse(r: any) {
   const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })

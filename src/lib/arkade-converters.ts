@@ -1,15 +1,8 @@
 /**
- * SDK ↔ unified-shape converter for the Arkade adapter.
- *
- * The single converter here covers Arkade transaction history:
- *  - `convertArkTxToUnifiedAll` — expand one ArkTransaction into one
- *    UnifiedTransaction per asset moved (or a single BTC entry for
- *    pure-BTC transfers).
- *
- * `getAssetDetails` is injected as a callback so this module stays pure —
- * the adapter wraps its `getCachedAssetDetails(wallet, …)` to pre-bind the
- * wallet + cache. That keeps the unit tests free of the @arkade-os/sdk
- * Wallet shape.
+ * SDK ↔ unified-shape converter for the Arkade adapter, covering transaction
+ * history. `getAssetDetails` is injected as a callback so this module stays pure —
+ * the adapter pre-binds its wallet + cache, keeping unit tests free of the
+ * @arkade-os/sdk Wallet shape.
  */
 
 import type { ArkTransaction, Asset as ArkAsset } from "@arkade-os/sdk";
@@ -26,27 +19,23 @@ import {
 } from "./arkade-helpers";
 
 /**
- * Resolve metadata for an Arkade asset id. The adapter passes a
- * cache-backed implementation that calls `wallet.assetManager.getAssetDetails`.
- * Returning `null` on failure is fine — the converter falls back to the
- * helper-derived ticker / name / precision.
+ * Resolve metadata for an Arkade asset id. The adapter passes a cache-backed
+ * implementation over `wallet.assetManager.getAssetDetails`. `null` on failure is
+ * fine — the converter falls back to the helper-derived ticker/name/precision.
  */
 export type AssetDetailsResolver = (assetId: string) => Promise<Record<string, unknown> | null>;
 
 /**
  * Expand an ArkTransaction into one UnifiedTransaction per asset moved.
- * Asset-bearing transfers carry only dust BTC for the carrier output, so we
- * emit one entry per `tx.assets[]` entry; pure-BTC transfers emit a single
- * BTC entry. `type` is the SDK's TxType enum: "SENT" or "RECEIVED".
+ * Asset-bearing transfers carry only dust BTC for the carrier output, so emit one
+ * entry per `tx.assets[]`; pure-BTC transfers emit a single BTC entry.
  *
- * SDK semantics (transactionHistory.js): asset amounts on RECEIVED txs come
- * from `collectAssets` (positive sums). Asset amounts on SENT txs come from
- * `subtractAssets(spent, change)` — i.e. `change - spent`, which is negative.
- * We surface absolute amounts and rely on `direction` for the sign.
+ * SDK semantics: asset amounts on RECEIVED txs come from `collectAssets` (positive
+ * sums); on SENT txs from `subtractAssets(spent, change)`, i.e. negative. We
+ * surface absolute amounts and rely on `direction` for the sign.
  *
- * On any error the converter swallows and returns `[]` — `listTransactions`
- * uses Promise.all over a flat-map, so a single malformed history entry
- * must not poison the whole batch.
+ * Errors are swallowed to `[]` — `listTransactions` flat-maps over Promise.all, so
+ * one malformed entry must not poison the batch.
  */
 export async function convertArkTxToUnifiedAll(
   tx: ArkTransaction,

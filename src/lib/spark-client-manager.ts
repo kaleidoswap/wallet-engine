@@ -1,15 +1,12 @@
 /**
  * Spark Client Manager
  *
- * Manages the lifecycle of a SparkWallet from `@buildonspark/spark-sdk`.
- * The native SDK inlines WASM as a binary buffer (no dynamic import needed)
- * and uses gRPC over fetch, both of which are supported in an MV3
- * ServiceWorker and in Node — so the SDK is imported statically by default.
+ * Lifecycle of a SparkWallet from `@buildonspark/spark-sdk`. The SDK inlines WASM
+ * as a binary buffer and uses gRPC over fetch, both fine in an MV3 service worker
+ * and in Node, so it is imported statically by default.
  *
- * Platform seam: consumers may inject an `SparkSdkFactory` via
- * `setSdkFactory()` to avoid the static import path (e.g. React Native /
- * Metro, where `import('@buildonspark/spark-sdk')` mis-bundles). When no
- * factory is set the static `SparkWallet.initialize` path is used.
+ * Platform seam: consumers may inject a `SparkSdkFactory` via `setSdkFactory()` to
+ * avoid that static import (React Native / Metro mis-bundles it).
  */
 
 import type { SparkConfig } from '../types/spark'
@@ -30,10 +27,9 @@ const NETWORK_MAP: Record<string, SparkNetworkType> = {
 }
 
 /**
- * Decode an `nsec1…` bech32 secret into a 32-byte private key hex, or null.
- * Mirrors the extension's `importNostrPrivateKey` nsec branch without pulling
- * in the nostr module — the Spark SDK accepts a raw hex seed via
- * `mnemonicOrSeed`, so an nsec-rooted wallet resolves to its hex private key.
+ * Decode an `nsec1…` secret into a 32-byte private key hex, or null. The Spark SDK
+ * accepts a raw hex seed via `mnemonicOrSeed`, so an nsec-rooted wallet resolves
+ * to its hex private key.
  */
 function nsecToPrivateKeyHex(input: string): string | null {
   try {
@@ -48,9 +44,8 @@ function nsecToPrivateKeyHex(input: string): string | null {
 }
 
 /**
- * Resolve a Spark wallet secret to the value handed to the SDK. Accepts an
- * `nsec1…` root secret (resolved to hex), otherwise passes the input through
- * unchanged (the SDK handles BIP39 mnemonics and hex seeds itself).
+ * Resolve a Spark wallet secret for the SDK: `nsec1…` resolves to hex, anything
+ * else passes through (the SDK handles mnemonics and hex seeds itself).
  */
 export function resolveSparkMnemonicOrSeed(walletSecret: string): string {
   const trimmed = walletSecret.trim()
@@ -65,8 +60,7 @@ export function resolveSparkMnemonicOrSeed(walletSecret: string): string {
 }
 
 /**
- * SDK factory injected by consumers to avoid the static import path.
- * Optional — when absent the manager uses the statically-imported SDK.
+ * SDK factory injected by consumers to avoid the static import path. Optional.
  */
 export interface SparkSdkFactory {
   initializeWallet: (config: {
@@ -91,17 +85,14 @@ class SparkClientManager {
   private sdkFactory: SparkSdkFactory | null = null
 
   /**
-   * Inject an SDK factory before calling initialize(). Avoids the static
-   * `@buildonspark/spark-sdk` import path on platforms where it mis-bundles.
+   * Inject an SDK factory before initialize(), for platforms where the static
+   * `@buildonspark/spark-sdk` import mis-bundles.
    */
   setSdkFactory(factory: SparkSdkFactory): void {
     this.sdkFactory = factory
   }
 
-  /**
-   * Initialize the SparkWallet.
-   * Concurrent calls share the same in-flight promise.
-   */
+  /** Initialize the SparkWallet. Concurrent calls share the in-flight promise. */
   initialize(config: SparkConfig): Promise<void> {
     if (this._initPromise) return this._initPromise
 
@@ -155,12 +146,10 @@ class SparkClientManager {
   }
 
   /**
-   * Adopt an externally-owned SparkWallet (e.g. the one the WDK Spark adapter
-   * holds) as this manager's wallet, WITHOUT initializing a second wallet. Lets
-   * hosts that drive Spark through the WDK adapter keep using the flashnet/bridge
-   * glue that reads the wallet via `getWallet()`/`getConfig()`. Idempotent per
-   * wallet instance. `mnemonic` is intentionally empty — adopted wallets never
-   * re-derive; only `network` is read downstream.
+   * Adopt an externally-owned SparkWallet (e.g. the WDK Spark adapter's) WITHOUT
+   * initializing a second one, so hosts driving Spark through WDK keep the
+   * flashnet/bridge glue that reads `getWallet()`/`getConfig()`. Idempotent per
+   * instance. `mnemonic` is empty — adopted wallets never re-derive.
    */
   adoptExternalWallet(wallet: any, network: string): void {
     if (!wallet || this.wallet === wallet) return
@@ -170,18 +159,16 @@ class SparkClientManager {
   }
 
   /**
-   * Wrap `transferTokens` so every outgoing token transfer — regardless of
-   * caller (SparkAdapter.sendAsset, Flashnet swaps / liquidity, or any future
-   * path) — is persisted to the sent-token outbox.
+   * Wrap `transferTokens` so every outgoing token transfer is persisted to the
+   * sent-token outbox, whatever the caller.
    *
-   * The Spark SDK reports no direction for token transactions, so without a
-   * local record an outgoing transfer is indistinguishable from a receive
-   * (and a send with no change output is not returned by the server at all).
-   * Recording at this single choke point guarantees no token send is missed.
+   * The Spark SDK reports no direction for token transactions, so without a local
+   * record an outgoing transfer is indistinguishable from a receive (and a send
+   * with no change output is not returned by the server at all). Recording at this
+   * one choke point guarantees no send is missed.
    *
-   * Metadata is minimal here; SparkAdapter.sendAsset re-saves the same hash
-   * with full token metadata, which supersedes this entry (records are keyed
-   * by hash). Paths with no richer recorder degrade to a generic "TOKEN" label.
+   * Metadata is minimal; SparkAdapter.sendAsset re-saves the same hash with full
+   * metadata and supersedes this entry (records are keyed by hash).
    */
   private installTokenSendRecorder(wallet: any): void {
     if (typeof wallet?.transferTokens !== 'function') return
@@ -207,10 +194,7 @@ class SparkClientManager {
     }
   }
 
-  /**
-   * Return the active wallet instance.
-   * Throws if initialize() has not been called successfully.
-   */
+  /** Return the active wallet instance. Throws if initialize() has not run. */
   getWallet(): any {
     if (!this.wallet) {
       throw new Error('SparkWallet not initialized. Call initialize() first.')
@@ -223,9 +207,8 @@ class SparkClientManager {
   }
 
   /**
-   * Connected config with the mnemonic REDACTED — getConfig() is read for
-   * network/settings lookups, and returning the seed here would let one
-   * careless `log(getConfig())` in a host leak it.
+   * Connected config with the mnemonic REDACTED — one careless
+   * `log(getConfig())` in a host would otherwise leak the seed.
    */
   getConfig(): SparkConfig | null {
     return this.config ? { ...this.config, mnemonic: '' } : null

@@ -1,9 +1,9 @@
 /**
  * Platform Ports
  * --------------
- * The engine must never touch platform APIs directly. Each host (React Native,
- * browser extension, Node) implements these ports and injects them at startup,
- * so the same engine + adapters run everywhere unchanged.
+ * The engine must never touch platform APIs directly. Each host implements these
+ * ports and injects them at startup, so the same engine + adapters run everywhere
+ * unchanged.
  */
 
 /** Persistent key/value storage. RN → SecureStore/MMKV; extension → chrome.storage. */
@@ -41,8 +41,8 @@ export interface PlatformContext {
 }
 
 /**
- * Console-backed logger used when a host injects none. Kept as the single place
- * the engine touches `console`, so the rest of core stays host-agnostic.
+ * Console-backed logger used when a host injects none. The single place the engine
+ * touches `console`, so the rest of core stays host-agnostic.
  */
 export const consoleLogger: Logger = {
   debug: (...a) => console.debug(...a),

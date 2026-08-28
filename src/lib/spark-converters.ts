@@ -1,13 +1,7 @@
 /**
- * SDK ↔ unified-shape converters for the Spark adapter.
- *
- * The three converters here cover the three sources of Spark activity:
- *
- *  - `convertTransferToTransaction`     — native Spark transfer
- *  - `convertTokenTransactionToUnified` — RGB-Spark token transaction
- *    (with direction-inference from output ownership)
- *  - `buildSentRecordTransaction`       — offline fallback from the
- *    locally-stored send-token outbox
+ * SDK ↔ unified-shape converters for the Spark adapter, covering the three sources
+ * of Spark activity: native transfers, RGB-Spark token transactions (direction
+ * inferred from output ownership), and the offline send-token outbox fallback.
  */
 
 import { encodeBech32mTokenIdentifier } from '@buildonspark/spark-sdk'
@@ -35,9 +29,9 @@ const BTC_ASSET: UnifiedAsset = {
 } as UnifiedAsset
 
 /**
- * Project a native Spark transfer into the unified shape. BTC is the only
- * native Spark asset, so the asset is hard-coded — this branch never
- * surfaces RGB-Spark token transfers (see `convertTokenTransactionToUnified`).
+ * Project a native Spark transfer into the unified shape. BTC is the only native
+ * Spark asset, so it is hard-coded — this branch never surfaces token transfers
+ * (see `convertTokenTransactionToUnified`).
  */
 export function convertTransferToTransaction(transfer: SparkTransfer): UnifiedTransaction {
   const isIncoming = transfer.transferDirection === 'INCOMING'
@@ -59,20 +53,16 @@ export function convertTransferToTransaction(transfer: SparkTransfer): UnifiedTr
 }
 
 /**
- * Convert a TokenTransactionWithStatus from the Spark SDK into a
- * UnifiedTransaction.
+ * Convert a TokenTransactionWithStatus into a UnifiedTransaction.
  *
- * Direction: mints/creates are always receives. For transfers the protocol
- * exposes no direction field, so we derive it from output ownership — the
- * SDK orders token outputs recipients-first, change-last, so a wallet-owned
- * first output (`tokenOutputs[0]`) means the wallet was the recipient
- * (receive); anything else means it sent. A hash in `sentHashSet` (our
- * local outbox) overrides this as an authoritative "send" — it covers the
- * rare batch transfer where the wallet is a non-first recipient.
+ * Direction: mints/creates are always receives. Transfers carry no direction field,
+ * so it is derived from output ownership — the SDK orders token outputs
+ * recipients-first, change-last, so a wallet-owned `tokenOutputs[0]` means receive.
+ * A hash in `sentHashSet` (our local outbox) overrides this as an authoritative
+ * "send", covering the rare batch transfer where we are a non-first recipient.
  *
- * Amount: receives sum the wallet-owned outputs; sends sum the outputs that
- * left the wallet (everything not wallet-owned), falling back to the
- * recorded amount when the gateway returns no figure.
+ * Amount: receives sum wallet-owned outputs; sends sum those that left the wallet,
+ * falling back to the recorded amount when the gateway returns no figure.
  */
 export function convertTokenTransactionToUnified(
   txWithStatus: {
@@ -251,14 +241,10 @@ export function convertTokenTransactionToUnified(
 }
 
 /**
- * Build a UnifiedTransaction directly from a locally-stored send record,
- * with no Spark RPC. Used as the offline / failed-fetch fallback in
- * `listTransactions` so a completed token withdrawal always appears in
- * history even when the Spark gateway is unreachable.
- *
- * Marks the transaction as `confirmed` on the rationale that the record is
- * only written after the SDK returns a tx id — i.e. the transfer was
- * signed and broadcast.
+ * Build a UnifiedTransaction from a locally-stored send record with no Spark RPC —
+ * the offline / failed-fetch fallback, so a completed token withdrawal always
+ * appears in history. Marked `confirmed` because the record is only written after
+ * the SDK returns a tx id, i.e. the transfer was signed and broadcast.
  */
 export function buildSentRecordTransaction(
   record: SentTokenTxRecord,

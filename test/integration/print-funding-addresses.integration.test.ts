@@ -1,12 +1,10 @@
 /**
- * Prints the funding addresses for Alice & Bob on every network, so you know
- * where to send test coins before running the funded assertions.
+ * Prints the funding addresses for Alice & Bob on every network, so you know where
+ * to send test coins before running the funded assertions.
  *
- * Run just this file (needs outbound access to the test networks):
  *   npm run test:integration -- print-funding-addresses
  *
- * Each protocol logs independently and never fails the run — a protocol whose
- * endpoint is unreachable just prints its error so the others still report.
+ * Each protocol logs independently and never fails the run.
  */
 
 import { describe, it } from 'vitest'

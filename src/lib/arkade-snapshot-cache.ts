@@ -1,20 +1,14 @@
 /**
- * Short-lived snapshot cache for Arkade `wallet.getBalance()` and
- * `wallet.getVtxos()` — the Arkade sibling of spark-balance-cache.
+ * Short-lived snapshot cache for Arkade `getBalance()` and `getVtxos()` — the
+ * Arkade sibling of spark-balance-cache. Concurrent callers within the TTL share a
+ * single RPC, so one dashboard render doesn't repeat the same reads.
  *
- * A dashboard render issues `listAssets`, `getNodeInfo` and the BTC balance
- * back-to-back, and the activity screen asks for VTXOs at the same time;
- * without a cache each of those repeats the same balance/VTXO reads against
- * the Ark provider. Concurrent callers within the TTL window share a single
- * RPC (single-flight), and repeat callers reuse the snapshot.
+ * Deliberately NOT used for send-path coin selection: picking VTXOs from a snapshot
+ * up to TTL old could double-select a just-spent VTXO, so mutating operations must
+ * call {@link invalidateArkadeSnapshotCache}.
  *
- * Deliberately NOT used for send-path coin selection — picking VTXOs from a
- * snapshot that may be up to TTL old could double-select a just-spent VTXO.
- * Mutating operations must call {@link invalidateArkadeSnapshotCache}.
- *
- * Errors are not cached — the next caller retries fresh. Empty snapshots
- * (wallet still syncing after connect) use a much shorter TTL so the UI
- * doesn't sit on "0 sats" while the sync completes.
+ * Errors are not cached. Empty snapshots (still syncing) use a much shorter TTL so
+ * the UI doesn't sit on "0 sats".
  */
 
 import { log } from './log'

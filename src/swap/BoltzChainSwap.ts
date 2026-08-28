@@ -2,23 +2,18 @@
  * BoltzChainSwap
  * --------------
  * BTC <-> L-BTC chain swaps against a KaleidoSwap maker over `@kaleidorg/swap-sdk`
- * (Boltz protocol, maker `/v2`). This is the second swap venue in the engine: the
- * RFQ rail in `KaleidoswapSwap` settles cross-asset trades over RLN and owns RGB,
- * while this one moves BTC between chains and never touches RGB.
+ * (Boltz protocol, maker `/v2`). Unlike the RFQ rail in `KaleidoswapSwap`, this
+ * moves BTC between chains and never touches RGB. The SDK is self-contained here:
+ * it reads the lockup UTXO from Esplora, builds and signs the claim/refund, and
+ * broadcasts.
  *
- * The SDK is self-contained for this leg — it reads the lockup UTXO from Esplora,
- * builds and signs the claim/refund, and broadcasts. The wallet supplies only a
- * mnemonic, a destination address, and the on-chain send that funds the lockup.
+ * UNITS: satoshis throughout. The wasm boundary returns 64-bit values as `bigint`,
+ * coerced through `toSats` so a renamed or oversized field fails loudly.
  *
- * UNITS: every amount on this boundary is in satoshis. The wasm boundary hands
- * back 64-bit values as `bigint`; they are coerced through `toSats` so a renamed
- * or oversized field fails loudly instead of flowing on as `NaN`.
- *
- * MONEY ORDERING: nothing here funds a lockup. `createSwap` returns the maker's
- * binding amounts and the address to pay, and the host performs the send with its
- * own adapter — so the spend stays an explicit, user-visible step. The lockup must
- * be paid as ONE output for EXACTLY `userLockAmount`; the maker does not sweep
- * multiple UTXOs or accept an overpayment as valid.
+ * MONEY ORDERING: nothing here funds a lockup. `createSwap` returns the binding
+ * amounts and the address; the host performs the send, keeping the spend an
+ * explicit user-visible step. The lockup must be ONE output for EXACTLY
+ * `userLockAmount` — the maker sweeps neither multiple UTXOs nor an overpayment.
  */
 
 import { Quote, QuoteRequest, Layer, ProtocolError } from '../types/base'
@@ -51,9 +46,8 @@ const ASSET_CHAIN_KIND: Record<BoltzChainAsset, 'bitcoin' | 'liquid'> = {
 
 /**
  * Coerce a wasm-boundary money field to a number, failing CLOSED on anything that
- * would corrupt downstream math: non-finite (a renamed/missing field), negative,
- * or past `Number.MAX_SAFE_INTEGER` where JS loses integer precision. Every field
- * this coerces is a non-negative sat amount by definition.
+ * would corrupt downstream math: non-finite, negative, or past
+ * `Number.MAX_SAFE_INTEGER`. Every field coerced is a non-negative sat amount.
  */
 function toSats(value: unknown, field: string): number {
   const n = typeof value === 'bigint' ? Number(value) : Number(value)
@@ -115,9 +109,8 @@ interface RawChainSwapResponse {
 export interface BoltzChainSwapConfig {
   /**
    * BIP-39 mnemonic. Seeds the per-swap key and preimage through BIP85 (index
-   * 26589) — the same derivation the maker's restore endpoint expects, so a
-   * wallet restored from this mnemonic can recover swaps it no longer has
-   * records for.
+   * 26589), matching the maker's restore endpoint, so a restored wallet can
+   * recover swaps it has no records for.
    */
   mnemonic: string
   /** Esplora override for the Bitcoin side. Omit to use the SDK's network default. */
@@ -127,9 +120,8 @@ export interface BoltzChainSwapConfig {
   /** Fee rate for claim/refund transactions, sat/vB. */
   feeSatPerVb?: number
   /**
-   * Blocks of headroom required between the chain tip and the claim timeout.
-   * Defaults follow the reference Boltz clients: 2 on Bitcoin, 10 on Liquid,
-   * whose faster blocks make a late claim likelier to lose the race.
+   * Blocks of headroom between the chain tip and the claim timeout. Defaults
+   * follow the reference Boltz clients: 2 on Bitcoin, 10 on Liquid.
    */
   claimTimeoutMarginBlocks?: { bitcoin?: number; liquid?: number }
 }
@@ -165,21 +157,17 @@ export class BoltzChainSwap {
   }
 
   /**
-   * The xpub to hand `swapRestore` when recovering swaps without local records.
-   * Pass `"m"` as the derivation path — the API defaults to something else.
+   * xpub for `swapRestore` when recovering swaps without local records. Pass `"m"`
+   * as the derivation path — the API defaults to something else.
    */
   restoreXpub(): string {
     return this.masterKey().masterXpub()
   }
 
   /**
-   * INDICATIVE quote from the maker's pair card. The binding numbers are the ones
-   * in the `createSwap` result: the maker prices the swap when it creates it, and
-   * this estimate is not a commitment either side is held to. Mirrors the SDK's
-   * own fee helper (percentage on the locked amount, plus both user miner fees and
-   * the server's), so it tracks the real figure closely enough to preview.
-   *
-   * `expiresAt` is 0 — there is no server-side quote to expire.
+   * INDICATIVE quote from the maker's pair card; the binding numbers are the ones
+   * in the `createSwap` result. Mirrors the SDK's own fee helper, so it previews
+   * closely. `expiresAt` is 0 — there is no server-side quote to expire.
    */
   async getQuote(req: QuoteRequest & { fromLayer: Layer; toLayer: Layer }): Promise<Quote> {
     if (req.fromAmount == null) {
@@ -250,11 +238,9 @@ export class BoltzChainSwap {
 
   /**
    * Create the swap at the maker and persist it BEFORE returning, so the record
-   * that makes the funds recoverable always exists by the time the caller can act
-   * on the lockup address.
-   *
-   * Nothing is spent here. Fund `record.lockupAddress` with exactly
-   * `record.userLockAmount` in a single output, then call `markLockupFunded`.
+   * that makes funds recoverable exists by the time the caller sees the lockup
+   * address. Nothing is spent here: fund `record.lockupAddress` with exactly
+   * `record.userLockAmount` in one output, then call `markLockupFunded`.
    */
   async createSwap(params: CreateChainSwapParams): Promise<BoltzChainSwapRecord> {
     const from = assetForLayer(params.fromLayer)
@@ -318,9 +304,8 @@ export class BoltzChainSwap {
   }
 
   /**
-   * Record the lockup funding transaction. Call this as soon as the send is
-   * broadcast — from here on the swap has funds at risk and must reach a claim or
-   * a refund.
+   * Record the lockup funding tx. Call as soon as the send is broadcast — from
+   * here the swap has funds at risk and must reach a claim or a refund.
    */
   async markLockupFunded(swapId: string, lockupTxid: string): Promise<BoltzChainSwapRecord> {
     const record = await this.require(swapId)
@@ -335,9 +320,8 @@ export class BoltzChainSwap {
   }
 
   /**
-   * Poll the maker and advance the local phase. Safe to call on a host alarm/timer;
-   * this is the reconciliation path that replaces the SDK's WebSocket stream, which
-   * an evicted service worker would silently drop.
+   * Poll the maker and advance the local phase. The reconciliation path replacing
+   * the SDK's WebSocket stream, which an evicted service worker would drop.
    */
   async sync(swapId: string): Promise<BoltzChainSwapRecord> {
     const record = await this.require(swapId)
@@ -361,20 +345,16 @@ export class BoltzChainSwap {
   /**
    * Claim the maker's lockup to `destinationAddress`.
    *
-   * Refuses unless the maker's lockup is CONFIRMED. A claim is the one
-   * irreversible disclosure in the protocol — it publishes the preimage, which is
-   * the only thing stopping the maker from taking our lockup. Spending that
-   * secret against an unconfirmed transaction that can still be replaced is a
-   * one-sided bet, so `server_locking` is not a claimable phase.
+   * Refuses unless the lockup is CONFIRMED: a claim publishes the preimage, the
+   * only thing stopping the maker from taking our lockup, so spending that secret
+   * against a still-replaceable transaction is a one-sided bet.
    *
-   * Also refuses within `claimTimeoutMarginBlocks` of the claim timeout, where our
-   * claim would race the maker's refund — unless the maker already spent our
-   * lockup, which means the preimage is public anyway and claiming late is
-   * strictly better than not claiming.
+   * Also refuses within `claimTimeoutMarginBlocks` of the timeout, where the claim
+   * would race the maker's refund — unless the maker already spent our lockup, in
+   * which case the preimage is public and claiming late is strictly better.
    *
-   * Chain-swap claims take the non-cooperative script path: the cooperative MuSig2
-   * keyspend needs a partial signature exchange the SDK's params object cannot
-   * express. It is cheaper, and worth having once the SDK supports it.
+   * Takes the non-cooperative script path: the cooperative MuSig2 keyspend needs a
+   * signature exchange the SDK's params object cannot express.
    */
   async claim(swapId: string): Promise<BoltzChainSwapRecord> {
     const record = await this.require(swapId)
@@ -405,9 +385,8 @@ export class BoltzChainSwap {
   }
 
   /**
-   * Refund our own lockup back to `destinationAddress` after the swap failed or
-   * expired. Fails until the lockup timelock has passed — that is the maker
-   * enforcing the timeout, not a bug.
+   * Refund our own lockup to `destinationAddress` after failure or expiry. Fails
+   * until the lockup timelock passes — that is the maker enforcing the timeout.
    */
   async refund(swapId: string): Promise<BoltzChainSwapRecord> {
     const record = await this.require(swapId)
@@ -439,8 +418,8 @@ export class BoltzChainSwap {
   }
 
   /**
-   * Swaps that still owe an action — the work list for a host's resume-on-unlock
-   * pass. Excludes swaps that are settled or that expired before we funded them.
+   * Swaps still owing an action — the work list for a resume-on-unlock pass.
+   * Excludes settled swaps and ones that expired before we funded them.
    */
   async listPending(): Promise<BoltzChainSwapRecord[]> {
     const records = await this.store.list()
@@ -450,12 +429,9 @@ export class BoltzChainSwap {
   }
 
   /**
-   * Gate on the two conditions that make a claim safe to broadcast: the maker's
-   * lockup is confirmed, and the claim timeout is far enough away that our
-   * transaction can land before the maker may reclaim.
-   *
-   * Both are waived once `userLockupSpent` is set — at that point the preimage is
-   * already public, so neither caution buys anything.
+   * Gate on the two conditions making a claim safe: the maker's lockup is
+   * confirmed, and the claim timeout is far enough off to land first. Both are
+   * waived once `userLockupSpent` is set — the preimage is already public.
    */
   private async assertClaimable(record: BoltzChainSwapRecord): Promise<void> {
     if (record.userLockupSpent) return
@@ -493,9 +469,8 @@ export class BoltzChainSwap {
   }
 
   /**
-   * Rebuild the swap script from the stored create response. `side` selects which
-   * half: 'claim' is the maker's lockup on the destination chain, 'lockup' is ours
-   * on the source chain.
+   * Rebuild the swap script from the stored create response. `side` picks the half:
+   * 'claim' is the maker's lockup, 'lockup' is ours.
    */
   private buildScript(record: BoltzChainSwapRecord, side: 'claim' | 'lockup'): SwapScriptLike {
     const sdk = boltzSwapClientManager.getSdk()
@@ -529,15 +504,12 @@ export class BoltzChainSwap {
 }
 
 /**
- * Fold a maker status into the local phase.
+ * Fold a maker status into the local phase. Locally-terminal phases win: once a
+ * claim or refund is broadcast a server status cannot walk the record backwards,
+ * and unknown statuses leave the phase untouched.
  *
- * Locally-terminal phases win: once we have broadcast a claim or a refund, a
- * server status cannot walk the record backwards. Unknown statuses leave the
- * phase untouched — never infer progress from a state we do not model.
- *
- * `transaction.claimed` means the SERVER claimed OUR lockup, which it can only do
- * after our claim revealed the preimage; it is not our claim completing, so it
- * does not set 'claimed'.
+ * `transaction.claimed` means the SERVER claimed OUR lockup, only possible after
+ * our claim revealed the preimage, so it does not set 'claimed'.
  */
 export function nextPhase(current: BoltzChainSwapPhase, status?: string): BoltzChainSwapPhase {
   if (current === 'claimed' || current === 'refunded') return current

@@ -1,12 +1,9 @@
 /**
- * KaleidoClient Manager
- * Singleton manager for KaleidoClient lifecycle (RGB Lightning node + Kaleidoswap maker).
+ * KaleidoClient Manager — lifecycle for the RGB Lightning node + Kaleidoswap maker.
  *
- * Transport is either "http" (kaleido-sdk's HTTP RlnClient) or "nwc" (an
- * RLN-shaped client over Nostr Wallet Connect). The NWC implementation carries
- * a nostr/relay dependency, so it is NOT bundled here — the consumer injects a
- * factory via `setNwcRlnClientFactory()` (the extension supplies its NwcRlnClient;
- * React Native / node hosts that don't use NWC never register one).
+ * Transport is "http" (kaleido-sdk's RlnClient) or "nwc" (RLN-shaped over Nostr
+ * Wallet Connect). The NWC implementation carries a nostr/relay dependency, so it
+ * is not bundled: consumers inject a factory via `setNwcRlnClientFactory()`.
  */
 
 import { HttpClient, KaleidoClient } from "kaleido-sdk";
@@ -28,8 +25,8 @@ export interface KaleidoClientConfig {
 }
 
 /**
- * Narrow construction seam shared by direct RLN consumers. The node bearer is
- * intentionally named `nodeApiKey`; this type has no maker `apiKey` field.
+ * Narrow construction seam for direct RLN consumers. The node bearer is named
+ * `nodeApiKey`; this type has no maker `apiKey` field.
  */
 export interface KaleidoNodeClientConfig {
   baseUrl?: string;
@@ -92,17 +89,16 @@ export type NwcRlnClientFactory = (nwcUri: string) => NwcRlnClientLike;
 let nwcRlnClientFactory: NwcRlnClientFactory | null = null;
 
 /**
- * Register the NWC-backed RLN client factory. The extension calls this once at
- * startup with `(uri) => new NwcRlnClient(uri)`. Without it, transport "nwc" throws.
+ * Register the NWC-backed RLN client factory, e.g. `(uri) => new NwcRlnClient(uri)`.
+ * Without it, transport "nwc" throws.
  */
 export function setNwcRlnClientFactory(factory: NwcRlnClientFactory): void {
   nwcRlnClientFactory = factory;
 }
 
 /**
- * A MakerClient stand-in used in NWC mode when no maker URL is configured.
- * Every access rejects with MAKER_NOT_CONFIGURED so swap flows fail loudly
- * instead of silently hitting the wrong endpoint.
+ * MakerClient stand-in for NWC mode with no maker URL. Every access rejects with
+ * MAKER_NOT_CONFIGURED so swap flows fail loudly rather than hit the wrong endpoint.
  */
 function createMakerStub(): MakerClient {
   return new Proxy(
@@ -170,17 +166,15 @@ class KaleidoClientManager {
       return;
     }
 
-    // `apiKey` here is the RLN node credential (the maker API is public), so
-    // it maps to the SDK's node-scoped `nodeApiKey` — passing it as the SDK's
-    // `apiKey` would send it to the maker and never to the node.
+    // `apiKey` here is the RLN node credential (the maker API is public), so it
+    // maps to the SDK's node-scoped `nodeApiKey`; passing it as `apiKey` would
+    // send it to the maker and never to the node.
     //
-    // SECURITY: `nodeApiKey` only exists in kaleido-sdk >= 0.1.16. The package
-    // floor is 0.1.17 because the opt-in Lightning adapters also require that
-    // release's /nwc and /rln exports. Do NOT reintroduce a cast here: an unknown
-    // extra property is dropped silently at runtime, so on an older SDK the
-    // node credential would vanish and every RLN call would go out
-    // unauthenticated while this method still reported a healthy client. Typed
-    // literally, that downgrade is a compile error instead — see
+    // SECURITY: `nodeApiKey` only exists in kaleido-sdk >= 0.1.16. Do NOT
+    // reintroduce a cast here — an unknown extra property is dropped silently, so
+    // on an older SDK the node credential would vanish and every RLN call would go
+    // out unauthenticated while this method still reported a healthy client.
+    // Typed literally, that downgrade is a compile error instead; see
     // `sdkSupportsNodeAuth` in `test/kaleido-node-auth.test.ts`.
     this.client = createKaleidoClientWithNodeCredential({
       baseUrl: config.baseUrl,
@@ -209,8 +203,8 @@ class KaleidoClientManager {
   }
 
   /**
-   * Check if a node is reachable — either an HTTP node URL or an NWC link.
-   * Gates almost every RLN operation in the adapter.
+   * Whether a node is reachable (HTTP URL or NWC link). Gates almost every RLN
+   * operation in the adapter.
    */
   hasNode(): boolean {
     return !!this.config?.nodeUrl || this.config?.transport === "nwc";
@@ -229,8 +223,8 @@ class KaleidoClientManager {
   }
 
   /**
-   * Reset the client (disconnect and clear). Tears down the NWC relay pool
-   * when running the NWC transport so we don't leak sockets on reconnect.
+   * Reset the client. Tears down the NWC relay pool under the NWC transport so
+   * sockets don't leak on reconnect.
    */
   reset(): void {
     this.nwcRln?.close();

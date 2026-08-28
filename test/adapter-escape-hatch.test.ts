@@ -3,9 +3,9 @@ import { RlnWdkAdapter } from '../src/adapters/wdk/RlnWdkAdapter'
 import { ArkadeWdkAdapter } from '../src/adapters/wdk/ArkadeWdkAdapter'
 
 /**
- * executeProtocolOperation must dispatch ONLY allowlisted operation names and
- * never use the caller-supplied string to index the account object directly
- * (which would reach `constructor`, prototype methods, etc.). See S2.
+ * executeProtocolOperation must dispatch ONLY allowlisted operation names, never
+ * using the caller-supplied string to index the account object directly (which
+ * would reach `constructor`, prototype methods, etc.). See S2.
  */
 function connectedRln() {
   const calls: any[] = []

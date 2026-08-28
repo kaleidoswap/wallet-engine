@@ -1,6 +1,5 @@
 /**
- * RGB Protocol Adapter
- * Uses Kaleido SDK to implement the protocol adapter interface
+ * RGB Protocol Adapter — implements IProtocolAdapter over the Kaleido SDK.
  */
 
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
@@ -71,9 +70,8 @@ export class RgbAdapter implements IProtocolAdapter {
   private connected = false;
   private config: RgbConfig | null = null;
   /**
-   * In-memory fallback for per-swap status access tokens (paymentHash → token).
-   * Hosts should persist `SwapResult.accessToken` themselves — this map does
-   * not survive process/service-worker restarts.
+   * In-memory fallback for per-swap status tokens (paymentHash → token). Hosts
+   * should persist `SwapResult.accessToken`; this map does not survive restarts.
    */
   private swapAccessTokens = new Map<string, string>();
 
@@ -326,10 +324,9 @@ export class RgbAdapter implements IProtocolAdapter {
         );
       }
 
-      // Fetch on-chain transfers, Lightning payments AND swaps in parallel.
-      // RGB assets can move via all three rails; the asset card needs to
-      // surface all of them. listPayments() and listSwaps() return ALL
-      // entries — filter client-side by asset_id.
+      // On-chain transfers, Lightning payments and swaps in parallel: RGB assets
+      // move via all three rails. listPayments()/listSwaps() return ALL entries, so
+      // filter client-side by asset_id.
       const [transfersResponse, paymentsResponse, swapsResponse] = await Promise.all([
         client.rln.listTransfers({ asset_id: filter.asset }) as Promise<{
           transfers?: Record<string, unknown>[];
@@ -787,17 +784,12 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Resolve a sat/vB fee rate to use for an RGB on-chain operation.
+   * Resolve a sat/vB fee rate for an RGB on-chain operation. Thin wrapper around
+   * {@link resolveRgbFeeRatePolicy}, supplying `estimateFn` and `network` from live
+   * adapter state; the pure policy lives outside the class so it is unit-testable.
    *
-   * Thin wrapper around {@link resolveRgbFeeRatePolicy} that provides the
-   * `estimateFn` and `network` from the live adapter state. The pure
-   * policy lives outside the class so it can be unit-tested without
-   * spinning up a kaleido client.
-   *
-   * Closes [GL #26] for the RGB adapter — previously every RGB on-chain
-   * spend used a hardcoded `1` (createUtxos) or `5` (sendAsset, sendBtc)
-   * which is a regtest-era default. On a busy mainnet mempool that's
-   * effectively "never confirms".
+   * Closes [GL #26]: RGB on-chain spends previously used a hardcoded regtest-era
+   * `1`/`5`, which on a busy mainnet mempool means "never confirms".
    */
   private async resolveFeeRate(
     provided: number | undefined,
@@ -1137,10 +1129,7 @@ export class RgbAdapter implements IProtocolAdapter {
     }
   }
 
-  // ========================================================================
-  // SDK ↔ unified-shape converters moved to ./converters.ts (this-free;
-  // covered by tests/unit/rgb-converters.test.ts).
-  // ========================================================================
+  // SDK ↔ unified-shape converters live in ./converters.ts (this-free).
 
   // Pure mappers + formatAmount moved to ./helpers.ts (this-free; covered
   // by tests/unit/rgb-helpers.test.ts).

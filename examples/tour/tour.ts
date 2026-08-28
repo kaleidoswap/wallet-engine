@@ -1,13 +1,10 @@
 /**
  * A five-minute tour of the engine — no SDKs, no node, no network.
- * -----------------------------------------------------------------
  * Run it with:  npm run example:tour
  *
- * Everything here comes from the SDK-free root barrel. The adapters are the
- * in-memory `MemoAdapter` stub standing in for four protocols, so what you see
- * below is the REAL router, the REAL capability manifest and the REAL unified
- * receive — only the wallets underneath are fake. Swap `MemoAdapter` for
- * `createWdkRegistry({ enabled: [...] })` and the same code drives real funds.
+ * Everything comes from the SDK-free root barrel. The adapters are the in-memory
+ * `MemoAdapter` stub standing in for four protocols, so the router, capability
+ * manifest and unified receive below are all real — only the wallets are fake.
  */
 
 import {
@@ -26,8 +23,7 @@ const h = (title: string) => console.log(`\n\x1b[1m${title}\x1b[0m\n${'─'.repe
 async function main() {
   // ── 1. Register a few protocols ──────────────────────────────────────────
   // A registry is just a map of adapters. Real hosts build it with
-  // `createWdkRegistry`; here each protocol is the same stub with a different
-  // manifest entry behind it.
+  // `createWdkRegistry`; here each protocol is the same stub.
   const registry = new ProtocolAdapterRegistry()
   for (const [protocol, balanceSat] of [
     ['RGB_LN', 250_000],
