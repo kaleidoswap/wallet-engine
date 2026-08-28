@@ -21,19 +21,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm before setup-node: `cache: pnpm` needs the binary to already exist.
+      # The version comes from the "packageManager" field in package.json.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
+          cache: pnpm
 
-      # --ignore-scripts skips the WDK SDKs' native postinstalls; the build only needs types.
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      # Build the release from the locked dep versions CI proved green, not from
+      # a fresh float. --ignore-scripts skips the WDK SDKs' native postinstalls;
+      # the build only needs types.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
-      - run: npm run build
+      - run: pnpm run build
 
       # Gate the release on the unit suite — never publish an untested build.
       - name: Test
-        run: npm test
+        run: pnpm test
 
       # Verify the ACTUAL published artifact: pack the tarball, install it into a
       # bare project with NO protocol SDKs, and import the root barrel in plain

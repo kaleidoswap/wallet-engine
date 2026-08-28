@@ -16,27 +16,36 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # pnpm before setup-node: `cache: pnpm` needs the binary to already exist.
+      # The version comes from the "packageManager" field in package.json.
+      - uses: pnpm/action-setup@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
+          cache: pnpm
 
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      # --frozen-lockfile is the point: CI fails on a stale pnpm-lock.yaml rather
+      # than silently resolving whatever satisfies the ranges, so what CI proves
+      # green is what a developer actually installs. --ignore-scripts skips the
+      # WDK SDKs' native postinstalls; the build and unit suite only need types.
+      - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Type-check + build (tsc)
-        run: npm run build
+        run: pnpm run build
 
       - name: Test
-        run: npm test
+        run: pnpm test
 
       # The tour is the front door for anyone evaluating the engine, and it
       # drives the real router and manifest rather than a transcript. Running it
       # here means a change to those internals cannot quietly break the first
       # thing a new developer executes. No node, credentials or network needed.
       - name: Example tour runs
-        run: npm run example:tour
+        run: pnpm run example:tour
 
       # Audit only the engine's own runtime deps (@scure/*). The heavy protocol
       # SDKs are OPTIONAL and host-owned, so their transitive advisories are out
       # of scope here and must not break this repo's CI.
       - name: Audit production dependencies (high+)
-        run: npm audit --omit=dev --omit=optional --audit-level=high
+        run: pnpm audit --prod --no-optional --audit-level=high

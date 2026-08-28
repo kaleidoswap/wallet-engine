@@ -51,6 +51,12 @@ jobs:
         with:
           node-version: 22
 
+      # Deliberately npm, not the pnpm frozen install the other workflows use.
+      # @utexo/rgb-lib-linux-x64 is a TRANSITIVE dep with a binding.gyp and no
+      # explicit install script: npm hoists it and auto-runs node-gyp, while
+      # pnpm leaves it unhoisted in .pnpm/ and `pnpm rebuild` silently no-ops on
+      # it, producing no .node artifact. Until that is solved this suite floats
+      # within the declared ranges rather than resolving from pnpm-lock.yaml.
       - run: npm install --ignore-scripts --no-audit --no-fund
 
       # Only the RGB-L1 native bindings need lifecycle scripts (node-gyp build
