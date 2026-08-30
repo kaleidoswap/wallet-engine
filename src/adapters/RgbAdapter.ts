@@ -1041,7 +1041,20 @@ export class RgbAdapter implements IProtocolAdapter {
         "NO_AMOUNT",
       );
     }
-    if (quote.expiresAt > 0 && Date.now() > quote.expiresAt) {
+    // Fail CLOSED on a non-finite expiry. `expiresAt` is `expires_at * 1000` from
+    // the maker response, so a maker that omits or renames the field yields NaN —
+    // and the old `quote.expiresAt > 0` form made `NaN > 0` false, silently
+    // skipping the engine's only client-side expiry check. A counterparty must
+    // not be able to switch off a safety check by leaving a field out. (The
+    // amount guard directly above is already written NaN-safe; this matches it.)
+    if (!Number.isFinite(quote.expiresAt) || quote.expiresAt <= 0) {
+      throw new ProtocolError(
+        "Approved quote has no usable expiry — request a fresh quote",
+        "RGB_LN",
+        "QUOTE_EXPIRED",
+      );
+    }
+    if (Date.now() > quote.expiresAt) {
       throw new ProtocolError(
         "Approved quote has expired — request a fresh quote",
         "RGB_LN",
