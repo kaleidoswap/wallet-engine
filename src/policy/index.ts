@@ -18,6 +18,7 @@
 
 import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
+import { parseUnifiedReceiveURI, receiveMethodsOf } from '../receive/unifiedReceive'
 
 /** Fund-moving / signing operations a policy can gate. */
 export type PolicyOperation = 'send' | 'keysend' | 'signPsbt' | 'signLiquidPset' | 'signMessage' | 'swap'
@@ -73,6 +74,27 @@ export class PolicyError extends Error {
 }
 
 const AMOUNT_OPS: ReadonlySet<PolicyOperation> = new Set(['send', 'keysend', 'swap'])
+
+/**
+ * Every destination kind a request could actually be paid through: the outer
+ * string, plus each payment rail embedded in it when it is a unified BIP321 URI.
+ * Fails CLOSED — a rail whose value does not classify contributes 'UNKNOWN',
+ * which no sane grant allowlists, so an unparseable rail denies rather than
+ * silently disappearing.
+ */
+function destinationKindsOf(destination: string): DestinationKind[] {
+  const kinds: DestinationKind[] = [classifyDestination(destination).kind]
+  const parsed = parseUnifiedReceiveURI(destination)
+  if (!parsed) return kinds
+  for (const method of receiveMethodsOf(parsed)) {
+    const value = parsed[method]
+    if (typeof value !== 'string' || value === '') continue
+    // The on-chain address is already covered by the outer BIP21 classification.
+    if (method === 'btcAddress') continue
+    kinds.push(classifyDestination(value).kind)
+  }
+  return kinds
+}
 
 function deny(code: string, reason: string): PolicyDecision {
   return { allowed: false, code, reason }
@@ -159,9 +181,16 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
       return deny('DEST_NOT_ALLOWLISTED', `destination not in grant '${grant.id}' allowlist`)
     }
     if (grant.allowedDestinationKinds) {
-      const kind = classifyDestination(req.destination).kind
-      if (!grant.allowedDestinationKinds.includes(kind)) {
-        return deny('DEST_KIND_NOT_ALLOWED', `destination kind '${kind}' not allowed by grant '${grant.id}'`)
+      // A BIP321 URI is not one destination: it can carry a Lightning invoice, a
+      // BOLT12 offer, and Spark/Ark/Liquid/RGB addresses alongside the on-chain
+      // one, and the router will pay any of them — ranking Lightning FIRST. So
+      // classifying only the outer string let a grant scoped to 'BIP21' execute
+      // an attacker-chosen BOLT11 that the same grant denied when pasted bare.
+      // Require EVERY rail the URI offers to be a kind this grant allows.
+      for (const kind of destinationKindsOf(req.destination)) {
+        if (!grant.allowedDestinationKinds.includes(kind)) {
+          return deny('DEST_KIND_NOT_ALLOWED', `destination kind '${kind}' not allowed by grant '${grant.id}'`)
+        }
       }
     }
   }
