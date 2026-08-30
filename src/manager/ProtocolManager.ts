@@ -391,14 +391,24 @@ export class ProtocolManager {
   }
 
   /**
-   * Sat amount a send will move, for policy evaluation: the caller's explicit
-   * amount, else the value encoded in the BOLT11. Undefined only for a truly
-   * amountless invoice with no explicit amount — which the policy engine treats
-   * as unknown and denies whenever a spend cap is set.
+   * Sat amount a send will actually move, for policy evaluation.
+   *
+   * The INVOICE wins whenever it encodes an amount. The adapters forward the
+   * caller's `amount` only for amountless invoices — SparkAdapter.ts:691 and
+   * RlnWdkAdapter.ts:331 both gate on `decodeBolt11(...).amountMsat == null`, a
+   * deliberate change from commit 32c351c so stale UI state or WebLN args cannot
+   * silently re-amount a payment. Preferring `request.amount` here therefore
+   * evaluated a number the adapters discard: a caller could pass a 1,000,000-sat
+   * invoice with `amount: 500` and clear a 1,000-sat cap while the wallet paid
+   * the full 1,000,000.
+   *
+   * Undefined only for a truly amountless invoice with no explicit amount —
+   * which the policy engine treats as unknown and denies whenever a cap is set.
    */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
-    if (request.amount != null) return request.amount
-    return decodeBolt11(request.invoice).amountSat
+    const invoiceAmountSat = decodeBolt11(request.invoice).amountSat
+    if (invoiceAmountSat != null) return invoiceAmountSat
+    return request.amount ?? undefined
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
