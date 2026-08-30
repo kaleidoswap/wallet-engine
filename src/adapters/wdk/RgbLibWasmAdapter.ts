@@ -102,7 +102,17 @@ function toRgbNetwork(network: string): string {
     case 'regtest':
       return 'Regtest'
     default:
-      return 'Mainnet'
+      // Fail CLOSED. Defaulting an unrecognised label to 'Mainnet' meant a host
+      // typo, or a newer network name rgb-lib does not enumerate ('testnet4'),
+      // silently derived MAINNET keys while `getConnectionInfo()` kept reporting
+      // the requested network — the user believes they are on a valueless
+      // network while handing out real mainnet receive addresses. Refuse to
+      // guess which chain a wallet is for.
+      throw new ProtocolError(
+        `Unsupported RGB network '${network}' (expected mainnet, testnet, signet, or regtest)`,
+        'RGB_L1',
+        'CONFIG',
+      )
   }
 }
 
