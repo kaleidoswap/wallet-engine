@@ -35,6 +35,13 @@ export interface ArkadeSwapsInitOptions {
 
 class ArkadeSwapsClientManager {
   private client: SwapsClient | null = null;
+  /**
+   * The wallet `client` was built for. A swaps client signs with the wallet it
+   * was created from, so serving it to a different wallet's session spends the
+   * previous wallet's VTXOs. Kept so `initialize()` can tell a genuine re-init
+   * from a wallet switch.
+   */
+  private clientWallet: IWallet | null = null;
   /** Serializes concurrent initialize() calls. */
   private _initPromise: Promise<void> | null = null;
   /** Generation of the in-flight _initPromise. */
@@ -49,7 +56,23 @@ class ArkadeSwapsClientManager {
    * in-flight is treated as stale and a fresh init is started.
    */
   initialize(wallet: IWallet, opts?: ArkadeSwapsInitOptions): Promise<void> {
-    if (this.client) return Promise.resolve();
+    // Same wallet, client already built → nothing to do.
+    if (this.client && this.clientWallet === wallet) return Promise.resolve();
+    // A client bound to a DIFFERENT wallet must not be reused: `ProtocolManager
+    // .connect()` re-connects an adapter without calling `disconnect()` first, so
+    // a wallet switch reaches here with a live client still holding the previous
+    // wallet's keys. Tear it down and build one for the wallet we were given.
+    if (this.client) {
+      const stale = this.client;
+      this.client = null;
+      this.clientWallet = null;
+      this._generation++;
+      void Promise.resolve()
+        .then(() => stale.dispose())
+        .catch((error: unknown) =>
+          log.warn('[ArkadeSwapsClientManager] Error disposing superseded client:', error),
+        );
+    }
     // Reuse in-flight promise only if it belongs to the current generation.
     if (this._initPromise && this._initGeneration === this._generation) {
       return this._initPromise;
@@ -96,12 +119,14 @@ class ArkadeSwapsClientManager {
         return;
       }
       this.client = client;
+      this.clientWallet = wallet;
       log.info("[ArkadeSwapsClientManager] Initialized (Boltz swaps ready)");
     } catch (error: unknown) {
       // Only clear client if this init's generation is still current (prevents
       // a stale failed init from clearing a newer successful client).
       if (generation === this._generation) {
         this.client = null;
+        this.clientWallet = null;
       }
       const msg = error instanceof Error ? error.message : String(error);
       log.warn(
@@ -131,6 +156,7 @@ class ArkadeSwapsClientManager {
     // Bump generation first so any in-flight _doInitialize sees the change
     // even if ArkadeSwaps.create() has not returned yet.
     this._generation++;
+    this.clientWallet = null;
     if (!this.client) return;
     try {
       await this.client.dispose();
