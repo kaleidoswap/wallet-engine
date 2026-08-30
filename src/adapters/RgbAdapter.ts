@@ -106,7 +106,12 @@ export class RgbAdapter implements IProtocolAdapter {
       kaleidoClientManager.initialize({
         baseUrl: rgbConfig.makerUrl || "",
         nodeUrl: rgbConfig.nodeUrl,
-        apiKey: rgbConfig.apiKey,
+        // `jwt` is the documented NODE-auth credential (types/rgb.ts:28) while
+        // `apiKey` is documented as the maker's. Forwarding only `apiKey` meant a
+        // host that configured `jwt` per the docs got a node client with no
+        // Authorization header and no warning. Same precedence as the WDK path
+        // (RlnWdkAdapter.ts:154) so the two backends agree.
+        apiKey: rgbConfig.jwt ?? rgbConfig.apiKey,
         transport,
         nwcUri: rgbConfig.nwcUri,
       });

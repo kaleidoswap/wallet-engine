@@ -250,9 +250,9 @@ describe('F6b: RgbAdapter drops RgbConfig.jwt', () => {
       nodeUrl: 'http://mock-node',
       jwt: 'node-bearer-token', // documented in src/types/rgb.ts:28 as the node credential
     } as any)
-    // The string 'jwt' appears nowhere in RgbAdapter.ts — only apiKey is forwarded.
-    expect(state.initConfig.apiKey).toBeUndefined()
-    expect(JSON.stringify(state.initConfig)).not.toContain('node-bearer-token')
+    // FIXED (audit finding C-F8): `jwt` is now forwarded as the node credential,
+    // with the same `jwt ?? apiKey` precedence as RlnWdkAdapter.ts:154.
+    expect(state.initConfig.apiKey).toBe('node-bearer-token')
     await adapter.disconnect()
   })
 })
