@@ -98,8 +98,14 @@ export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   }
 
   const qs = params.toString()
-  // BIP321: `bitcoin:` + optional address + optional `?params`.
-  return `bitcoin:${p.btcAddress ?? ''}${qs ? `?${qs}` : ''}`
+  // BIP321: `bitcoin:` + optional address + optional `?params`. The address is
+  // percent-encoded like every other field: interpolated raw, an address holding
+  // a `?` or `&` injects query params into our own QR — a caller-supplied
+  // `bc1qGOOD?lightning=lnbcATTACKER` produced a URI whose `lightning=` rail we
+  // never set and whose `amount=` was swallowed into the injected value. Normal
+  // base58/bech32 addresses contain no reserved characters, so their encoding is
+  // a no-op and existing QRs are byte-for-byte unchanged.
+  return `bitcoin:${encodeURIComponent(p.btcAddress ?? '')}${qs ? `?${qs}` : ''}`
 }
 
 /** Parse a BIP321 unified URI back into its parts (Kaleido wallets use this on scan). */
@@ -107,7 +113,7 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
   // Address is optional under BIP321 → allow an empty path.
   const m = (uri ?? '').trim().match(/^bitcoin:([^?]*)(?:\?(.*))?$/i)
   if (!m) return null
-  const btcAddress = m[1] || undefined
+  const btcAddress = decodePath(m[1]) || undefined
   const params = new URLSearchParams(m[2] ?? '')
   return {
     btcAddress,
@@ -146,6 +152,19 @@ function toDecimalAmount(v: string | null, opts: { maxDecimals?: number; max?: n
   if (!Number.isFinite(n) || n < 0) return undefined
   if (opts.max != null && n > opts.max) return undefined
   return n
+}
+
+/**
+ * Percent-decode the URI path. Malformed encoding (a hostile QR ending in a bare
+ * `%`) must not throw out of the parser — fall back to the raw text, matching how
+ * `extractLightning` in the destination classifier handles the same hazard.
+ */
+function decodePath(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
 }
 
 /** Largest amount BIP21 can meaningfully carry: the whole BTC supply. */
