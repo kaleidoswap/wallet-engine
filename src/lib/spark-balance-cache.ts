@@ -44,6 +44,10 @@ export type SparkBalanceSnapshot = Awaited<ReturnType<SparkWalletInstance['getBa
 
 let cachedBalance: { value: SparkBalanceSnapshot; fetchedAt: number } | null = null
 let inflightBalance: Promise<SparkBalanceSnapshot> | null = null
+// The generation the in-flight fetch started in. A fetch begun before an
+// invalidation is stale for READERS too, not just for the cache write-back —
+// serving it hands a post-send caller the pre-send balance.
+let inflightGeneration = 0
 // The wallet instance the cached value / in-flight fetch belongs to. The engine
 // holds a single active Spark wallet at a time, but this cache is a module-level
 // singleton shared by both Spark adapters — so if the active wallet is ever
@@ -88,9 +92,15 @@ export async function getSparkBalanceCached(
       return cachedBalance.value
     }
   }
-  if (inflightBalance) return inflightBalance
+  // Share the in-flight fetch only when it started in the current generation.
+  // Otherwise it predates an invalidation (a completed send/receive) and would
+  // report spent sats as still available — the same staleness the write-back
+  // guard below rejects. Let it finish for whoever already holds it; start a
+  // fresh fetch for this caller.
+  if (inflightBalance && inflightGeneration === cacheGeneration) return inflightBalance
 
   const startedGeneration = cacheGeneration
+  inflightGeneration = startedGeneration
   inflightBalance = (async () => {
     try {
       const value = await withTimeout(wallet.getBalance(), SPARK_RPC_TIMEOUT_MS, 'spark.getBalance')
@@ -102,7 +112,9 @@ export async function getSparkBalanceCached(
       }
       return value
     } finally {
-      inflightBalance = null
+      // Only clear the slot if this fetch still owns it; a superseded fetch
+      // settling later must not wipe a newer one's dedupe.
+      if (inflightGeneration === startedGeneration) inflightBalance = null
     }
   })()
 
@@ -126,6 +138,7 @@ export function invalidateSparkBalanceCache(): void {
 export function _resetSparkBalanceCacheForTests(): void {
   cachedBalance = null
   inflightBalance = null
+  inflightGeneration = 0
   cachedWallet = null
   cacheGeneration++
 }
