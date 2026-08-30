@@ -644,17 +644,18 @@ export class RgbAdapter implements IProtocolAdapter {
       const client = kaleidoClientManager.getClient();
       const btcBalance = await client.rln.getBtcBalance();
       const vanilla = btcBalance?.vanilla || {};
-      const colored = btcBalance?.colored || {};
 
-      const spendableVanilla = vanilla.spendable || 0;
-      const spendableColored = colored.spendable || 0;
-      const futureVanilla = vanilla.future || 0;
-      const futureColored = colored.future || 0;
-
-      const confirmed = spendableVanilla + spendableColored;
+      // Vanilla only. "Colored" sats sit under RGB asset allocations and cannot be
+      // spent as ordinary BTC — `convertBtcBalance` (rgb-converters.ts) states the
+      // same policy in its doc comment and returns vanilla only, so summing them
+      // here made one adapter report two different BTC balances for identical node
+      // state (`getAssetBalance('BTC')` → 5000 vs `getBtcBalance()` → 7000). The
+      // overstated figure is the one a host uses to bound a send or a "max" button.
+      // Colored sats remain visible per-asset and via `getRgbDetailedBalance()`.
+      const confirmed = vanilla.spendable || 0;
       // `future` is the expected balance after all pending txs settle.
       // Pending incoming = amount above spendable; pending outgoing reduces future below spendable.
-      const futureTotal = futureVanilla + futureColored;
+      const futureTotal = vanilla.future || 0;
       const unconfirmed = Math.max(futureTotal - confirmed, 0);
 
       return { confirmed, unconfirmed, total: futureTotal };
