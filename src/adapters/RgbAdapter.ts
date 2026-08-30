@@ -274,11 +274,17 @@ export class RgbAdapter implements IProtocolAdapter {
         return convertBtcBalance(btcBalance);
       }
 
-      // Get RGB asset balance
-      const balanceData = await client.rln.getAssetBalance({
-        asset_id: assetId,
-      });
-      return convertSdkBalance(balanceData);
+      // Get RGB asset balance AT THE ASSET'S OWN PRECISION. `convertSdkBalance`
+      // defaults to 8 (the BTC convention), which silently understates every
+      // non-8-precision asset by 10^(8-p) — a precision-0 asset holding 1,000,000
+      // units rendered as "0.01000000" — and disagreed with the same asset's
+      // `listAssets()` card, which does use the real precision. Metadata is
+      // fetched in parallel so this costs no extra round trip.
+      const [balanceData, metadata] = await Promise.all([
+        client.rln.getAssetBalance({ asset_id: assetId }),
+        client.rln.getAssetMetadata({ asset_id: assetId }),
+      ]);
+      return convertSdkBalance(balanceData, (metadata as { precision?: number })?.precision ?? 8);
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get asset balance");
     }
