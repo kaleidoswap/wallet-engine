@@ -178,6 +178,27 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     this.connected = true
   }
 
+  /**
+   * Tear down symmetrically with `connect()`. The base implementation clears only
+   * this adapter's own account/manager/mnemonic — "a locked wallet must not be
+   * able to keep signing", per its doc comment — but `connect()` also handed the
+   * raw SparkWallet to the `sparkClientManager` singleton. Without releasing it
+   * there, the singleton keeps serving a live, signing-capable wallet long after
+   * the adapter reports disconnected.
+   */
+  async disconnect(): Promise<void> {
+    const adopted = (this.account as any)?._wallet
+    try {
+      if (adopted) {
+        const { sparkClientManager } = await import('../../lib/spark-client-manager')
+        sparkClientManager.releaseExternalWallet(adopted)
+      }
+    } catch {
+      /* the glue is optional on connect; releasing it must not block teardown */
+    }
+    await super.disconnect()
+  }
+
   async getConnectionInfo(): Promise<ConnectionInfo> {
     this.assertConnected()
     // Warm the balance cache so the dashboard's first read is coalesced.

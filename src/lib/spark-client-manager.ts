@@ -227,6 +227,22 @@ class SparkClientManager {
   }
 
   /**
+   * Release a wallet handed over by `adoptExternalWallet`, so tearing down the
+   * adapter that owns it also revokes this singleton's signing capability.
+   *
+   * No-op unless the singleton still holds exactly that wallet — another owner
+   * may have adopted in the meantime, and dropping a live wallet that is not
+   * ours would be a worse bug than the one this closes.
+   */
+  releaseExternalWallet(wallet: any): void {
+    if (!wallet || this.wallet !== wallet) return
+    this.wallet = null
+    this.readonlyClient = null
+    this.config = null
+    this._teardownGeneration++
+  }
+
+  /**
    * Wrap `transferTokens` so every outgoing token transfer — regardless of
    * caller (SparkAdapter.sendAsset, Flashnet swaps / liquidity, or any future
    * path) — is persisted to the sent-token outbox.
