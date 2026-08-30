@@ -17,7 +17,8 @@ import { log } from './log'
 import { SparkWallet, SparkReadonlyClient } from '@buildonspark/spark-sdk'
 import { saveSentTokenRecord } from './spark-sent-token-records'
 import { bech32 } from '@scure/base'
-import { bytesToHex } from '@noble/hashes/utils.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import { sha256 } from '@noble/hashes/sha2.js'
 
 /** Matches the SDK's internal NetworkType (keyof typeof Network). Not exported by the SDK. */
 type SparkNetworkType = 'MAINNET' | 'TESTNET' | 'SIGNET' | 'REGTEST' | 'LOCAL'
@@ -77,6 +78,15 @@ export interface SparkSdkFactory {
 
 // ---------------------------------------------------------------------------
 // SparkClientManager
+/**
+ * Stable identity for the wallet a config denotes, used only to decide whether
+ * two `initialize()` calls are for the same wallet. Hashed so the manager never
+ * holds a second comparable copy of the secret.
+ */
+function walletKey(config: SparkConfig): string {
+  return `${config.network ?? 'mainnet'}:${bytesToHex(sha256(utf8ToBytes(config.mnemonic ?? '')))}`
+}
+
 // ---------------------------------------------------------------------------
 
 class SparkClientManager {
@@ -85,6 +95,21 @@ class SparkClientManager {
   private config: SparkConfig | null = null
   /** Serializes concurrent initialize() calls to prevent races during SW restart. */
   private _initPromise: Promise<void> | null = null
+  /**
+   * Which wallet the in-flight `_initPromise` is for. Sharing an in-flight init
+   * is only correct for the SAME wallet — handing wallet B's caller the promise
+   * for wallet A's handshake puts B's session on A's wallet and spends A's funds.
+   * A hash, not the secret, so no second copy of key material is retained.
+   */
+  private _initKey: string | null = null
+  /**
+   * Bumped by every disconnect()/reset() and by a wallet switch. An in-flight
+   * `_doInitialize` captures it and refuses to install its wallet if it changed
+   * while the SDK handshake was pending — otherwise a teardown that completed
+   * first is silently undone, restoring a "locked" wallet and its
+   * mnemonic-bearing config to a live, signing-capable state.
+   */
+  private _teardownGeneration = 0
   /** Serializes concurrent readonly client initialization. */
   private _readonlyInitPromise: Promise<SparkReadonlyClient> | null = null
   /** Optional SDK factory escape hatch (React Native / Metro). */
@@ -103,12 +128,25 @@ class SparkClientManager {
    * Concurrent calls share the same in-flight promise.
    */
   initialize(config: SparkConfig): Promise<void> {
-    if (this._initPromise) return this._initPromise
+    const key = walletKey(config)
+    // Same wallet → share the handshake, as before.
+    if (this._initPromise && this._initKey === key) return this._initPromise
+    // Different wallet → the pending init belongs to someone else. Invalidate it
+    // (the generation guard stops it installing) and start a fresh one, rather
+    // than returning it and silently connecting the caller to the other wallet.
+    if (this._initPromise) this._teardownGeneration++
 
-    this._initPromise = this._doInitialize(config).finally(() => {
-      this._initPromise = null
+    this._initKey = key
+    const promise = this._doInitialize(config).finally(() => {
+      // Only the newest init clears the slot; an older one settling later must
+      // not wipe a newer in-flight handshake.
+      if (this._initPromise === promise) {
+        this._initPromise = null
+        this._initKey = null
+      }
     })
-    return this._initPromise
+    this._initPromise = promise
+    return promise
   }
 
   private async _doInitialize(config: SparkConfig): Promise<void> {
@@ -117,6 +155,8 @@ class SparkClientManager {
       await this.disconnect()
     }
 
+    // Captured AFTER the re-init disconnect above, which bumps the counter itself.
+    const generation = this._teardownGeneration
     const network: SparkNetworkType = NETWORK_MAP[config.network ?? 'mainnet'] ?? 'MAINNET'
     const mnemonicOrSeed = resolveSparkMnemonicOrSeed(config.mnemonic)
 
@@ -134,6 +174,21 @@ class SparkClientManager {
         })
       }
 
+      // A disconnect()/reset()/wallet-switch that landed while the handshake was
+      // pending has already torn this session down. Installing now would undo it:
+      // the locked wallet would come back live and signing-capable, and
+      // `this.config` would restore the mnemonic. Drop the orphan instead.
+      if (generation !== this._teardownGeneration) {
+        log.info('[SparkClientManager] Init superseded by teardown — discarding wallet')
+        try {
+          await result.wallet?.cleanupConnections?.()
+        } catch (cleanupError: unknown) {
+          const cleanupMsg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+          log.warn('[SparkClientManager] Error cleaning up superseded wallet:', cleanupMsg)
+        }
+        return
+      }
+
       this.wallet = result.wallet
       this.config = config
       this.installTokenSendRecorder(this.wallet)
@@ -148,7 +203,9 @@ class SparkClientManager {
         log.warn('[SparkClientManager] Failed to enable privacy mode:', privMsg)
       }
     } catch (error: unknown) {
-      this.wallet = null
+      // Only clear the wallet if this init still owns the session; a failure here
+      // must not tear down a newer, successful one.
+      if (generation === this._teardownGeneration) this.wallet = null
       const msg = error instanceof Error ? error.message : String(error)
       throw Object.assign(new Error(`Failed to initialize SparkWallet: ${msg}`), { cause: error })
     }
@@ -278,13 +335,16 @@ class SparkClientManager {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
+    this._teardownGeneration++
   }
 
   reset(): void {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
+    this._teardownGeneration++
     this._initPromise = null
+    this._initKey = null
     this._readonlyInitPromise = null
     log.info('[SparkClientManager] Complete reset performed')
   }
