@@ -367,16 +367,28 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     const r: any = await this.account.listTransactions()
     const txs: any[] = r?.transactions ?? []
-    return txs.map((t) => ({
-      id: t.txid ?? t.transaction_id ?? '',
-      type: (t.transaction_type === 'User' || t.amount < 0 ? 'send' : 'receive') as UnifiedTransaction['type'],
-      status: (t.confirmation_time ? 'confirmed' : 'pending') as TransactionStatus,
-      timestamp: (t.confirmation_time?.timestamp ?? 0) * 1000,
-      amount: Number(t.received ?? t.sent ?? 0),
-      amountDisplay: '',
-      asset: undefined as unknown as UnifiedAsset,
-      protocolData: t,
-    }))
+    // Direction and amount come from received/sent, not from a transaction_type
+    // string: the node's enum is RgbSend | Drain | CreateUtxos | SendBtc |
+    // Incoming — there is no 'User' — and the schema has no `amount` field. The
+    // old predicate (`transaction_type === 'User' || t.amount < 0`) was therefore
+    // always false, so EVERY on-chain tx reported as a receive; and `received ??
+    // sent` always took `received`, which is 0 on a send. A full-wallet drain
+    // displayed in history as "received 0". Matches the sibling adapters
+    // (RgbLibWdkAdapter.ts:214, RgbLibWasmAdapter.ts:851-885).
+    return txs.map((t) => {
+      const received = Number(t.received ?? 0)
+      const sent = Number(t.sent ?? 0)
+      return {
+        id: t.txid ?? t.transaction_id ?? '',
+        type: (received >= sent ? 'receive' : 'send') as UnifiedTransaction['type'],
+        status: (t.confirmation_time ? 'confirmed' : 'pending') as TransactionStatus,
+        timestamp: (t.confirmation_time?.timestamp ?? 0) * 1000,
+        amount: Math.abs(received - sent) || received || sent,
+        amountDisplay: '',
+        asset: undefined as unknown as UnifiedAsset,
+        protocolData: t,
+      }
+    })
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
