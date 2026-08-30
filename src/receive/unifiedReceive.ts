@@ -111,10 +111,10 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
   const params = new URLSearchParams(m[2] ?? '')
   return {
     btcAddress,
-    // Amounts are coerced through a finite/non-negative guard: a junk, negative,
-    // or non-finite `amount=` must surface as `undefined`, never as NaN/-1/Infinity
-    // flowing into a send.
-    amountBtc: toNonNegativeFinite(params.get('amount')),
+    // Junk, negative, non-decimal or out-of-range `amount=` surfaces as
+    // `undefined`, never as a number flowing into a send. BTC amounts carry at
+    // most 8 decimals (one satoshi) and never exceed max supply.
+    amountBtc: toDecimalAmount(params.get('amount'), { maxDecimals: 8, max: MAX_BTC }),
     label: params.get('label') ?? undefined,
     lightningInvoice: params.get(K.lightning) ?? undefined,
     lightningOffer: params.get(K.lno) ?? undefined,
@@ -123,16 +123,33 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
     liquidAddress: params.get(K.liquid) ?? undefined,
     rgbInvoice: params.get(K.rgb) ?? undefined,
     assetId: params.get(K.assetId) ?? undefined,
-    assetAmount: toNonNegativeFinite(params.get(K.assetAmount)),
+    // Asset amounts are in the asset's own display units, so no 8-decimal cap.
+    assetAmount: toDecimalAmount(params.get(K.assetAmount)),
   }
 }
 
-/** Parse a query value as a finite, non-negative number, else `undefined`. */
-function toNonNegativeFinite(v: string | null): number | undefined {
-  if (v == null || v.trim() === '') return undefined
+/**
+ * BIP21/BIP321 amounts are written as a plain non-negative decimal. `Number()`
+ * alone also accepts hex (`0x10` → 16), exponent (`1e300`), sign, and surrounding
+ * whitespace — none of which a spec-compliant wallet emits, and all of which make
+ * this engine read a different amount from the same QR than every other wallet
+ * does. Match the grammar explicitly and reject anything else, so a hostile or
+ * malformed URI surfaces as `undefined` rather than as an attacker-chosen number.
+ */
+const DECIMAL_AMOUNT = /^\d+(?:\.\d+)?$/
+
+function toDecimalAmount(v: string | null, opts: { maxDecimals?: number; max?: number } = {}): number | undefined {
+  if (v == null || !DECIMAL_AMOUNT.test(v)) return undefined
+  const [, frac = ''] = v.split('.')
+  if (opts.maxDecimals != null && frac.length > opts.maxDecimals) return undefined
   const n = Number(v)
-  return Number.isFinite(n) && n >= 0 ? n : undefined
+  if (!Number.isFinite(n) || n < 0) return undefined
+  if (opts.max != null && n > opts.max) return undefined
+  return n
 }
+
+/** Largest amount BIP21 can meaningfully carry: the whole BTC supply. */
+const MAX_BTC = 21_000_000
 
 /** BIP21/BIP321 amounts are in BTC with up to 8 decimals, no trailing zeros / exponent. */
 function formatBtc(amountBtc: number): string {
