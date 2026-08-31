@@ -170,13 +170,13 @@ describe('F3: RGB history converters default to precision 8 (rgb-converters.ts:1
 })
 
 // ── F4: getSwapQuote missing coercion guards ───────────────────────────────
-describe('F4: RgbAdapter.getSwapQuote unguarded maker fields (RgbAdapter.ts:993-1007)', () => {
+describe('F4 [E-F4 FIXED]: RgbAdapter.getSwapQuote coerces maker money fields (RgbAdapter.ts:1049-1085)', () => {
   function makerClient(quote: unknown) {
     return { maker: { getQuote: async () => quote } }
   }
   const REQ = { fromAsset: 'rgb:USDT', toAsset: 'BTC', fromAmount: 1000 }
 
-  it('accepts a NEGATIVE fee from a hostile maker (KaleidoswapSwap throws on the same input)', async () => {
+  it('rejects a NEGATIVE fee from a hostile maker (as KaleidoswapSwap already did)', async () => {
     const adapter = connectedRgbAdapter(
       makerClient({
         rfq_id: 'r1',
@@ -187,12 +187,12 @@ describe('F4: RgbAdapter.getSwapQuote unguarded maker fields (RgbAdapter.ts:993-
         expires_at: 1_900_000_000,
       }),
     )
-    const q = await adapter.getSwapQuote(REQ as any)
-    console.log(`hostile maker fee -1000 -> quote.fee.amount = ${q.fee.amount} (no throw)`)
-    expect(q.fee.amount).toBe(-1000) // BUG: should throw like KaleidoswapSwap.toAmount
+    // Was: `expect(q.fee.amount).toBe(-1000)` — a negative fee flowed into the
+    // Quote and poisoned downstream net-amount math.
+    await expect(adapter.getSwapQuote(REQ as any)).rejects.toThrow(/negative/i)
   })
 
-  it('silently rounds a maker amount past MAX_SAFE_INTEGER', async () => {
+  it('rejects a maker amount past MAX_SAFE_INTEGER instead of silently rounding it', async () => {
     const adapter = connectedRgbAdapter(
       makerClient({
         rfq_id: 'r2',
@@ -203,12 +203,11 @@ describe('F4: RgbAdapter.getSwapQuote unguarded maker fields (RgbAdapter.ts:993-
         expires_at: 1_900_000_000,
       }),
     )
-    const q = await adapter.getSwapQuote(REQ as any)
-    console.log(`maker amount "9007199254740993" -> quote.fromAmount = ${q.fromAmount}`)
-    expect(q.fromAmount).toBe(9007199254740992) // BUG: 1 unit lost, no throw
+    // Was: `expect(q.fromAmount).toBe(9007199254740992)` — one unit lost, no throw.
+    await expect(adapter.getSwapQuote(REQ as any)).rejects.toThrow(/safe integer precision/i)
   })
 
-  it('passes a missing price through as undefined', async () => {
+  it('rejects a missing price instead of passing undefined through', async () => {
     const adapter = connectedRgbAdapter(
       makerClient({
         rfq_id: 'r3',
@@ -219,8 +218,9 @@ describe('F4: RgbAdapter.getSwapQuote unguarded maker fields (RgbAdapter.ts:993-
         expires_at: 1_900_000_000,
       }),
     )
-    const q = await adapter.getSwapQuote(REQ as any)
-    expect(q.price).toBeUndefined() // BUG: NaN-class field, no throw
+    // Was: `expect(q.price).toBeUndefined()` — a NaN-class field, no throw. A
+    // counterparty must not be able to switch off a check by leaving a field out.
+    await expect(adapter.getSwapQuote(REQ as any)).rejects.toThrow(/not a finite number/i)
   })
 })
 

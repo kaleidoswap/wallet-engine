@@ -49,6 +49,7 @@ import {
 import { RgbConfig } from "../types/rgb";
 import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy";
+import { toSwapAmount } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
 import {
   convertBtcBalance,
@@ -1101,24 +1102,37 @@ export class RgbAdapter implements IProtocolAdapter {
         expires_at: number;
       };
 
+      // Every money field goes through the SAME fail-closed coercion the WDK
+      // path applies to the SAME maker API (`toSwapAmount`, extracted from
+      // KaleidoswapSwap). Raw, these fields let a negative `final_fee`, an
+      // amount past 2^53 (silently rounded) and a missing `price`/`expires_at`
+      // (NaN) through, on the path that then feeds `executeSwap`. `|| 0` is gone
+      // with them: defaulting a missing amount to 0 let a counterparty switch off
+      // a safety check by leaving a field out — the same rationale as the expiry
+      // guard in executeSwap below.
+      //
+      // NOT done here, deliberately: nothing compares the maker's amounts or
+      // asset ids to `request`. `fromAsset`/`toAsset` still come from the
+      // response. That is finding B-F1 and needs a product decision; see
+      // src/lib/swap-money.ts.
       return {
         id: quoteResponse.rfq_id,
         fromAsset: quoteResponse.from_asset.asset_id,
-        fromAmount: Number(quoteResponse.from_asset.amount || 0),
+        fromAmount: toSwapAmount(quoteResponse.from_asset.amount, "from_asset.amount"),
         toAsset: quoteResponse.to_asset.asset_id,
-        toAmount: Number(quoteResponse.to_asset.amount || 0),
-        price: quoteResponse.price,
+        toAmount: toSwapAmount(quoteResponse.to_asset.amount, "to_asset.amount"),
+        price: toSwapAmount(quoteResponse.price, "price"),
         fee: {
-          amount: quoteResponse.fee.final_fee,
-          asset: quoteResponse.fee.fee_asset,
+          amount: toSwapAmount(quoteResponse.fee?.final_fee, "fee.final_fee"),
+          asset: quoteResponse.fee?.fee_asset,
           breakdown: {
-            baseFee: quoteResponse.fee.base_fee,
-            variableFee: quoteResponse.fee.variable_fee,
+            baseFee: toSwapAmount(quoteResponse.fee?.base_fee, "fee.base_fee"),
+            variableFee: toSwapAmount(quoteResponse.fee?.variable_fee, "fee.variable_fee"),
             networkFee: 0,
           },
         },
         // Maker reports seconds since epoch; the engine convention is ms.
-        expiresAt: quoteResponse.expires_at * 1000,
+        expiresAt: toSwapAmount(quoteResponse.expires_at, "expires_at") * 1000,
         provider: "Kaleidoswap",
       };
     } catch (error: unknown) {
@@ -1249,9 +1263,12 @@ export class RgbAdapter implements IProtocolAdapter {
         quote: {
           id: swapId,
           fromAsset: swap?.from_asset ?? "",
-          fromAmount: Number(swap?.qty_from ?? 0),
+          // Same coercion as KaleidoswapSwap.getSwapStatus, `?? 0` and all: a
+          // status lookup legitimately predates a fill, so an absent quantity is
+          // 0 here rather than an error — but a present, corrupt one still fails.
+          fromAmount: toSwapAmount(swap?.qty_from ?? 0, "qty_from"),
           toAsset: swap?.to_asset ?? "",
-          toAmount: Number(swap?.qty_to ?? 0),
+          toAmount: toSwapAmount(swap?.qty_to ?? 0, "qty_to"),
           price: 0,
           fee: { amount: 0, asset: swap?.from_asset ?? "" },
           expiresAt: 0,

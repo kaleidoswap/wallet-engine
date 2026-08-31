@@ -166,7 +166,7 @@ describe('F2: native RgbAdapter quote coercion fails open (C1/L1 partial)', () =
     })
   }
 
-  it('F2a: missing expires_at -> NaN expiresAt -> expiry guard disabled, stale quote executes', async () => {
+  it('F2a [E-F4 FIXED]: a missing expires_at is now refused at quote time, not just at execution', async () => {
     const capture: { init?: any } = {}
     const adapter = adapterWithQuoteResponse(
       {
@@ -180,17 +180,21 @@ describe('F2: native RgbAdapter quote coercion fails open (C1/L1 partial)', () =
       capture,
     )
 
-    const quote = await adapter.getSwapQuote(REQ as any)
-    expect(quote.expiresAt).toBeNaN() // undefined * 1000 — still true of getSwapQuote
+    // Was: `expect(quote.expiresAt).toBeNaN()` — `undefined * 1000`. B-F2 closed
+    // the harm at execution time; E-F4 closes it one step earlier, so a quote
+    // with an unusable expiry is never constructed at all.
+    await expect(adapter.getSwapQuote(REQ as any)).rejects.toThrow(/not a finite number/i)
+    expect(capture.init, 'must not reach the maker').toBeFalsy()
 
-    // FIXED (audit finding B-F2): a non-finite expiry now fails closed instead of
-    // disabling the guard. The remaining NaN above is why F4 below still stands:
-    // getSwapQuote does not validate the maker's numeric fields.
-    await expect(adapter.executeSwap(quote)).rejects.toThrow(/expir/i)
+    // The B-F2 execution-time guard is unchanged and still the backstop for a
+    // quote that reached executeSwap by any other route.
+    await expect(
+      adapter.executeSwap({ id: 'rfq-stale', fromAmount: 1, toAmount: 1, expiresAt: NaN } as any),
+    ).rejects.toThrow(/expir/i)
     expect(capture.init, 'must not reach the maker').toBeFalsy()
   })
 
-  it('F2b: negative fee / price from a hostile maker flow into the Quote unfiltered', async () => {
+  it('F2b [E-F4 FIXED]: negative fee / price from a hostile maker are refused', async () => {
     const adapter = adapterWithQuoteResponse(
       {
         rfq_id: 'rfq-neg',
@@ -202,10 +206,10 @@ describe('F2: native RgbAdapter quote coercion fails open (C1/L1 partial)', () =
       },
       {},
     )
-    const quote = await adapter.getSwapQuote(REQ as any)
-    // The WDK path throws on exactly this (toAmount, KaleidoswapSwap.ts:36-38).
-    expect(quote.fee.amount).toBe(-500)
-    expect(quote.price).toBe(-20)
+    // Was: `expect(quote.fee.amount).toBe(-500)` / `expect(quote.price).toBe(-20)`.
+    // The WDK path always threw on exactly this; both paths now share one
+    // coercion (src/lib/swap-money.ts).
+    await expect(adapter.getSwapQuote(REQ as any)).rejects.toThrow(/negative/i)
   })
 })
 
