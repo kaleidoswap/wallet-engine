@@ -20,7 +20,7 @@ import { rgbAssetBalance } from '../../src/adapters/wdk/RgbCore'
  * (the whole projected total), so callers that render total+pending double-count,
  * and a received-but-unconfirmed asset reports total = 0.
  */
-describe.skip('AUDIT C-F4: convertSdkBalance / convertNodeBalance semantics', () => {
+describe('AUDIT C-F4: convertSdkBalance / convertNodeBalance semantics', () => {
   it('pending must be the unsettled delta (future - settled), not the projected total', () => {
     const sdk = { settled: 100, spendable: 100, future: 150, offchain_outbound: 0, offchain_inbound: 0 } as any
     const converted = convertSdkBalance(sdk)

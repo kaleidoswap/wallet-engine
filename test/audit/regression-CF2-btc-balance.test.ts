@@ -58,6 +58,24 @@ describe('C-F2: BTC balance must exclude RGB-colored sats', () => {
     expect(btcView.total).toBe(8000)
   })
 
+  // C-F4b (run 2): the C-F2 fix aligned the two BTC views on which sats count,
+  // but not on which bucket is the TOTAL. `getBtcBalance()` uses `future`;
+  // `convertBtcBalance` used `settled`, so with an unconfirmed receive in flight
+  // one adapter still gave two answers — 8000 vs 5000 — and the asset view hid
+  // the incoming 3000 entirely.
+  it('the two BTC views also agree while a receive is unconfirmed', async () => {
+    state.client = { rln: { getBtcBalance: async () => ({
+      vanilla: { settled: 5000, future: 8000, spendable: 5000 },
+      colored: { settled: 2000, future: 2000, spendable: 2000 },
+    }) } }
+    const a = adapter()
+    const assetView = await a.getAssetBalance('BTC')
+    const btcView = await a.getBtcBalance()
+    expect(assetView.total, 'one adapter must not give two answers').toBe(btcView.total)
+    expect(assetView.total).toBe(8000)
+    expect(assetView.pending, 'the unsettled delta, not the projected total').toBe(3000)
+  })
+
   it('a node with no colored sub-balance still works', async () => {
     state.client = { rln: { getBtcBalance: async () => ({ vanilla: { settled: 1000, future: 1000, spendable: 1000 } }) } }
     const btcView = await adapter().getBtcBalance()

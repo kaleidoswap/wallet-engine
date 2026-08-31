@@ -34,12 +34,22 @@ import {
  */
 export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset["balance"] {
   const vanilla = btcBalance.vanilla ?? { settled: 0, future: 0, spendable: 0 };
+  // `future` is the projected balance once every pending tx settles, so it is
+  // what is OWNED; `spendable` is what can be sent right now and `future -
+  // spendable` is the unsettled delta. The old `total: settled, pending: future`
+  // reported the projected total as "pending" (so a UI summing total+pending
+  // double-counts) and hid an unconfirmed receive from `total` entirely — and it
+  // disagreed with this adapter's own `getBtcBalance()`, which already uses
+  // `future` as the total. One adapter must not give two answers.
+  const spendable = vanilla.spendable || 0;
+  const future = vanilla.future || 0;
+  const owned = future || vanilla.settled || spendable || 0;
   return {
-    total: vanilla.settled || 0,
-    available: vanilla.spendable || 0,
-    pending: vanilla.future || 0,
-    totalDisplay: formatAmount(vanilla.settled || 0, 8),
-    availableDisplay: formatAmount(vanilla.spendable || 0, 8),
+    total: owned,
+    available: spendable,
+    pending: Math.max(0, future - spendable),
+    totalDisplay: formatAmount(owned, 8),
+    availableDisplay: formatAmount(spendable, 8),
   };
 }
 
@@ -53,15 +63,25 @@ export function convertSdkBalance(
   balance: AssetBalanceResponse,
   precision: number = 8,
 ): UnifiedAsset["balance"] {
+  // Same semantics as `RgbCore.rgbAssetBalance` (src/adapters/wdk/RgbCore.ts),
+  // the shared source of truth the WDK RGB adapters use: `total` is the owned
+  // amount (`future`, the projected total), `pending` is the unsettled DELTA.
+  // This converter previously emitted `total = settled` and `pending = future`,
+  // so a received-but-unconfirmed asset reported total 0 while the WDK adapter
+  // for the same protocol reported the real figure.
+  const settled = balance.settled || 0;
+  const spendable = balance.spendable || 0;
+  const future = balance.future || 0;
+  const owned = future || settled || spendable || 0;
   return {
-    total: balance.settled || 0,
-    available: balance.spendable || 0,
-    pending: balance.future || 0,
+    total: owned,
+    available: spendable,
+    pending: Math.max(0, future - settled),
     locked: balance.offchain_outbound || 0,
     offchain_outbound: balance.offchain_outbound || 0,
     offchain_inbound: balance.offchain_inbound || 0,
-    totalDisplay: formatAmount(balance.settled || 0, precision),
-    availableDisplay: formatAmount(balance.spendable || 0, precision),
+    totalDisplay: formatAmount(owned, precision),
+    availableDisplay: formatAmount(spendable, precision),
   } as UnifiedAsset["balance"];
 }
 
@@ -74,9 +94,12 @@ export function convertNodeBalance(
   balance: Record<string, number> | undefined,
   precision: number = 8,
 ): UnifiedAsset["balance"] {
-  const total = balance?.settled || 0;
+  // Same semantics as `convertSdkBalance` above / `RgbCore.rgbAssetBalance`.
+  const settled = balance?.settled || 0;
   const available = balance?.spendable || 0;
-  const pending = balance?.future || 0;
+  const future = balance?.future || 0;
+  const total = future || settled || available || 0;
+  const pending = Math.max(0, future - settled);
 
   return {
     total,
