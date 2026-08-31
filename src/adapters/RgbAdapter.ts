@@ -150,6 +150,19 @@ export class RgbAdapter implements IProtocolAdapter {
         log.info("[RgbAdapter] No maker URL provided (swaps disabled)");
       }
     } catch (error: unknown) {
+      // FAIL CLOSED. `kaleidoClientManager.initialize()` ran before the
+      // `getNodeInfo()` handshake, and the fund-moving methods on this adapter gate
+      // on `kaleidoClientManager.hasNode()` — config presence — not on
+      // `isConnected()`. So a connect() that threw (bad credentials, version skew)
+      // used to leave the manager initialized with the node URL: the host marked
+      // the wallet disconnected and hid the send UI, while any code path still
+      // holding this adapter could call `sendPayment`/`payKeysend`/`sendAsset`/
+      // `sendBtcOnchain` and have it sail through the `hasNode()` guard and pay.
+      // Resetting here revokes node access with the failed connect
+      // (audit finding G-F6).
+      this.connected = false;
+      this.config = null;
+      kaleidoClientManager.reset();
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`[RgbAdapter] connect() failed: ${msg}`);
       throw new ConnectionError(

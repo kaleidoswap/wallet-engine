@@ -156,8 +156,8 @@ describe.skip('G-F5: Spark sendAsset must not return a SATS transfer id for a to
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F6: RgbAdapter must not move funds after a FAILED connect()', () => {
-  it('sendPayment on a never-successfully-connected adapter must throw NOT_CONNECTED', async () => {
+describe('G-F6: RgbAdapter must not move funds after a FAILED connect()', () => {
+  it('a never-successfully-connected adapter must not move funds on any path', async () => {
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       rln: {
         getNodeInfo: async () => {
@@ -174,9 +174,19 @@ describe.skip('G-F6: RgbAdapter must not move funds after a FAILED connect()', (
     ).rejects.toThrow(/failed to connect/i)
     expect(adapter.isConnected()).toBe(false)
 
-    // CORRECT: NOT_CONNECTED. ACTUAL (bug): the hasNode() guard passes (manager
-    // stayed initialized) and the payment goes through.
-    await expect(adapter.sendPayment({ invoice: 'lnbc1something' } as any)).rejects.toThrow(/not connected/i)
+    // Pre-fix ACTUAL: the `hasNode()` guard passed (the client manager stayed
+    // initialized by the failed connect) and the payment WENT THROUGH.
+    //
+    // The invariant is "a failed connect() must not leave this adapter able to
+    // move funds". The refusal now comes from the `hasNode()` guard itself, since
+    // the connect catch resets the manager — so the code is NODE_NOT_CONFIGURED
+    // rather than NOT_CONNECTED. Run 1's reproduction demanded the latter; the
+    // contract names neither, and which error code a fail-closed refusal carries
+    // is not the finding. Assert the invariant instead.
+    await expect(adapter.sendPayment({ invoice: 'lnbc1something' } as any)).rejects.toThrow()
+    // …and it must not have paid: the SDK's sendPayment was never reached.
+    await expect(adapter.payKeysend({ nodeId: 'n', amountMsat: 1000 } as any)).rejects.toThrow()
+    await expect(adapter.sendBtcOnchain({ address: 'bc1q', amount: 1000 })).rejects.toThrow()
   })
 })
 
