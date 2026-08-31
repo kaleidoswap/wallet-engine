@@ -939,9 +939,17 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
             invalidateSparkBalanceCache()
             return { txId: success.txid }
           }
-          const satsSuccess = response.satsTransactionSuccess?.[0]
-          if (satsSuccess) return { txId: satsSuccess.transferResponse.id }
-          throw new Error('Spark invoice payment returned no result')
+          // No sats-leg fallback — see the note on `SparkAdapter.sendAsset`
+          // (audit finding G-F5). An empty `tokenTransactionSuccess` means the token
+          // leg did not succeed; returning a SATS transfer id as the result of a
+          // TOKEN send reports a success that did not happen, with the id of a
+          // different transfer, and skips `saveSentTokenRecord`. A genuinely bundled
+          // sats+token invoice succeeds on both legs, so `success` above covers it.
+          throw new ProtocolError(
+            'Spark invoice payment returned no token transfer result',
+            'SPARK',
+            'SEND_ASSET_ERROR',
+          )
         }
       }
 

@@ -1335,13 +1335,27 @@ export class SparkAdapter implements IProtocolAdapter {
             return { txId: success.txid };
           }
 
-          // Fallback: maybe it was a sats invoice bundled with token
-          const satsSuccess = response.satsTransactionSuccess[0];
-          if (satsSuccess) {
-            return { txId: satsSuccess.transferResponse.id };
-          }
-
-          throw new Error("Spark invoice payment returned no result");
+          // NO sats-leg fallback. This entry point is `sendAsset` — the caller asked
+          // to move a TOKEN. An empty `tokenTransactionSuccess` means the token leg
+          // did NOT succeed, so returning `satsTransactionSuccess[0]`'s id told the
+          // caller "your token send succeeded, here is its id" while handing them
+          // the id of a different, BTC transfer — and it skipped the
+          // `saveSentTokenRecord` call above, the only reliable record of an
+          // outgoing token transfer, so the send was invisible in history too.
+          //
+          // The old comment read "maybe it was a sats invoice bundled with token".
+          // For a genuinely bundled invoice BOTH legs succeed, so `success` above is
+          // present and this path never runs. What the fallback actually covered was
+          // a sats-ONLY invoice reached through `sendAsset` — where
+          // `fulfillSparkInvoice` was handed `amount: BigInt(tokenAmount)` and would
+          // settle that many SATS instead of that many units of the asset. Reporting
+          // that as a successful asset send is worse than failing
+          // (audit finding G-F5).
+          throw new ProtocolError(
+            "Spark invoice payment returned no token transfer result",
+            "SPARK",
+            "SEND_ASSET_ERROR",
+          );
         }
       }
 

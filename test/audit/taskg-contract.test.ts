@@ -138,7 +138,7 @@ describe.skip('G-F4: RgbLibWasmAdapter.getBtcBalance must exclude RGB-colored sa
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F5: Spark sendAsset must not return a SATS transfer id for a token send', () => {
+describe('G-F5: Spark sendAsset must not return a SATS transfer id for a token send', () => {
   it('SparkWdkAdapter: token send with only a sats success entry must throw', async () => {
     const wallet = {
       getSparkAddress: async () => 'spark1sender',
