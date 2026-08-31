@@ -489,12 +489,21 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     throw new ProtocolError('Liquid has no invoices', 'LIQUID', 'NOT_SUPPORTED')
   }
   async listChannels(): Promise<any[]> {
+    // A disconnected adapter must not answer as if this were the wallet's state:
+    // a dashboard that skipped its own isConnected() gate renders "0 channels /
+    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
+    // array on the PROTOCOL having no channels, not on being disconnected, and
+    // every sibling read on these adapters already asserts (audit finding G-F9).
+    this.assertConnected()
     return [] // no Lightning
   }
   async listPayments(): Promise<any> {
     return this.listTransactions()
   }
   async listTransfers(): Promise<any> {
+    // Without this the null account produced an opaque `TypeError` instead of a
+    // ProtocolError NOT_CONNECTED (audit finding G-F9).
+    this.assertConnected()
     return this.withLock(() => this.account.listTransactions())
   }
 

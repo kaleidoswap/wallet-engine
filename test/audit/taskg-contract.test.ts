@@ -244,7 +244,7 @@ describe.skip('G-F8: listTransactions must honor the TransactionFilter contract'
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F9: disconnected adapters must throw NOT_CONNECTED, not return success-shaped empties', () => {
+describe('G-F9: disconnected adapters must throw NOT_CONNECTED, not return success-shaped empties', () => {
   it('SparkWdkAdapter.listTransfers on a fresh adapter', async () => {
     await expect(new SparkWdkAdapter().listTransfers()).rejects.toThrow(/not connected/i)
     // ACTUAL (bug): { transfers: [] } (SparkWdkAdapter.ts:752-755)

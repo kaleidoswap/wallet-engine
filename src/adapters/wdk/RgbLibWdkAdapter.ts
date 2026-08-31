@@ -234,10 +234,17 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async listChannels(): Promise<unknown[]> {
+    // A disconnected adapter must not answer as if this were the wallet's state:
+    // a dashboard that skipped its own isConnected() gate renders "0 channels /
+    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
+    // array on the PROTOCOL having no channels, not on being disconnected, and
+    // every sibling read on these adapters already asserts (audit finding G-F9).
+    this.assertConnected()
     return []
   }
 
   async listPayments(): Promise<unknown> {
+    this.assertConnected()
     return []
   }
 
