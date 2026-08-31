@@ -601,6 +601,13 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const signed = await this.account.signPsbt(unsigned)
     const txid: string = await this.account.sendBtcEnd(this.online, signed, false)
     await this.flushState()
+    // A send that reports success with no transaction id can never be tracked or
+    // reconciled, and a status poll on `''` returns pending forever. The in-repo
+    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
+    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    if (!txid) {
+      throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
+    }
     return { ok: true, txid }
   }
 

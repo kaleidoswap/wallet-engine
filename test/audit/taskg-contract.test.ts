@@ -41,7 +41,7 @@ function connected<T extends object>(adapter: T, account: any, extra: Record<str
 }
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F1: ArkadeWdkAdapter Ark-transfer send — confirmed with empty txid', () => {
+describe('G-F1: ArkadeWdkAdapter Ark-transfer send — confirmed with empty txid', () => {
   it('must throw (like its own sendBtcOnchain) when sendTransaction returns no hash', async () => {
     const adapter = connected(new ArkadeWdkAdapter(), {
       sendTransaction: async () => ({}), // sparse SDK response, no throw
@@ -267,7 +267,7 @@ describe.skip('G-F9: disconnected adapters must throw NOT_CONNECTED, not return 
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F12: sendBtcOnchain must not return ok:true with an empty txid', () => {
+describe('G-F12: sendBtcOnchain must not return ok:true with an empty txid', () => {
   it('RlnWdkAdapter throws when the node returns no txid', async () => {
     const adapter = connected(new RlnWdkAdapter(), { sendBtc: async () => ({}) })
     await expect(adapter.sendBtcOnchain({ address: 'bc1qx', amount: 1000 })).rejects.toThrow()

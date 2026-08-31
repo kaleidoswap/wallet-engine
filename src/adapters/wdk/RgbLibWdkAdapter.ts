@@ -277,7 +277,15 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
     const r: any = await this.account.sendTransaction({ to: params.address, value: params.amount, feeRate: params.feeRate })
-    return { ok: true, txid: typeof r === 'string' ? r : (r?.txid ?? r?.hash ?? '') }
+    const txid: string = typeof r === 'string' ? r : (r?.txid ?? r?.hash ?? '')
+    // A send that reports success with no transaction id can never be tracked or
+    // reconciled, and a status poll on `''` returns pending forever. The in-repo
+    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
+    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    if (!txid) {
+      throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
+    }
+    return { ok: true, txid }
   }
 
 }

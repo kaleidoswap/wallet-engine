@@ -266,8 +266,16 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const r: any = await this.withLock(() =>
       this.account.transfer({ recipient: request.invoice.trim(), amount: request.amount })
     )
+    const hash: string = r?.hash ?? ''
+    // A send that reports success with no transaction id can never be tracked or
+    // reconciled, and a status poll on `''` returns pending forever. The in-repo
+    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
+    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    if (!hash) {
+      throw new ProtocolError('Liquid send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
+    }
     return {
-      paymentHash: r?.hash ?? '',
+      paymentHash: hash,
       amount: request.amount,
       fee: Number(r?.fee ?? 0),
       status: 'pending', // on-chain — confirms later
@@ -286,7 +294,11 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         feeRate: params.feeRate,
       })
     )
-    return { paymentHash: r?.hash ?? '', fee: Number(r?.fee ?? 0), amount: params.amount, status: 'pending' as TransactionStatus }
+    const assetHash: string = r?.hash ?? ''
+    if (!assetHash) {
+      throw new ProtocolError('Liquid asset send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
+    }
+    return { paymentHash: assetHash, fee: Number(r?.fee ?? 0), amount: params.amount, status: 'pending' as TransactionStatus }
   }
 
   /** L-BTC on-chain send (alias of sendPayment's transfer). */
@@ -295,7 +307,11 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const r: any = await this.withLock(() =>
       this.account.transfer({ recipient: params.address, amount: params.amount, feeRate: params.feeRate })
     )
-    return { txid: r?.hash ?? '', fee: Number(r?.fee ?? 0) }
+    const btcTxid: string = r?.hash ?? ''
+    if (!btcTxid) {
+      throw new ProtocolError('Liquid send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
+    }
+    return { txid: btcTxid, fee: Number(r?.fee ?? 0) }
   }
 
   // --- Transactions -------------------------------------------------------
