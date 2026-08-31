@@ -126,6 +126,14 @@ export class SparkAdapter implements IProtocolAdapter {
       this.config = sparkConfig;
       log.info("[SparkAdapter] Connected to Spark successfully");
     } catch (error: unknown) {
+      // Fail CLOSED. On a wallet switch A→B whose connect throws, the client
+      // manager has already torn A's wallet down (isConnected() is false), but a
+      // `this.config` left over from A's earlier successful connect still holds
+      // A's mnemonic — and the signing methods below used to gate on that field
+      // alone. Any code path still holding this adapter (an in-flight LNURL-auth
+      // challenge, a dapp PSBT request) could then sign with WALLET A's KEYS
+      // while every indicator said the wallet was locked.
+      this.config = null;
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Spark: ${msg}`, "SPARK", error);
     }
@@ -1118,6 +1126,13 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
+    // A locked wallet must not be able to keep signing — the invariant
+    // BaseWdkAdapter states for the WDK family (BaseWdkAdapter.ts:30-33) and
+    // commit fb826c9 (H1) applies engine-wide. Holding a mnemonic is not the
+    // same as being connected.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
+    }
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }
@@ -1131,6 +1146,10 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async signMessage(message: string): Promise<string> {
+    // Same invariant as signPsbt: never sign for a wallet the host has locked.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
+    }
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }

@@ -42,7 +42,7 @@ import { SparkAdapter } from '../../src/adapters/SparkAdapter'
 const MNEMONIC =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
-describe.skip('G: SparkAdapter must not sign while isConnected() is false', () => {
+describe('G: SparkAdapter must not sign while isConnected() is false', () => {
   it('a failed re-connect leaves the adapter disconnected AND unable to sign', async () => {
     const a = new SparkAdapter()
     await a.connect({ protocol: 'SPARK', mnemonic: MNEMONIC } as any)
