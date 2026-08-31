@@ -323,8 +323,20 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       const invoiceBody = dest.toLowerCase().startsWith('lightning:') ? dest.slice('lightning:'.length) : dest
       try {
         const result: any = await swaps.sendLightningPayment({ invoice: invoiceBody })
+        // See the note on `ArkadeAdapter.sendPayment` (audit finding G-F11): the
+        // preimage is a secret and belongs in `PaymentResult.preimage`, not in the
+        // field hosts treat as the payment's public identifier and that
+        // `getPaymentStatus` searches history by.
+        if (!result?.txid && !result?.preimage) {
+          throw new ProtocolError(
+            'Arkade Lightning send returned no transaction id and no preimage',
+            'ARKADE',
+            'SEND_ERROR',
+          )
+        }
         return {
-          paymentHash: result?.preimage ?? result?.txid ?? '',
+          paymentHash: result?.txid ?? '',
+          preimage: result?.preimage,
           amount: Number(result?.amount ?? request.amount ?? 0),
           fee: 0,
           status: 'pending',

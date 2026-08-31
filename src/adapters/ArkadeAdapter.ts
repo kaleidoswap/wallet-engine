@@ -456,8 +456,28 @@ export class ArkadeAdapter implements IProtocolAdapter {
       try {
         const swaps = arkadeSwapsClientManager.getClient();
         const result = await swaps.sendLightningPayment({ invoice: invoiceBody });
+        // Neither a txid nor a preimage means nothing came back that evidences the
+        // payment — that is a send failure, not a pending payment with an empty id.
+        if (!result?.txid && !result?.preimage) {
+          throw new ProtocolError(
+            "Arkade Lightning send returned no transaction id and no preimage",
+            "ARKADE",
+            "SEND_ERROR",
+          );
+        }
         return {
-          paymentHash: result.preimage ?? result.txid ?? "",
+          // `paymentHash` is the field a host persists, logs and shows as the
+          // payment's public identifier, and `getPaymentStatus(paymentHash)`
+          // searches history by it. The old
+          // `result.preimage ?? result.txid ?? ''` therefore (a) put a SECRET —
+          // the payment preimage, which is proof of payment — into that field
+          // whenever Boltz resolved with a preimage but no on-chain txid yet, and
+          // (b) guaranteed the status lookup could never match, so the payment
+          // stayed pending forever. Four sibling adapters keep the preimage in
+          // `PaymentResult.preimage`, which exists for exactly this
+          // (types/base.ts:175) (audit finding G-F11).
+          paymentHash: result.txid ?? "",
+          preimage: result.preimage,
           amount: result.amount ?? request.amount ?? 0,
           fee: 0,
           // Boltz submarine swap; the swap can still fail in the HODL/claim
