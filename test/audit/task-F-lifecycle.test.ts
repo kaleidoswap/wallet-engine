@@ -177,29 +177,35 @@ describe('escape-hatch hardening checks (extends M3 verification)', () => {
 
 // ---------------------------------------------------------------------------
 
-describe('F7: RlnWdkAdapter.supportsSwaps() over-reports (manifest flag, no runtime gate)', () => {
-  it('supportsSwaps() is true with NO makerUrl; getSwapQuote then throws CONFIG', async () => {
+describe('F7 [FIXED]: RlnWdkAdapter.supportsSwaps() gates on makerUrl', () => {
+  it('supportsSwaps() is false with NO makerUrl, so the manager gate refuses cleanly', async () => {
     const adapter = new RlnWdkAdapter() // no makerUrl configured
-    // BaseWdkAdapter.ts:62-64 reads the manifest flag unconditionally:
-    expect(adapter.supportsSwaps()).toBe(true)
-    // …but every swap call throws once attempted (RlnWdkAdapter.ts:520-522):
+    // The capability must reflect what the adapter can actually do: every swap
+    // call throws CONFIG without a makerUrl (RlnWdkAdapter.ts:587-589).
+    expect(adapter.supportsSwaps()).toBe(false)
     Object.assign(adapter as any, { connected: true, account: {} })
     await expect(adapter.getSwapQuote({} as any)).rejects.toThrow(/makerUrl/)
 
-    // Through the manager boundary: the supportsSwaps() gate at
-    // ProtocolManager.ts:526 passes, so the failure surfaces mid-operation.
+    // Through the manager boundary the gate now stops the call BEFORE the
+    // adapter, so the host gets NOT_SUPPORTED up front instead of a
+    // configuration error surfacing mid-operation.
     const manager = new ProtocolManager()
     manager.registerAdapter(adapter as unknown as IProtocolAdapter)
     await manager.connect('RGB_LN', { protocol: 'RGB_LN' } as any).catch(() => {})
-    // (connect itself loads the WDK module; drive the state directly instead)
     Object.assign(manager as any, { activeProtocol: 'RGB_LN' })
-    await expect(manager.getSwapQuote({} as any)).rejects.toThrow(/makerUrl/)
+    await expect(manager.getSwapQuote({} as any)).rejects.toThrow(/Swaps not supported/)
   })
 
-  it('contrast: the native RgbAdapter gates supportsSwaps() on makerUrl', () => {
-    // RgbAdapter.ts:955-959: return !!this.config?.makerUrl — verified by source;
-    // the WDK adapter has no equivalent override.
-    expect((RlnWdkAdapter as any).prototype.hasOwnProperty('supportsSwaps')).toBe(false)
+  it('supportsSwaps() is true once a makerUrl is configured', () => {
+    const adapter = new RlnWdkAdapter()
+    Object.assign(adapter as any, { makerUrl: 'https://maker.example' })
+    expect(adapter.supportsSwaps()).toBe(true)
+  })
+
+  it('parity: both RGB_LN adapters now gate supportsSwaps() on makerUrl', () => {
+    // RgbAdapter.ts: `return !!this.config?.makerUrl` — the WDK adapter now has
+    // an equivalent override rather than inheriting the static manifest flag.
+    expect((RlnWdkAdapter as any).prototype.hasOwnProperty('supportsSwaps')).toBe(true)
   })
 })
 

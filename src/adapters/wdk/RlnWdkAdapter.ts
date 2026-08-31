@@ -131,6 +131,19 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   /** KaleidoSwap maker base URL, for cross-asset RFQ swaps (Option C: swaps live in the adapter). */
   private makerUrl = ''
+
+  /**
+   * RLN swaps need a maker. `BaseWdkAdapter.supportsSwaps()` returns the STATIC
+   * capability-manifest flag, so this adapter answered `true` on a config with no
+   * `makerUrl` while both swap entry points throw CONFIG
+   * ("RLN swaps require a makerUrl in the adapter config", :587-589) — and
+   * `ProtocolManager.getSwapQuote`/`executeSwap` gate on exactly this method
+   * before calling through. The native `RgbAdapter` sibling is config-dependent;
+   * this is that parity.
+   */
+  supportsSwaps(): boolean {
+    return super.supportsSwaps() && !!this.makerUrl
+  }
   /** Lazily-built maker swap client, bound to this connected account. */
   private swap: KaleidoswapSwap | null = null
   /** Host opt-in for fund-moving escape-hatch ops (see RLN_PRIVILEGED_OPS). */
