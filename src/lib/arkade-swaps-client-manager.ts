@@ -21,6 +21,7 @@
 import { ArkadeSwaps, IndexedDbSwapRepository } from "@arkade-os/boltz-swap";
 import type { IWallet } from "@arkade-os/sdk";
 import { log } from "./log";
+import { WalletSessionGuard, type SessionAttempt } from "./wallet-session";
 
 type SwapsClient = InstanceType<typeof ArkadeSwaps>;
 
@@ -33,6 +34,9 @@ export interface ArkadeSwapsInitOptions {
   swapRepository?: unknown;
 }
 
+/** The guard's single slot: the Boltz swaps-client handshake. */
+const CLIENT_SLOT = "client";
+
 class ArkadeSwapsClientManager {
   private client: SwapsClient | null = null;
   /**
@@ -42,26 +46,20 @@ class ArkadeSwapsClientManager {
    * from a wallet switch.
    */
   private clientWallet: IWallet | null = null;
-  /** Serializes concurrent initialize() calls. */
-  private _initPromise: Promise<void> | null = null;
-  /** Generation of the in-flight _initPromise. */
-  private _initGeneration = 0;
   /**
-   * The wallet the in-flight `_initPromise` is building a client for. While
-   * `ArkadeSwaps.create()` is pending `this.client` is still null, so the
-   * wallet-switch teardown in `initialize()` does not fire — without this the
-   * in-flight promise would be handed to a different wallet's caller and bind
-   * that session to the previous wallet's swaps client.
+   * Wallet identity + generation guard, shared with the other client managers.
+   * The wallet key is the `IWallet` instance itself, recorded from the moment
+   * the attempt starts — which is what stops an in-flight `ArkadeSwaps.create()`
+   * for wallet A being handed to wallet B's caller while `this.client` is still
+   * null (finding N1). See src/lib/wallet-session.ts.
    */
-  private _initWallet: IWallet | null = null;
-  /** Bumped by dispose() to invalidate any in-flight init. */
-  private _generation = 0;
+  private readonly session = new WalletSessionGuard({ name: "ArkadeSwapsClientManager" });
 
   /**
    * Initialize the swaps client with a connected Arkade wallet.
-   * Concurrent calls that belong to the same generation share the in-flight
-   * promise. A dispose() between calls bumps the generation so the old
-   * in-flight is treated as stale and a fresh init is started.
+   * Concurrent calls for the SAME wallet share the in-flight handshake. A call
+   * for a different wallet, or one arriving after a dispose(), supersedes the
+   * pending attempt and builds its own — the superseded client is disposed.
    */
   initialize(wallet: IWallet, opts?: ArkadeSwapsInitOptions): Promise<void> {
     // Same wallet, client already built → nothing to do.
@@ -74,44 +72,29 @@ class ArkadeSwapsClientManager {
       const stale = this.client;
       this.client = null;
       this.clientWallet = null;
-      this._generation++;
+      this.session.invalidate();
       void Promise.resolve()
         .then(() => stale.dispose())
         .catch((error: unknown) =>
           log.warn('[ArkadeSwapsClientManager] Error disposing superseded client:', error),
         );
     }
-    // An in-flight handshake for a DIFFERENT wallet must not be shared: the
-    // teardown branch above only fires once a client exists, so a wallet switch
-    // that races ArkadeSwaps.create() would otherwise return wallet A's promise
-    // to wallet B's caller — and A's client would install and sign with A's
-    // keys for the rest of B's session. Invalidate it (the generation guard in
-    // _doInitialize discards the orphan) and build one for the wallet we were
-    // given. ArkadeAdapter.connect() does not await this init, so the window is
-    // the normal case, not an edge case.
-    if (this._initPromise && this._initWallet !== wallet) this._generation++;
-    // Reuse in-flight promise only if it belongs to the current generation.
-    if (this._initPromise && this._initGeneration === this._generation) {
-      return this._initPromise;
-    }
-    const generation = this._generation;
-    this._initGeneration = generation;
-    this._initWallet = wallet;
-    const promise = this._doInitialize(wallet, generation, opts).finally(() => {
-      // Only clear if this promise is still the active one (prevents stale
-      // promises from clearing a newer in-flight init).
-      if (this._initPromise === promise && this._initGeneration === generation) {
-        this._initPromise = null;
-        this._initWallet = null;
-      }
-    });
-    this._initPromise = promise;
-    return this._initPromise;
+    // The in-flight case — the seam the teardown branch above cannot cover,
+    // because it only fires once a client EXISTS. While ArkadeSwaps.create() is
+    // pending `this.client` is null, so a wallet switch that races it would
+    // otherwise return wallet A's promise to wallet B's caller, and A's client
+    // would install and sign with A's keys for the rest of B's session
+    // (finding N1). The guard keys the in-flight slot on the wallet itself, so
+    // B's caller supersedes A's attempt and gets its own. ArkadeAdapter.connect()
+    // does not await this init, so the window is the normal case, not an edge one.
+    return this.session.begin(CLIENT_SLOT, wallet, (attempt) =>
+      this._doInitialize(wallet, attempt, opts),
+    );
   }
 
   private async _doInitialize(
     wallet: IWallet,
-    generation: number,
+    attempt: SessionAttempt,
     opts?: ArkadeSwapsInitOptions,
   ): Promise<void> {
     try {
@@ -124,26 +107,16 @@ class ArkadeSwapsClientManager {
         swapManager: true,
         swapRepository,
       } as unknown as Parameters<typeof ArkadeSwaps.create>[0]);
-      // Guard: dispose() may have been called while ArkadeSwaps.create was
-      // awaited. If the generation has changed the wallet is stale — discard.
-      if (generation !== this._generation) {
-        try {
-          await client.dispose();
-        } catch {
-          /* ignore cleanup errors */
-        }
-        log.warn(
-          "[ArkadeSwapsClientManager] Stale init discarded (generation changed during ArkadeSwaps.create)",
-        );
-        return;
-      }
+      // Guard: dispose(), or a wallet switch, may have landed while
+      // ArkadeSwaps.create was awaited. If so this client is stale — discard it.
+      if (!(await attempt.claim(() => client.dispose()))) return;
       this.client = client;
       this.clientWallet = wallet;
       log.info("[ArkadeSwapsClientManager] Initialized (Boltz swaps ready)");
     } catch (error: unknown) {
-      // Only clear client if this init's generation is still current (prevents
-      // a stale failed init from clearing a newer successful client).
-      if (generation === this._generation) {
+      // Only clear client if this init still owns the session (prevents a stale
+      // failed init from clearing a newer successful client).
+      if (attempt.isCurrent) {
         this.client = null;
         this.clientWallet = null;
       }
@@ -172,11 +145,10 @@ class ArkadeSwapsClientManager {
    * the client was never initialized.
    */
   async dispose(): Promise<void> {
-    // Bump generation first so any in-flight _doInitialize sees the change
-    // even if ArkadeSwaps.create() has not returned yet.
-    this._generation++;
+    // Invalidate first so any in-flight _doInitialize sees the change even if
+    // ArkadeSwaps.create() has not returned yet.
+    this.session.invalidate();
     this.clientWallet = null;
-    this._initWallet = null;
     if (!this.client) return;
     try {
       await this.client.dispose();

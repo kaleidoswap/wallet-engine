@@ -19,6 +19,7 @@
  */
 
 import type { ArkadeConfig } from "../types/arkade";
+import { WalletSessionGuard, type SessionAttempt } from "./wallet-session";
 import { DEFAULT_VTXO_THRESHOLD_SECONDS } from "./arkade-vtxo-lifecycle";
 import { log } from "./log";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -128,23 +129,49 @@ function isBip39Secret(walletSecret: string): boolean {
 // ArkadeClientManager
 // ---------------------------------------------------------------------------
 
+/** The guard's single slot: the Arkade wallet handshake. */
+const WALLET_SLOT = "wallet";
+
+/**
+ * The config fields that decide WHICH wallet, on which network, with which
+ * server endpoints, an `initialize()` call is for. Two configs agreeing on all
+ * of them denote the same session and may share one in-flight handshake.
+ */
+function sameArkadeConfig(a: unknown, b: unknown): boolean {
+  const x = a as ArkadeConfig | null;
+  const y = b as ArkadeConfig | null;
+  return (
+    x?.network === y?.network &&
+    x?.mnemonic === y?.mnemonic &&
+    x?.walletMode === y?.walletMode &&
+    x?.arkServerUrl === y?.arkServerUrl &&
+    x?.delegatorUrl === y?.delegatorUrl &&
+    x?.delegationEnabled === y?.delegationEnabled &&
+    x?.vtxoThresholdSeconds === y?.vtxoThresholdSeconds
+  );
+}
+
 class ArkadeClientManager {
   private wallet: Wallet | null = null;
   private _vtxoManager: VtxoManager | null = null;
   private config: ArkadeConfig | null = null;
-  /** Serializes concurrent initialize() calls */
-  private _initPromise: Promise<void> | null = null;
-  /** Config for the in-flight _initPromise (used for concurrent-init guard) */
-  private _pendingConfig: ArkadeConfig | null = null;
   /**
-   * Bumped by every disconnect()/reset(). An in-flight `_doInitialize` captures
-   * it and refuses to install its wallet if it changed while `Wallet.create()`
-   * was pending — otherwise a teardown that already completed is silently
-   * undone and the "locked" wallet comes back live and signing-capable
-   * (`ArkadeAdapter.isConnected()` is `isInitialized()`, so every adapter
-   * operation works again). Same guard as `SparkClientManager` (7b95f0a).
+   * Wallet identity + generation guard, shared with the other client managers.
+   * `onConflict: "reject"` keeps this manager's historical, more conservative
+   * answer to a wallet switch that races an in-flight handshake: refuse the new
+   * caller rather than supersede the pending one. Less available than the other
+   * managers' `supersede`, equally safe, and preserved deliberately so adopting
+   * the guard does not loosen it. See src/lib/wallet-session.ts.
    */
-  private _teardownGeneration = 0;
+  private readonly session = new WalletSessionGuard({
+    name: "ArkadeClientManager",
+    sameWallet: sameArkadeConfig,
+    onConflict: "reject",
+    conflictError: () =>
+      new Error(
+        "Arkade client is already initializing with a different config. Call dispose() first.",
+      ),
+  });
   /** Cleanup function returned by wallet.notifyIncomingFunds() */
   private _stopIncomingFunds: (() => void) | null = null;
   /** Guards against duplicate startIncomingFundsListener() calls */
@@ -164,41 +191,20 @@ class ArkadeClientManager {
    * network — the caller must call dispose() first.
    */
   initialize(config: ArkadeConfig): Promise<void> {
-    if (this._initPromise) {
-      if (
-        this._pendingConfig?.network !== config.network ||
-        this._pendingConfig?.mnemonic !== config.mnemonic ||
-        this._pendingConfig?.walletMode !== config.walletMode ||
-        this._pendingConfig?.arkServerUrl !== config.arkServerUrl ||
-        this._pendingConfig?.delegatorUrl !== config.delegatorUrl ||
-        this._pendingConfig?.delegationEnabled !== config.delegationEnabled ||
-        this._pendingConfig?.vtxoThresholdSeconds !== config.vtxoThresholdSeconds
-      ) {
-        return Promise.reject(
-          new Error(
-            "Arkade client is already initializing with a different config. Call dispose() first.",
-          ),
-        );
-      }
-      return this._initPromise;
-    }
-    this._pendingConfig = config;
-    this._initPromise = this._doInitialize(config).finally(() => {
-      this._initPromise = null;
-      this._pendingConfig = null;
-    });
-    return this._initPromise;
+    return this.session.begin(WALLET_SLOT, config, (attempt) =>
+      this._doInitialize(config, attempt),
+    );
   }
 
-  private async _doInitialize(config: ArkadeConfig): Promise<void> {
+  private async _doInitialize(config: ArkadeConfig, attempt: SessionAttempt): Promise<void> {
     if (this.wallet) {
       log.warn("[ArkadeClientManager] Wallet already initialized, re-initializing...");
       await this.disconnect();
     }
 
     this.config = config;
-    // Captured AFTER the re-init disconnect above, which bumps the counter itself.
-    const generation = this._teardownGeneration;
+    // Marked AFTER the re-init disconnect above, which invalidates the session itself.
+    attempt.mark();
 
     try {
       const isMainnet = config.network === "mainnet";
@@ -255,15 +261,10 @@ class ArkadeClientManager {
       // already torn this session down. Installing now would undo it: the locked
       // wallet would come back live and signing-capable, and `this.config` (which
       // carries the mnemonic) would be restored with it. Drop the orphan instead.
-      if (generation !== this._teardownGeneration) {
-        log.info("[ArkadeClientManager] Init superseded by teardown — discarding wallet");
-        try {
-          await (created as unknown as { dispose?: () => Promise<void> | void })?.dispose?.();
-        } catch (cleanupError: unknown) {
-          log.warn("[ArkadeClientManager] Error cleaning up superseded wallet:", cleanupError);
-        }
-        return;
-      }
+      const claimed = await attempt.claim(() =>
+        (created as unknown as { dispose?: () => Promise<void> | void })?.dispose?.(),
+      );
+      if (!claimed) return;
 
       this.wallet = created;
 
@@ -298,7 +299,7 @@ class ArkadeClientManager {
     } catch (error: unknown) {
       // Only clear the wallet if this init still owns the session; a failure here
       // must not tear down a newer, successful one.
-      if (generation === this._teardownGeneration) {
+      if (attempt.isCurrent) {
         this.wallet = null;
         this._vtxoManager = null;
       }
@@ -384,7 +385,7 @@ class ArkadeClientManager {
     }
     this.wallet = null;
     this.config = null;
-    this._teardownGeneration++;
+    this.session.invalidate();
     log.info("[ArkadeClientManager] Wallet disconnected");
   }
 
@@ -401,9 +402,7 @@ class ArkadeClientManager {
     }
     this.wallet = null;
     this.config = null;
-    this._teardownGeneration++;
-    this._initPromise = null;
-    this._pendingConfig = null;
+    this.session.invalidate();
     log.info("[ArkadeClientManager] Complete reset performed");
   }
 
@@ -432,17 +431,17 @@ class ArkadeClientManager {
     // stop function, so the earlier one could never be stopped and repeated
     // connect cycles grew them without bound.
     this._listenerStarted = true;
-    // The session this listener belongs to. A disconnect()/reset() bumps it, so
-    // both the late-landing subscription and the callback itself can tell that
-    // the wallet they belong to is gone.
-    const generation = this._teardownGeneration;
+    // The session this listener belongs to. A disconnect()/reset() invalidates
+    // it, so both the late-landing subscription and the callback itself can tell
+    // that the wallet they belong to is gone.
+    const generation = this.session.generation;
     const wallet = this.wallet;
 
     wallet
       .notifyIncomingFunds((notification) => {
         // Never deliver a notification for a wallet the host has torn down —
         // that is a stale listener firing into the next wallet's session.
-        if (generation !== this._teardownGeneration) return;
+        if (generation !== this.session.generation) return;
         try {
           onIncoming(notification);
         } catch (err) {
@@ -450,7 +449,7 @@ class ArkadeClientManager {
         }
       })
       .then((stop) => {
-        if (generation !== this._teardownGeneration) {
+        if (generation !== this.session.generation) {
           // Teardown landed while the subscribe was pending. Installing now
           // would leave a live listener on a torn-down wallet that no
           // stopIncomingFundsListener() call can reach.
@@ -470,7 +469,7 @@ class ArkadeClientManager {
       .catch((err) => {
         log.error("[ArkadeClientManager] Failed to start incoming funds listener:", err);
         // Release the slot so a retry (or the next wallet) can subscribe.
-        if (generation === this._teardownGeneration) this._listenerStarted = false;
+        if (generation === this.session.generation) this._listenerStarted = false;
       });
   }
 

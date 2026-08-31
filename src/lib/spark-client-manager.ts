@@ -19,6 +19,7 @@ import { saveSentTokenRecord } from './spark-sent-token-records'
 import { bech32 } from '@scure/base'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { sha256 } from '@noble/hashes/sha2.js'
+import { WalletSessionGuard, type SessionAttempt } from './wallet-session'
 
 /** Matches the SDK's internal NetworkType (keyof typeof Network). Not exported by the SDK. */
 type SparkNetworkType = 'MAINNET' | 'TESTNET' | 'SIGNET' | 'REGTEST' | 'LOCAL'
@@ -89,35 +90,22 @@ function walletKey(config: SparkConfig): string {
 
 // ---------------------------------------------------------------------------
 
+/** The guard's two slots: the wallet handshake, and the readonly-client build. */
+const WALLET_SLOT = 'wallet'
+const READONLY_SLOT = 'readonly'
+
 class SparkClientManager {
   private wallet: any = null
   private readonlyClient: SparkReadonlyClient | null = null
   private config: SparkConfig | null = null
-  /** Serializes concurrent initialize() calls to prevent races during SW restart. */
-  private _initPromise: Promise<void> | null = null
   /**
-   * Which wallet the in-flight `_initPromise` is for. Sharing an in-flight init
-   * is only correct for the SAME wallet — handing wallet B's caller the promise
-   * for wallet A's handshake puts B's session on A's wallet and spends A's funds.
-   * A hash, not the secret, so no second copy of key material is retained.
+   * Wallet identity + generation guard, shared with the other client managers.
+   * Both slots hang off one generation, so any teardown invalidates the wallet
+   * handshake and the readonly-client build together. `walletKey` hashes the
+   * secret, so the guard never holds a second comparable copy of key material.
+   * See src/lib/wallet-session.ts.
    */
-  private _initKey: string | null = null
-  /**
-   * Bumped by every disconnect()/reset() and by a wallet switch. An in-flight
-   * `_doInitialize` captures it and refuses to install its wallet if it changed
-   * while the SDK handshake was pending — otherwise a teardown that completed
-   * first is silently undone, restoring a "locked" wallet and its
-   * mnemonic-bearing config to a live, signing-capable state.
-   */
-  private _teardownGeneration = 0
-  /** Serializes concurrent readonly client initialization. */
-  private _readonlyInitPromise: Promise<SparkReadonlyClient> | null = null
-  /**
-   * Teardown generation the in-flight `_readonlyInitPromise` belongs to. Without
-   * it a reader arriving after a disconnect()/wallet switch is handed the
-   * previous wallet's in-flight build.
-   */
-  private _readonlyInitGeneration = 0
+  private readonly session = new WalletSessionGuard({ name: 'SparkClientManager' })
   /** Optional SDK factory escape hatch (React Native / Metro). */
   private sdkFactory: SparkSdkFactory | null = null
 
@@ -134,35 +122,19 @@ class SparkClientManager {
    * Concurrent calls share the same in-flight promise.
    */
   initialize(config: SparkConfig): Promise<void> {
-    const key = walletKey(config)
-    // Same wallet → share the handshake, as before.
-    if (this._initPromise && this._initKey === key) return this._initPromise
-    // Different wallet → the pending init belongs to someone else. Invalidate it
-    // (the generation guard stops it installing) and start a fresh one, rather
-    // than returning it and silently connecting the caller to the other wallet.
-    if (this._initPromise) this._teardownGeneration++
-
-    this._initKey = key
-    const promise = this._doInitialize(config).finally(() => {
-      // Only the newest init clears the slot; an older one settling later must
-      // not wipe a newer in-flight handshake.
-      if (this._initPromise === promise) {
-        this._initPromise = null
-        this._initKey = null
-      }
-    })
-    this._initPromise = promise
-    return promise
+    return this.session.begin(WALLET_SLOT, walletKey(config), (attempt) =>
+      this._doInitialize(config, attempt),
+    )
   }
 
-  private async _doInitialize(config: SparkConfig): Promise<void> {
+  private async _doInitialize(config: SparkConfig, attempt: SessionAttempt): Promise<void> {
     if (this.wallet) {
       log.warn('[SparkClientManager] Wallet already initialized, re-initializing...')
       await this.disconnect()
     }
 
-    // Captured AFTER the re-init disconnect above, which bumps the counter itself.
-    const generation = this._teardownGeneration
+    // Marked AFTER the re-init disconnect above, which invalidates the session itself.
+    attempt.mark()
     const network: SparkNetworkType = NETWORK_MAP[config.network ?? 'mainnet'] ?? 'MAINNET'
     const mnemonicOrSeed = resolveSparkMnemonicOrSeed(config.mnemonic)
 
@@ -184,16 +156,7 @@ class SparkClientManager {
       // pending has already torn this session down. Installing now would undo it:
       // the locked wallet would come back live and signing-capable, and
       // `this.config` would restore the mnemonic. Drop the orphan instead.
-      if (generation !== this._teardownGeneration) {
-        log.info('[SparkClientManager] Init superseded by teardown — discarding wallet')
-        try {
-          await result.wallet?.cleanupConnections?.()
-        } catch (cleanupError: unknown) {
-          const cleanupMsg = cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
-          log.warn('[SparkClientManager] Error cleaning up superseded wallet:', cleanupMsg)
-        }
-        return
-      }
+      if (!(await attempt.claim(() => result.wallet?.cleanupConnections?.()))) return
 
       this.wallet = result.wallet
       this.config = config
@@ -211,7 +174,7 @@ class SparkClientManager {
     } catch (error: unknown) {
       // Only clear the wallet if this init still owns the session; a failure here
       // must not tear down a newer, successful one.
-      if (generation === this._teardownGeneration) this.wallet = null
+      if (attempt.isCurrent) this.wallet = null
       const msg = error instanceof Error ? error.message : String(error)
       throw Object.assign(new Error(`Failed to initialize SparkWallet: ${msg}`), { cause: error })
     }
@@ -241,11 +204,10 @@ class SparkClientManager {
    * ours would be a worse bug than the one this closes.
    */
   releaseExternalWallet(wallet: any): void {
-    if (!wallet || this.wallet !== wallet) return
+    if (!this.session.releaseIf(this.wallet, wallet)) return
     this.wallet = null
     this.readonlyClient = null
     this.config = null
-    this._teardownGeneration++
   }
 
   /**
@@ -312,42 +274,31 @@ class SparkClientManager {
 
   async getReadonlyClient(): Promise<SparkReadonlyClient> {
     if (this.readonlyClient) return this.readonlyClient
-    // Share an in-flight build only within the same session. A build started
-    // before a disconnect()/wallet switch is keyed to the PREVIOUS wallet's
-    // master key; handing it to the next session's reader is the same
-    // cross-wallet identity leak the wallet handshake is guarded against.
-    if (this._readonlyInitPromise && this._readonlyInitGeneration === this._teardownGeneration) {
-      return this._readonlyInitPromise
-    }
     if (!this.config?.mnemonic) {
       throw new Error('SparkReadonlyClient cannot be created without mnemonic config.')
     }
 
-    const network: SparkNetworkType = NETWORK_MAP[this.config.network ?? 'mainnet'] ?? 'MAINNET'
+    const config = this.config
+    const network: SparkNetworkType = NETWORK_MAP[config.network ?? 'mainnet'] ?? 'MAINNET'
 
-    const generation = this._teardownGeneration
-    this._readonlyInitGeneration = generation
-    const promise = (async () => {
-      const mnemonicOrSeed = resolveSparkMnemonicOrSeed(this.config!.mnemonic)
+    // Guarded by the same session as the wallet handshake, on its own slot: a
+    // build started before a disconnect()/wallet switch is keyed to the PREVIOUS
+    // wallet's master key, so it must neither be shared with the next session's
+    // reader nor cached once it lands.
+    return this.session.begin(READONLY_SLOT, walletKey(config), async (attempt) => {
+      const mnemonicOrSeed = resolveSparkMnemonicOrSeed(config.mnemonic)
       const client = await SparkReadonlyClient.createWithMasterKey({ network }, mnemonicOrSeed)
       // A disconnect()/reset()/wallet switch landed while the client was being
       // built. Caching it would keep a live read capability on a wallet the host
       // has already wiped — and the `if (this.readonlyClient) return` fast path
       // above would then serve it past the mnemonic gate, to the next wallet's
       // session. Discard the orphan.
-      if (generation !== this._teardownGeneration) {
+      if (!(await attempt.claim())) {
         throw new Error('SparkReadonlyClient init superseded by teardown')
       }
       this.readonlyClient = client
       return client
-    })().finally(() => {
-      // Only the newest build clears the slot; an older one settling later must
-      // not wipe a newer in-flight build's dedupe.
-      if (this._readonlyInitPromise === promise) this._readonlyInitPromise = null
     })
-    this._readonlyInitPromise = promise
-
-    return promise
   }
 
   /**
@@ -376,17 +327,14 @@ class SparkClientManager {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
-    this._teardownGeneration++
+    this.session.invalidate()
   }
 
   reset(): void {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
-    this._teardownGeneration++
-    this._initPromise = null
-    this._initKey = null
-    this._readonlyInitPromise = null
+    this.session.invalidate()
     log.info('[SparkClientManager] Complete reset performed')
   }
 }
