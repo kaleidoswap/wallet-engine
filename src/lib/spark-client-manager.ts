@@ -112,6 +112,12 @@ class SparkClientManager {
   private _teardownGeneration = 0
   /** Serializes concurrent readonly client initialization. */
   private _readonlyInitPromise: Promise<SparkReadonlyClient> | null = null
+  /**
+   * Teardown generation the in-flight `_readonlyInitPromise` belongs to. Without
+   * it a reader arriving after a disconnect()/wallet switch is handed the
+   * previous wallet's in-flight build.
+   */
+  private _readonlyInitGeneration = 0
   /** Optional SDK factory escape hatch (React Native / Metro). */
   private sdkFactory: SparkSdkFactory | null = null
 
@@ -306,23 +312,42 @@ class SparkClientManager {
 
   async getReadonlyClient(): Promise<SparkReadonlyClient> {
     if (this.readonlyClient) return this.readonlyClient
-    if (this._readonlyInitPromise) return this._readonlyInitPromise
+    // Share an in-flight build only within the same session. A build started
+    // before a disconnect()/wallet switch is keyed to the PREVIOUS wallet's
+    // master key; handing it to the next session's reader is the same
+    // cross-wallet identity leak the wallet handshake is guarded against.
+    if (this._readonlyInitPromise && this._readonlyInitGeneration === this._teardownGeneration) {
+      return this._readonlyInitPromise
+    }
     if (!this.config?.mnemonic) {
       throw new Error('SparkReadonlyClient cannot be created without mnemonic config.')
     }
 
     const network: SparkNetworkType = NETWORK_MAP[this.config.network ?? 'mainnet'] ?? 'MAINNET'
 
-    this._readonlyInitPromise = (async () => {
+    const generation = this._teardownGeneration
+    this._readonlyInitGeneration = generation
+    const promise = (async () => {
       const mnemonicOrSeed = resolveSparkMnemonicOrSeed(this.config!.mnemonic)
       const client = await SparkReadonlyClient.createWithMasterKey({ network }, mnemonicOrSeed)
+      // A disconnect()/reset()/wallet switch landed while the client was being
+      // built. Caching it would keep a live read capability on a wallet the host
+      // has already wiped — and the `if (this.readonlyClient) return` fast path
+      // above would then serve it past the mnemonic gate, to the next wallet's
+      // session. Discard the orphan.
+      if (generation !== this._teardownGeneration) {
+        throw new Error('SparkReadonlyClient init superseded by teardown')
+      }
       this.readonlyClient = client
       return client
     })().finally(() => {
-      this._readonlyInitPromise = null
+      // Only the newest build clears the slot; an older one settling later must
+      // not wipe a newer in-flight build's dedupe.
+      if (this._readonlyInitPromise === promise) this._readonlyInitPromise = null
     })
+    this._readonlyInitPromise = promise
 
-    return this._readonlyInitPromise
+    return promise
   }
 
   /**
