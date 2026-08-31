@@ -78,18 +78,40 @@ describe('F1: policy checks caller amount, adapter pays invoice amount', () => {
   })
 })
 
-describe('F2: swap caps compare sats against raw asset base units', () => {
+describe('F2 [FIXED]: swap caps no longer compare sats against raw asset base units', () => {
   const xautQuote: Quote = {
     id: 'q1', fromAsset: 'XAUT', fromAmount: 90_000, // 0.9 XAUT at precision 6
     toAsset: 'BTC', toAmount: 8_000_000, price: 0, fee: { amount: 0, asset: 'XAUT' }, expiresAt: 0,
   }
-  it('a ~$3k XAUT swap passes a 100k-sat cap because 90_000 <= 100_000 numerically', async () => {
+  it('a ~$3k XAUT swap no longer passes a 100k-sat cap on a numeric coincidence', async () => {
     const { adapter, state } = stubAdapter('RGB_LN', { swaps: true })
     const manager = new ProtocolManager({ policy: { maxAmountSat: 100_000 } })
     manager.registerAdapter(adapter)
     await manager.connect('RGB_LN', { protocol: 'RGB_LN' })
 
-    await manager.executeSwap(xautQuote) // NOT denied
+    // The from-asset is not BTC, so `fromAmount` is not sats and the cap cannot
+    // bound it. The policy engine's fail-closed AMOUNT_UNKNOWN rule applies.
+    await expect(manager.executeSwap(xautQuote)).rejects.toThrow(PolicyError)
+    expect(state.swapsExecuted).toHaveLength(0)
+  })
+
+  it('with no cap configured, an asset swap still executes', async () => {
+    const { adapter, state } = stubAdapter('RGB_LN', { swaps: true })
+    const manager = new ProtocolManager({ policy: {} })
+    manager.registerAdapter(adapter)
+    await manager.connect('RGB_LN', { protocol: 'RGB_LN' })
+
+    await manager.executeSwap(xautQuote)
+    expect(state.swapsExecuted).toHaveLength(1)
+  })
+
+  it('a BTC-denominated quote UNDER the cap still executes', async () => {
+    const { adapter, state } = stubAdapter('RGB_LN', { swaps: true })
+    const manager = new ProtocolManager({ policy: { maxAmountSat: 100_000 } })
+    manager.registerAdapter(adapter)
+    await manager.connect('RGB_LN', { protocol: 'RGB_LN' })
+
+    await manager.executeSwap({ ...xautQuote, fromAsset: 'BTC', fromAmount: 50_000 })
     expect(state.swapsExecuted).toHaveLength(1)
   })
 

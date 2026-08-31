@@ -545,8 +545,26 @@ export class ProtocolManager {
 
   async executeSwap(quote: Quote): Promise<SwapResult> {
     const receiverAddress = (quote as Quote & { receiverAddress?: unknown }).receiverAddress
+    // `Quote.fromAmount` is in RAW BASE UNITS of `quote.fromAsset` (documented on
+    // `QuoteRequest`, types/base.ts:233-238, and on the swap boundary,
+    // KaleidoswapSwap.ts:11-16) — satoshis ONLY when the from-asset is BTC.
+    // `PolicyRequest.amountSat` is satoshis (policy/index.ts:30). Passing one as
+    // the other made a sat-denominated cap meaningless for every non-BTC
+    // from-asset: `{ maxAmountSat: 100_000 }` allowed a quote of
+    // `{ fromAsset: 'XAUT', fromAmount: 90_000 }` — thousands of dollars, millions
+    // of sats — because 90_000 <= 100_000 numerically.
+    //
+    // A sat-denominated cap cannot bound an arbitrary asset without a price
+    // oracle, so don't pretend: report the amount only when it IS sats. The
+    // policy engine already fails CLOSED on an unknown amount whenever a cap is
+    // configured (AMOUNT_UNKNOWN, policy/index.ts:121-128), so an asset swap under
+    // a cap now gets an explicit, visible host decision instead of a silent unit
+    // mismatch. NOTE FOR HOSTS: this means non-BTC swaps are DENIED while
+    // `maxAmountSat` is set — see REPORT-2 "Still open" for the per-asset-cap
+    // design question that would lift that.
+    const fromIsSats = quote.fromAsset === 'BTC'
     this.enforce('swap', {
-      amountSat: quote.fromAmount,
+      amountSat: fromIsSats ? quote.fromAmount : undefined,
       destination: typeof receiverAddress === 'string' ? receiverAddress : undefined,
     })
     const adapter = this.getActiveAdapterUnchecked()
