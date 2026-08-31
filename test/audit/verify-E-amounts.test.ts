@@ -4,11 +4,13 @@ import { convertSdkBalance, convertTransferToTransaction, convertPaymentToTransa
 import { decodeBolt11 } from '../../src/lib/bolt11'
 
 describe('VERIFY E-F1: formatAmount float division + toFixed range', () => {
-  it('precision > 100 throws RangeError', () => {
+  it('[E-F1b FIXED] precision > 100 renders instead of throwing RangeError', () => {
     let err: any = null
-    try { formatAmount(5, 200) } catch (e: any) { err = e }
-    console.log('formatAmount(5,200) ->', err ? `${err.constructor.name}: ${err.message}` : 'no throw')
-    expect(err).toBeInstanceOf(RangeError)
+    let out = ''
+    try { out = formatAmount(5, 200) } catch (e: any) { err = e }
+    console.log('formatAmount(5,200) ->', err ? `${err.constructor.name}: ${err.message}` : out)
+    expect(err).toBeNull()
+    expect(out).toBe('0.' + '0'.repeat(199) + '5')
   })
   it('precision 18 on a large integer', () => {
     // BigInt truth vs float result

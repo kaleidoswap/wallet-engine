@@ -53,11 +53,14 @@ describe('F1: formatAmount (src/lib/amount.ts:20)', () => {
     expect(got).toBe('1.000000000000000000')
   })
 
-  it('throws RangeError at issuer-controlled precision > 100 (RGB precision is u8; Spark decimals issuer-set)', () => {
-    expect(() => formatAmount(5, 200)).toThrow(RangeError)
+  it('[E-F1b FIXED] renders issuer-controlled precision > 100 (RGB precision is u8; Spark decimals issuer-set)', () => {
+    // Was: `expect(() => formatAmount(5, 200)).toThrow(RangeError)` — toFixed
+    // accepts 0-100 digits. formatAmount now digit-shifts a BigInt, which has
+    // no ceiling, so a crafted asset can no longer throw out of the render loop.
+    expect(formatAmount(5, 200)).toBe('0.' + '0'.repeat(199) + '5')
   })
 
-  it('the RangeError propagates out of the Spark history converter (decimals: 200 token)', () => {
+  it('[E-F1b FIXED] a decimals: 200 token no longer breaks the Spark history converter', () => {
     const hashBytes = new Uint8Array(32).fill(7)
     const tokenIdBytes = new Uint8Array(32).fill(9)
     const rawId = rawTokenIdFromBytes(tokenIdBytes)
@@ -76,18 +79,19 @@ describe('F1: formatAmount (src/lib/amount.ts:20)', () => {
       tokenTransactionHash: hashBytes,
     }
     const rawMeta = new Map([[rawId, { id: 'btkn1x', meta: { name: 'Evil', ticker: 'EVL', decimals: 200 } }]])
-    expect(() =>
-      convertTokenTransactionToUnified(
-        tx,
-        'aa'.repeat(33),
-        new Map(),
-        rawMeta,
-        new Set(),
-        new Map(),
-        new Map(),
-        'MAINNET',
-      ),
-    ).toThrow(RangeError)
+    // Was: `.toThrow(RangeError)`. One dust transfer of this asset used to take
+    // out the caller's whole activity view; it now renders as a row like any other.
+    const converted = convertTokenTransactionToUnified(
+      tx,
+      'aa'.repeat(33),
+      new Map(),
+      rawMeta,
+      new Set(),
+      new Map(),
+      new Map(),
+      'MAINNET',
+    )
+    expect(converted).toBeTruthy()
   })
 
   it('is exact for all reachable sats values at precision 8 (control)', () => {
