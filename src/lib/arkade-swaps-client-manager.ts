@@ -46,6 +46,14 @@ class ArkadeSwapsClientManager {
   private _initPromise: Promise<void> | null = null;
   /** Generation of the in-flight _initPromise. */
   private _initGeneration = 0;
+  /**
+   * The wallet the in-flight `_initPromise` is building a client for. While
+   * `ArkadeSwaps.create()` is pending `this.client` is still null, so the
+   * wallet-switch teardown in `initialize()` does not fire — without this the
+   * in-flight promise would be handed to a different wallet's caller and bind
+   * that session to the previous wallet's swaps client.
+   */
+  private _initWallet: IWallet | null = null;
   /** Bumped by dispose() to invalidate any in-flight init. */
   private _generation = 0;
 
@@ -73,17 +81,28 @@ class ArkadeSwapsClientManager {
           log.warn('[ArkadeSwapsClientManager] Error disposing superseded client:', error),
         );
     }
+    // An in-flight handshake for a DIFFERENT wallet must not be shared: the
+    // teardown branch above only fires once a client exists, so a wallet switch
+    // that races ArkadeSwaps.create() would otherwise return wallet A's promise
+    // to wallet B's caller — and A's client would install and sign with A's
+    // keys for the rest of B's session. Invalidate it (the generation guard in
+    // _doInitialize discards the orphan) and build one for the wallet we were
+    // given. ArkadeAdapter.connect() does not await this init, so the window is
+    // the normal case, not an edge case.
+    if (this._initPromise && this._initWallet !== wallet) this._generation++;
     // Reuse in-flight promise only if it belongs to the current generation.
     if (this._initPromise && this._initGeneration === this._generation) {
       return this._initPromise;
     }
     const generation = this._generation;
     this._initGeneration = generation;
+    this._initWallet = wallet;
     const promise = this._doInitialize(wallet, generation, opts).finally(() => {
       // Only clear if this promise is still the active one (prevents stale
       // promises from clearing a newer in-flight init).
       if (this._initPromise === promise && this._initGeneration === generation) {
         this._initPromise = null;
+        this._initWallet = null;
       }
     });
     this._initPromise = promise;
@@ -157,6 +176,7 @@ class ArkadeSwapsClientManager {
     // even if ArkadeSwaps.create() has not returned yet.
     this._generation++;
     this.clientWallet = null;
+    this._initWallet = null;
     if (!this.client) return;
     try {
       await this.client.dispose();
