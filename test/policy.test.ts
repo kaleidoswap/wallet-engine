@@ -145,23 +145,48 @@ describe('evaluatePolicy — default-deny', () => {
     }, p)).toMatchObject({ allowed: false, code: 'PROTOCOL_NOT_GRANTED' })
   })
 
-  it('treats Liquid PSET signing as an explicit signing grant without applying spend caps', () => {
+  it('gates blindLiquidPset as an explicit signing grant, never by a spend cap', () => {
+    // A PSET can move multiple assets and blinded (hidden) values, so a sat cap
+    // cannot authorize it — blinding is gated by an explicit LIQUID grant only.
     const p: SigningPolicy = {
       mode: 'deny',
       maxAmountSat: 1,
-      grants: [{ id: 'review-ui', operations: ['signLiquidPset'], protocols: ['LIQUID'] }],
+      grants: [{ id: 'review-ui', operations: ['blindLiquidPset'], protocols: ['LIQUID'] }],
     }
     expect(evaluatePolicy({
-      operation: 'signLiquidPset',
+      operation: 'blindLiquidPset',
       grantId: 'review-ui',
       protocol: 'LIQUID',
       amountSat: 1_000_000,
     }, p)).toEqual({ allowed: true })
     expect(evaluatePolicy({
-      operation: 'signLiquidPset',
+      operation: 'blindLiquidPset',
       grantId: 'review-ui',
       protocol: 'BTC',
     }, p)).toMatchObject({ allowed: false, code: 'PROTOCOL_NOT_GRANTED' })
+  })
+
+  it('fails closed on Liquid PSET mutations with no authorizing grant (default-deny)', () => {
+    const p: SigningPolicy = { mode: 'deny', grants: [] }
+    for (const operation of ['blindLiquidPset', 'signLiquidPset'] as const) {
+      expect(evaluatePolicy({ operation, protocol: 'LIQUID' }, p)).toMatchObject({
+        allowed: false,
+        code: 'NO_GRANT',
+      })
+    }
+  })
+
+  it('never lets a large spend cap substitute for op authorization on a PSET mutation', () => {
+    // Hidden/multi-asset value means amount can't authorize a PSET: a grant that
+    // omits the operation is denied regardless of how permissive the caps are.
+    const p: SigningPolicy = {
+      mode: 'deny',
+      maxAmountSat: 1_000_000_000,
+      grants: [{ id: 'review-ui', operations: ['signLiquidPset'], protocols: ['LIQUID'] }],
+    }
+    expect(
+      evaluatePolicy({ operation: 'blindLiquidPset', grantId: 'review-ui', protocol: 'LIQUID' }, p),
+    ).toMatchObject({ allowed: false, code: 'OP_NOT_GRANTED' })
   })
 })
 

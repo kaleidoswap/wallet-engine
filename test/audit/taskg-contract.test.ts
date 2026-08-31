@@ -212,9 +212,13 @@ describe('G-F6: RgbAdapter must not move funds after a FAILED connect()', () => 
 
 // ---------------------------------------------------------------------------
 describe('G-F7: capabilities flags must match what the adapter actually does', () => {
-  it('a) LIQUID declares liquid-pset-sign but signLiquidPset throws NOT_SUPPORTED on a plain account', async () => {
+  it('a) [FIXED ON main] LIQUID no longer declares liquid-pset-sign on a plain account', async () => {
+    // Fixed on `main` by 0ce6304: the experimental PSET/Simplicity operations
+    // left the static manifest and are now derived from the account's LWK
+    // binding, so a plain account advertises neither — the flag and the
+    // behaviour agree.
     const adapter = connected(new LiquidWdkAdapter(), { getBalance: async () => 0n })
-    expect(adapter.capabilities).toContain('liquid-pset-sign') // the static flag
+    expect(adapter.capabilities).not.toContain('liquid-pset-sign')
     await expect(adapter.signLiquidPset({ pset: 'AAAA' } as any)).rejects.toThrow(/NOT_SUPPORTED|Simplicity/i)
   })
 

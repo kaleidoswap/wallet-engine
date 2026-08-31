@@ -3,16 +3,18 @@ import {
   LiquidWdkAdapter,
   type LiquidSyncWarning,
 } from '../src/adapters/wdk/LiquidWdkAdapter'
-import type { LiquidSyncWarning as PublicLiquidSyncWarning } from '../src/adapters/wdk'
+import type {
+  LiquidSyncWarning as PublicLiquidSyncWarning,
+  LiquidSecretsStore as PublicLiquidSecretsStore,
+  LiquidOutputSecretsRecord as PublicLiquidOutputSecretsRecord,
+} from '../src/adapters/wdk'
 import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { LIQUID_USDT_ASSET_ID } from '../src/constants'
 
 /**
  * Fast unit tests for the Liquid (lwk) backing. They inject a fake `account` +
- * `manager` directly (bypassing connect()) so the ~10 MB lwk wasm never loads in
- * CI — the goal is to pin the adapter's translation onto the IProtocolAdapter
- * contract (asset mapping, send param shaping, tx mapping, on-chain-only guards),
- * not lwk internals (those are validated on-device + upstream).
+ * `manager` directly (bypassing connect()) so the ~10 MB lwk wasm never loads in CI.
+ * The goal is to pin the adapter's translation onto the contract, not lwk internals.
  */
 describe('LiquidWdkAdapter', () => {
   const POLICY = 'aaaa1111'.repeat(8).slice(0, 64) // L-BTC policy asset id (mainnet-ish)
@@ -73,6 +75,64 @@ describe('LiquidWdkAdapter', () => {
       details: { reason: 'waterfalls_failed' },
     })
     expect(receivedWarning?.code).toBe('LIQUID_WATERFALLS_FALLBACK')
+  })
+
+  it('forwards a configured secretsStore to the wallet manager', async () => {
+    let managerConfig: Record<string, unknown> | undefined
+    class FakeLiquidWalletManager {
+      constructor(_mnemonic: string, config: Record<string, unknown>) {
+        managerConfig = config
+      }
+      async getAccount() {
+        return {}
+      }
+    }
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => ({ default: FakeLiquidWalletManager }))
+
+    const put = vi.fn()
+    const secretsStore: PublicLiquidSecretsStore = { put }
+    const adapter = new LiquidWdkAdapter()
+    await adapter.connect({
+      protocol: 'LIQUID',
+      mnemonic: 'test mnemonic',
+      network: 'mainnet',
+      secretsStore,
+    })
+
+    // Identity, not shape: the host's store must reach lwk unwrapped, or the
+    // records go nowhere and the loss is silent.
+    expect(managerConfig?.secretsStore).toBe(secretsStore)
+
+    const records: PublicLiquidOutputSecretsRecord[] = [
+      {
+        txid: 'ab'.repeat(32),
+        vout: 0,
+        assetId: 'cd'.repeat(32),
+        value: '1000',
+        assetBlindingFactor: 'ef'.repeat(32),
+        valueBlindingFactor: '12'.repeat(32),
+      },
+    ]
+    await (managerConfig?.secretsStore as PublicLiquidSecretsStore).put(records)
+    expect(put).toHaveBeenCalledWith(records)
+  })
+
+  it('omits secretsStore when the host configures none', async () => {
+    let managerConfig: Record<string, unknown> | undefined
+    class FakeLiquidWalletManager {
+      constructor(_mnemonic: string, config: Record<string, unknown>) {
+        managerConfig = config
+      }
+      async getAccount() {
+        return {}
+      }
+    }
+    registerWdkModule('@kaleidorg/wdk-wallet-liquid', () => ({ default: FakeLiquidWalletManager }))
+
+    const adapter = new LiquidWdkAdapter()
+    await adapter.connect({ protocol: 'LIQUID', mnemonic: 'test mnemonic', network: 'mainnet' })
+
+    expect(managerConfig?.secretsStore).toBeUndefined()
   })
 
   it('lists L-BTC (policy asset) first, then other Liquid assets with known metadata', async () => {
@@ -240,9 +300,9 @@ describe('LiquidWdkAdapter', () => {
 
   it('serializes concurrent lwk operations (no re-entrant wasm access)', async () => {
     // lwk's Wollet panics ("recursive use of an object") if a second call enters
-    // while the first is mid-flight. Simulate that: the fake account throws if any
-    // method is invoked while another is still running. The adapter's opLock must
-    // prevent overlap even when the dashboard fires balance + assets + address at once.
+    // mid-flight. The fake account throws if any method is invoked while another
+    // runs, so the adapter's opLock must prevent overlap even when the dashboard
+    // fires balance + assets + address at once.
     let inFlight = 0
     const guard = async <T>(value: T): Promise<T> => {
       if (inFlight > 0) throw new Error('recursive use of an object detected')
@@ -321,5 +381,34 @@ describe('LiquidWdkAdapter', () => {
       code: 'NOT_SUPPORTED',
       protocol: 'LIQUID',
     })
+  })
+
+  // In real wdk-wallet-liquid the PSET/Simplicity methods are ALWAYS present on
+  // LiquidAccount; whether they work is decided at runtime by
+  // getSimplicityCapabilities(). So the `capabilities` manifest the UI gates on must
+  // be derived from that probe, never statically claimed.
+  it('does not advertise experimental PSET/Simplicity capabilities without runtime support (fail closed)', () => {
+    const without = connected({}) // pre-Simplicity account: no capability probe
+    expect(without.capabilities).not.toContain('liquid-pset-inspect')
+    expect(without.capabilities).not.toContain('liquid-pset-sign')
+    expect(without.capabilities).not.toContain('simplicity-compile')
+    // The always-on Liquid operations are still advertised.
+    expect(without.capabilities).toEqual(
+      expect.arrayContaining(['onchain-send', 'onchain-receive', 'asset-send', 'asset-receive']),
+    )
+  })
+
+  it('advertises experimental capabilities derived from the runtime Simplicity probe', () => {
+    const withSimplicity = connected({
+      getSimplicityCapabilities: () => ({
+        version: 'experimental-0.1',
+        available: true,
+        pset: { inspect: true, blind: true, sign: true, finalize: true },
+        simplicity: { compile: true, derivePublicKey: true, finalizeTransaction: true },
+      }),
+    })
+    expect(withSimplicity.capabilities).toEqual(
+      expect.arrayContaining(['liquid-pset-inspect', 'liquid-pset-sign', 'simplicity-compile']),
+    )
   })
 })

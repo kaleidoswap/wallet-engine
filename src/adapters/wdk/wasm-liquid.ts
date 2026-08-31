@@ -1,16 +1,10 @@
 /**
  * Lean Liquid (WASM) entry — `@kaleidorg/wallet-engine/adapters/wdk/wasm-liquid`.
  *
- * Exposes ONLY the Liquid adapter + the module-injection seam, with no static
- * reference to the other WDK adapters (Spark/RLN/native-RGB/RGB-L1/Arkade) or
- * `createWdkRegistry`. The full `./adapters/wdk` barrel statically re-exports
- * every adapter, which transitively drags in heavy/native deps (`lwk_wasm`,
- * `sodium-native`, `@utexo/wdk-wallet-rgb`, `@arkade-os/wdk`) that a browser /
- * MV3 service worker host doesn't want. Importing from this lean entry lets such
- * a host bundle just the Liquid adapter (+ `lwk_wasm`, which it instantiates and
- * injects via `registerWdkModule`) without resolving those.
- *
- * Mirrors `./wasm-rgb` (the RGB-L1 analogue).
+ * Exposes ONLY the Liquid adapter + the module-injection seam. The full
+ * `./adapters/wdk` barrel re-exports every adapter, transitively dragging in heavy
+ * native deps (`lwk_wasm`, `sodium-native`, `@utexo/wdk-wallet-rgb`,
+ * `@arkade-os/wdk`) a browser / MV3 host doesn't want. Mirrors `./wasm-rgb`.
  */
 export {
   LiquidWdkAdapter,

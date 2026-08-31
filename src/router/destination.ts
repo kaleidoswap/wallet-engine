@@ -1,13 +1,10 @@
 /**
  * Destination Classifier
  * ----------------------
- * Pure, dependency-free classification of a send destination string into a
- * (kind, layer, candidate protocols) triple. The cross-protocol router uses this
- * to decide which adapter(s) can pay a given destination — without any adapter
- * needing to know about the others.
- *
- * This is the cross-protocol layer that WDK's per-module detection does NOT cover:
- * WDK detects within a protocol; this chooses BETWEEN protocols.
+ * Pure, dependency-free classification of a send destination into a (kind, layer,
+ * candidate protocols) triple, so the router can pick an adapter without any
+ * adapter knowing about the others. WDK detects within a protocol; this chooses
+ * BETWEEN protocols.
  */
 
 import { base58check } from '@scure/base'
@@ -24,15 +21,12 @@ const base58checkDecode = base58check(sha256).decode
 const LIQUID_CONFIDENTIAL_VERSIONS = new Set([12, 23, 4])
 
 /**
- * True for a legacy base58 *confidential* Liquid address (`VJL…`/`VT…` on
- * mainnet and the testnet/regtest equivalents). Unlike the UNCONFIDENTIAL
- * base58 forms — which are indistinguishable from arbitrary text / BTC and so
- * are deliberately NOT matched — a confidential address decodes to a fixed
- * 55-byte payload (`[blinded_prefix][inner version][33-byte blinding pubkey]
- * [20-byte hash]`) whose first byte is the network's blinded prefix. That, plus
- * the verified base58check checksum, makes it unambiguous and safe to identify:
- * it still fails CLOSED (→ false) on junk, BTC (21-byte payload), or a bad
- * checksum. The bech32/blech32 `lq1…` forms are handled by the regex instead.
+ * True for a legacy base58 *confidential* Liquid address (`VJL…`/`VT…` and the
+ * testnet/regtest equivalents). Unlike the unconfidential base58 forms — which are
+ * indistinguishable from arbitrary text or BTC and so are deliberately NOT matched
+ * — a confidential address decodes to a fixed 55-byte payload whose first byte is
+ * the network's blinded prefix. That plus the base58check checksum makes it
+ * unambiguous, and it still fails CLOSED on junk, BTC, or a bad checksum.
  */
 function isLiquidConfidentialBase58(dest: string): boolean {
   try {
@@ -69,33 +63,28 @@ export interface ClassifiedDestination {
   value: string
 }
 
-// Matchers are deliberately STRICT and anchored: the classifier directs funds,
-// so it must fail CLOSED (→ UNKNOWN, no candidates) on anything it cannot
-// positively identify. A loose prefix that matches arbitrary text (the old
-// Liquid `H`/`VT`/`Az` and the bare-letter BTC fallbacks) is a fund-misrouting
-// bug, not a convenience.
+// Matchers are deliberately STRICT and anchored: the classifier directs funds, so
+// it must fail CLOSED (→ UNKNOWN) on anything it cannot positively identify. A
+// loose prefix matching arbitrary text is a fund-misrouting bug, not a convenience.
 const RE = {
-  // BOLT11 currency prefixes: bc (mainnet), tb (testnet), tbs (signet — the
-  // project's active network via Mutinynet), bcrt (regtest). `tbs` MUST precede
-  // `tb` in the alternation, otherwise `tb` matches first and the required
-  // trailing `[0-9]` sees the `s` and fails — silently misrouting a signet
-  // invoice (`lntbs1…`) to UNKNOWN. Kept in sync with `lib/bolt11.ts`.
+  // BOLT11 prefixes: bc (mainnet), tb (testnet), tbs (signet/Mutinynet), bcrt.
+  // `tbs` MUST precede `tb`, else `tb` matches first and the required trailing
+  // `[0-9]` sees the `s` and fails, misrouting a signet invoice to UNKNOWN.
+  // Kept in sync with `lib/bolt11.ts`.
   bolt11: /^ln(bcrt|tbs|bc|tb)[0-9]/i,
   bolt12: /^lno1[0-9a-z]+$/i,
   lnurl: /^lnurl[0-9a-z]+$/i,
   lnAddress: /^[^@\s]+@[^@\s]+\.[^@\s]+$/i,
   rgb: /^(rgb:|utxob:)/i,
-  // Spark bech32m HRPs, per the @buildonspark/spark-sdk address encoder:
-  // `spark1` (mainnet), `sparkt1` (testnet), `sparkrt1` (regtest), `sparkl1`
-  // (local/signet), plus the legacy `spl1`/`sprt1` forms. `sp1` is deliberately
-  // NOT here — that HRP belongs to BIP352 Silent Payments, so matching it as
-  // Spark would be a fund-misrouting bug. Longest prefixes first.
+  // Spark bech32m HRPs per the SDK's address encoder: `spark1`, `sparkt1`,
+  // `sparkrt1`, `sparkl1`, plus legacy `spl1`/`sprt1`. `sp1` is deliberately NOT
+  // here — it belongs to BIP352 Silent Payments, so matching it as Spark would
+  // misroute funds. Longest prefixes first.
   spark: /^(sparkrt|sparkt|sparkl|spark|sprt|spl)1[0-9a-z]{6,}$/i,
   arkade: /^(ark|tark)1[0-9a-z]{6,}$/i,
-  // Liquid bech32/blech32 (confidential `lq1`, unconfidential `ex1`, + testnet/
-  // regtest variants). Legacy *confidential* base58 addresses (`VJL…`/`VT…`) are
-  // matched separately via isLiquidConfidentialBase58 (checksum + fixed payload).
-  // The UNCONFIDENTIAL base58 forms stay dropped: `Q`/`H`/`Gq` are
+  // Liquid bech32/blech32 (`lq1` confidential, `ex1` unconfidential, + testnet/
+  // regtest). Legacy confidential base58 goes through
+  // isLiquidConfidentialBase58; the unconfidential base58 forms stay dropped as
   // indistinguishable from arbitrary text / BTC.
   liquid: /^(lq1|tlq1|ex1|tex1|el1|ert1)[0-9a-z]{6,}$/i,
   // BTC bech32 (charset excludes 1/b/i/o) or legacy base58 (charset excludes
@@ -123,14 +112,11 @@ export function classifyDestination(raw: string): ClassifiedDestination {
   if (RE.bip21.test(dest)) {
     const addr = dest.slice('bitcoin:'.length).split('?')[0]
     const lightningFallback = extractLightning(dest)
-    // BIP321 allows an address-less URI (`bitcoin:?lightning=…`). With no
-    // on-chain address there is nothing for the single-rail resolver to pay
-    // directly, so fail CLOSED (no candidates, no layer) rather than emit a
-    // `direct` on-chain route whose `value` is the empty string — that would
-    // let lite mode auto-select a send to an empty destination while silently
-    // dropping the embedded lightning=/asset rails. Callers that want those
-    // rails must go through `resolveUnifiedSend`. The `lightningFallback` is
-    // still surfaced so a caller can route it explicitly.
+    // BIP321 allows an address-less URI (`bitcoin:?lightning=…`). With no on-chain
+    // address, fail CLOSED rather than emit a `direct` route whose `value` is the
+    // empty string — that would let lite mode auto-select a send to an empty
+    // destination while dropping the embedded rails. Callers wanting those must go
+    // through `resolveUnifiedSend`; `lightningFallback` is still surfaced.
     if (!addr) {
       return { kind: 'BIP21', layer: null, format: null, candidates: [], lightningFallback, value: '' }
     }

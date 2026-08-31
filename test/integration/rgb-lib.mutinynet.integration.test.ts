@@ -1,15 +1,13 @@
 /**
  * RGB-L1 (rgb-lib) · mutinynet (signet) — live integration
  * --------------------------------------------------------
- * Connects Alice and Bob to a LOCAL rgb-lib wallet (RgbLibWdkAdapter) on
- * Mutinynet. rgb-lib holds keys in-process and persists SQLite state under a
- * per-wallet dataDir, so Alice and Bob never share state.
+ * Connects Alice and Bob to a LOCAL rgb-lib wallet on Mutinynet. rgb-lib holds keys
+ * in-process and persists SQLite state under a per-wallet dataDir, so the two never
+ * share state.
  *
- * Checks their pre-funded on-chain (vanilla) BTC balance, RGB asset list, and
- * BTC receive address. RGB asset *transfers* require colorable UTXOs and a
- * consignment exchange over the proxy, so they stay behind RUN_SEND_TESTS.
- *
- * Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
+ * Checks pre-funded vanilla BTC balance, RGB asset list and BTC receive address.
+ * Asset transfers need colorable UTXOs and a consignment exchange, so they stay
+ * behind RUN_SEND_TESTS. Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'

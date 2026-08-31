@@ -1,14 +1,10 @@
 /**
  * RgbCore
  * -------
- * Pure, transport-agnostic translation helpers shared by every RGB-backed
- * adapter: the node-backed `RlnWdkAdapter` (RGB over an rgb-lightning-node, with
- * Lightning) and the local `RgbLibWdkAdapter` (RGB-L1 over rgb-lib, no Lightning).
- *
- * Only the BACKING differs between those two — the shape of an RGB asset, a
- * balance, and a status are identical. Keeping the mapping here is the single
- * source of truth so the two adapters cannot drift (the native adapters
- * predate this and are intentionally left untouched).
+ * Pure, transport-agnostic translation helpers shared by every RGB-backed adapter:
+ * the node-backed `RlnWdkAdapter` and the local `RgbLibWdkAdapter`. Only the
+ * BACKING differs — asset, balance and status shapes are identical — so keeping
+ * the mapping here is the single source of truth against drift.
  *
  * Everything here is pure: no I/O, no SDK calls, no `this`.
  */
@@ -18,9 +14,8 @@ import { formatAmount } from '../../lib/amount'
 
 /**
  * What differs between the two RGB backings: the node-backed `RGB` adapter has
- * Lightning + swaps and lists assets on the RGB-LN layer; the local rgb-lib
- * `RGB_L1` adapter is on-chain only. Everything else about the asset/balance
- * mapping is identical, so the adapters pass their profile and share the rest.
+ * Lightning + swaps and lists assets on the RGB-LN layer, while the local `RGB_L1`
+ * adapter is on-chain only. Adapters pass their profile and share the rest.
  */
 export interface RgbProfile {
   protocol: ProtocolType
@@ -104,11 +99,11 @@ export function rgbNiaAsset(
 }
 
 /**
- * Map a raw rgb-lib Balance ({ settled, future, spendable }) → domain
- * AssetBalance. `future` is the projected total (confirmed + incoming), so it's
- * the "owned" amount; `spendable` is what can be sent right now. Uses `||` (not
- * `??`) so a present-but-zero `spendable` doesn't hide a real `settled`/`future`
- * — a just-received asset has spendable: 0 but a non-zero balance.
+ * Map a raw rgb-lib Balance ({ settled, future, spendable }) → domain AssetBalance.
+ * `future` is the projected total (confirmed + incoming), so it is the "owned"
+ * amount; `spendable` is what can be sent now. Uses `||` not `??`, so a
+ * present-but-zero `spendable` doesn't hide a real `settled`/`future` — a
+ * just-received asset has spendable: 0 but a non-zero balance.
  */
 export type RgbBalanceLike = {
   spendable?: number | string | bigint

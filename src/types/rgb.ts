@@ -6,10 +6,8 @@
 import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
 
 /**
- * How the RGB Lightning Node (RLN) is reached.
- *  - "http": direct HTTP RPC to `nodeUrl` (optional Biscuit/JWT auth).
- *  - "nwc":  Nostr Wallet Connect — the node is reached over a relay using a
- *            `nostr+walletconnect://` connection string (`nwcUri`).
+ * How the RGB Lightning Node is reached: "http" (direct RPC to `nodeUrl`, optional
+ * Biscuit/JWT auth) or "nwc" (over a relay via `nwcUri`).
  */
 export type RgbTransport = 'http' | 'nwc'
 
@@ -17,9 +15,9 @@ export interface RgbConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
   makerUrl: string // Kaleidoswap maker URL
   /**
-   * Master mnemonic. Required by the WDK RLN adapter, which derives the wallet's
-   * signing seed locally on-device. Never transmitted to the node. Optional here
-   * so legacy/non-WDK call sites still type-check.
+   * Master mnemonic, required by the WDK RLN adapter, which derives the signing seed
+   * on-device. Never transmitted to the node. Optional so legacy call sites still
+   * type-check.
    */
   mnemonic?: string
   /** Node transport. Defaults to "http" when omitted. */
@@ -28,7 +26,7 @@ export interface RgbConfig extends BaseProtocolConfig {
   jwt?: string // JWT token for node authentication (optional)
   apiKey?: string // API key for maker (optional)
   /**
-   * `nostr+walletconnect://` connection string. Required for transport "nwc".
+   * `nostr+walletconnect://` connection string, required for transport "nwc".
    * Sensitive (carries the client secret) — encrypted at rest, never logged.
    */
   nwcUri?: string

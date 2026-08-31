@@ -3,14 +3,12 @@
  *
  * Mirrored in kaleidoswap-maker/app/models/cross_l2.py — keep shapes in sync.
  *
- * The destination side uses our custom SHA256-VHTLC contract type
- * (registered with the @arkade-os/sdk ContractManager via the proxy's
- * sha256VhtlcContract.js), so the SAME sha256(preimage) hash secures both
- * sides of a swap. Single hash, no cheating window — the taker generates
- * preimage P, supplies sha256(P) as `payment_hash`, and the maker locks
- * both Lightning HODL and Arkade SHA256-VHTLC against it.
+ * The destination side uses our custom SHA256-VHTLC contract type, so the SAME
+ * sha256(preimage) secures both sides: the taker generates preimage P, supplies
+ * sha256(P) as `payment_hash`, and the maker locks both the Lightning HODL and the
+ * Arkade SHA256-VHTLC against it. Single hash, no cheating window.
  *
- * The atomic-swap design lives in docs/atomic-swaps/spark-arkade.md.
+ * Design: docs/atomic-swaps/spark-arkade.md.
  */
 
 import type { Layer } from './base'
@@ -18,16 +16,9 @@ import type { Layer } from './base'
 export type BackendId = 'spark' | 'arkade' | 'rln' | 'boltz'
 
 /**
- * Phase of a cross-L2 swap. Rides alongside the maker's existing
- * SwapOrderStatus on the same SwapOrder document.
- *
- *   quoted          quote handed to taker, nothing locked
- *   dest_locked     destination L2 (e.g. Arkade) VHTLC funded
- *   source_invoiced source L2 (e.g. Spark) HODL invoice issued
- *   source_locked   taker paid HODL on source, htlc pending
- *   dest_claimed    taker revealed preimage on destination
- *   source_settled  maker captured preimage, settled HODL on source
- *   refunded        timeout path completed on both sides
+ * Phase of a cross-L2 swap, riding alongside the maker's SwapOrderStatus:
+ * quoted → dest_locked → source_invoiced → source_locked → dest_claimed →
+ * source_settled, or refunded when the timeout path completes on both sides.
  */
 export type CrossL2Phase =
   | 'quoted'
@@ -39,10 +30,8 @@ export type CrossL2Phase =
   | 'refunded'
 
 /**
- * Parameters for a SHA256-VHTLC contract on Arkade.
- *
- * Pubkeys are 32-byte x-only hex; `hash` is sha256(preimage), 32-byte hex
- * — same hash that secures the source-side Lightning HODL invoice.
+ * Parameters for a SHA256-VHTLC contract on Arkade. Pubkeys are 32-byte x-only hex;
+ * `hash` is sha256(preimage), the same hash securing the source-side HODL invoice.
  */
 export interface VhtlcParams {
   sender: string
@@ -83,15 +72,11 @@ export interface CrossL2Quote {
 }
 
 /**
- * Cross-L2 swap initiation, taker-driven.
- *
- * The TAKER generates a single secret preimage P and supplies sha256(P)
- * as `payment_hash`. The same hash is used on BOTH sides:
- *   - source: Spark Lightning HODL committed to sha256(P)
- *   - destination: Arkade SHA256-VHTLC committed to sha256(P)
- * Atomicity holds because knowledge of P unlocks both sides; the taker
- * reveals P on Arkade by claiming the VHTLC, the maker scrapes P from
- * the spend witness and settles the HODL on Spark.
+ * Cross-L2 swap initiation, taker-driven. The TAKER generates one secret preimage P
+ * and supplies sha256(P) as `payment_hash`, used on BOTH sides (Spark Lightning
+ * HODL and Arkade SHA256-VHTLC). Atomicity holds because knowledge of P unlocks
+ * both: the taker reveals P by claiming the VHTLC, and the maker scrapes it from the
+ * spend witness to settle the HODL.
  */
 export interface CrossL2InitiatePayload {
   quote_id: string

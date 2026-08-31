@@ -1,28 +1,16 @@
 /**
  * Protocol Adapter Interface
- * All protocol implementations must implement this contract.
  *
- * Canonical contract: this is the single source of truth shared by every host
- * (rate-extension, rate mobile, desktop). Hosts that ship their own adapters
- * implement this contract; they must NOT redeclare it. See the wallet-engine
- * integration spec (A1/A2).
+ * The canonical contract shared by every host (rate-extension, mobile, desktop).
+ * Hosts shipping their own adapters implement it and must NOT redeclare it.
  *
- * Structure: `ICoreProtocolAdapter` is the small, universal surface EVERY
- * adapter must implement. Protocol-specific method groups live in their own
- * capability interfaces (`IRgbOperations`, `ISparkOperations`, …). The public
- * `IProtocolAdapter` recomposes them as `Core & Partial<each group>`, so it is
- * structurally identical to the historical flat interface (every group method
- * is still optional on it) — existing `implements`/call sites are unaffected.
- *
- * Two ways to consume the groups:
- *   - a new adapter can `implements ICoreProtocolAdapter & IRgbOperations` to
- *     declare full RGB support (methods become REQUIRED — stronger typing than
- *     the all-optional god-interface);
- *   - a caller can narrow with `asRgbOperations(adapter)` etc. below.
- *
- * Third-party protocols implement `ICoreProtocolAdapter` (+ any groups they
- * support) and connect with any `BaseProtocolConfig`-shaped config — no edit to
- * this file required (see `ProtocolConfig`).
+ * `ICoreProtocolAdapter` is the universal surface every adapter implements;
+ * protocol-specific groups live in their own interfaces (`IRgbOperations`,
+ * `ISparkOperations`, …). `IProtocolAdapter` recomposes them as
+ * `Core & Partial<each group>`, so it stays structurally identical to the old
+ * flat interface. An adapter may instead `implements ICoreProtocolAdapter &
+ * IRgbOperations` to make a group's methods required, and callers can narrow
+ * with `asRgbOperations(adapter)`. Third-party protocols need no edit here.
  */
 
 import {
@@ -67,10 +55,9 @@ export interface BaseProtocolConfig {
 }
 
 /**
- * Configuration accepted by `connect()`. The known first-party configs are
- * kept as named members (autocomplete + narrowing), and any other
- * `BaseProtocolConfig`-shaped object is accepted too — so a third-party
- * protocol can define and pass its own config without editing this union.
+ * Configuration accepted by `connect()`. Known first-party configs are named
+ * members (autocomplete + narrowing); any other `BaseProtocolConfig`-shaped
+ * object is accepted, so third-party protocols need not edit this union.
  */
 export type ProtocolConfig =
   | RgbConfig
@@ -88,9 +75,8 @@ export interface ICoreProtocolAdapter {
   readonly supportedLayers: Layer[]
   readonly version: string
   /**
-   * Native operations this adapter supports. Static — available before the
-   * adapter connects — so the UI can gate actions without per-call-site
-   * network checks.
+   * Native operations this adapter supports. Static — readable before connect —
+   * so the UI can gate actions without per-call-site network checks.
    */
   readonly capabilities: readonly ProtocolCapability[]
 
@@ -134,10 +120,8 @@ export interface ICoreProtocolAdapter {
   supportsSwaps(): boolean
 }
 
-// ===========================================================================
-// Capability groups — optional on the composed IProtocolAdapter, REQUIRED when
-// an adapter opts into a group explicitly (`implements Core & IRgbOperations`).
-// ===========================================================================
+// --- Capability groups: optional on IProtocolAdapter, required when an adapter
+// opts in explicitly (`implements Core & IRgbOperations`). --------------------
 
 /** Spontaneous Lightning keysend. Not every backend exposes a keysend primitive. */
 export interface IKeysendOperations {
@@ -153,13 +137,11 @@ export interface ISigningOperations {
    */
   signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }>
   /**
-   * Sign an arbitrary message using the wallet's Lightning identity key.
-   * Returns an LND-style zbase32-encoded recoverable ECDSA signature.
+   * Sign a message with the wallet's Lightning identity key (LND-style zbase32).
    */
   signMessage(message: string): Promise<string>
   /**
-   * Verify an LND-style zbase32 signature and recover the signing pubkey.
-   * Returns the hex-encoded compressed public key of the signer.
+   * Verify an LND-style zbase32 signature, returning the signer's hex pubkey.
    */
   verifyMessage(message: string, signature: string): Promise<string>
 }
@@ -168,19 +150,33 @@ export interface ISigningOperations {
 export interface IOnchainOperations {
   sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<unknown>
   /**
-   * Broadcast a raw, fully-signed network transaction (hex) through the
-   * adapter's node. Callers fall back to a public broadcaster when absent.
+   * Broadcast a raw signed tx (hex) through the adapter's node. Callers fall back
+   * to a public broadcaster when absent.
    */
   broadcastTransaction(txHex: string): Promise<{ txid: string }>
 }
 
-/** Liquid PSET review/signing and optional Simplicity compilation. */
+/**
+ * Liquid PSET review/signing and optional Simplicity compilation.
+ *
+ * EXPERIMENTAL: real availability depends on the resolved LWK binding, so the
+ * Liquid adapter advertises these only when `getSimplicityCapabilities()` reports
+ * runtime support. `ProtocolManager` routes them exclusively to the LIQUID adapter
+ * and policy-gates the mutating ones.
+ *
+ * `finalizeLiquidPset`/`broadcastLiquidPset` are declared for the raw adapter
+ * surface but DISABLED on `ProtocolManager` (NOT_SUPPORTED): a PSET can carry
+ * multiple assets and blinded values the `amountSat` policy model cannot
+ * authorize, so they stay fail-closed.
+ */
 export interface ISimplicityOperations {
   getSimplicityCapabilities(): Promise<SimplicityCapabilities>
   inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview>
   blindLiquidPset(psetBase64: string): Promise<string>
   signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult>
+  /** @deprecated Disabled on ProtocolManager until exact-byte spend authorization exists. */
   finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }>
+  /** @deprecated Disabled on ProtocolManager until exact-byte spend authorization exists. */
   broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }>
   deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }>
   compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult>
@@ -216,11 +212,10 @@ export interface IRgbOperations {
 }
 
 /**
- * Wallet-state backup (RGB-L1 wasm). RGB is stateful: allocations/consignments
- * cannot be reconstructed from the seed alone, so state must be durably backed
- * up after every settled transfer. `backup`/`restoreBackup` produce a local
- * encrypted artifact; the `vss*` methods push/pull the same state to a versioned
- * cloud store (rgb-lib encrypts client-side — the server only sees ciphertext).
+ * Wallet-state backup (RGB-L1 wasm). RGB allocations/consignments cannot be
+ * rebuilt from the seed, so state is backed up after every settled transfer.
+ * `backup`/`restoreBackup` produce a local encrypted artifact; the `vss*` methods
+ * push the same state to a versioned cloud store (encrypted client-side).
  */
 export interface IBackupOperations {
   /** Encrypted wallet backup bytes (rgb-lib's own format). */
@@ -230,8 +225,8 @@ export interface IBackupOperations {
   /** Whether local wallet state has changed since the last backup. */
   backupInfo(): Promise<{ required: boolean }>
   /**
-   * Configure VSS (cloud) backup: server URL, a stable per-wallet store id, and
-   * the 32-byte signing key (hex, on a dedicated path — never a spend key).
+   * Configure VSS backup: server URL, stable per-wallet store id, and the 32-byte
+   * signing key (hex, on a dedicated path — never a spend key).
    */
   configureVssBackup(params: { serverUrl: string; storeId: string; signingKeyHex: string }): Promise<void>
   /** Disable VSS (cloud) backup for this wallet. */
@@ -261,8 +256,8 @@ export interface ISparkOperations {
 /** Arkade-specific operations. */
 export interface IArkadeOperations {
   /**
-   * Create a Lightning invoice that pays into Arkade via a Boltz reverse swap.
-   * Requires a positive `request.amount`.
+   * Lightning invoice paying into Arkade via a Boltz reverse swap. Needs a
+   * positive `request.amount`.
    */
   createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice>
   /** List virtual transaction outputs. */
@@ -288,10 +283,8 @@ export interface IExtensibleAdapter {
 }
 
 /**
- * The canonical adapter contract: the universal core plus every capability
- * group as OPTIONAL. Structurally identical to the historical flat interface,
- * so `class X implements IProtocolAdapter` and `adapter.createRgbInvoice?.(…)`
- * are unchanged.
+ * The canonical adapter contract: universal core plus every capability group as
+ * OPTIONAL. Structurally identical to the historical flat interface.
  */
 export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<IKeysendOperations> &
@@ -305,11 +298,8 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<ISwapOperations> &
   Partial<IExtensibleAdapter>
 
-// ===========================================================================
-// Capability narrowing helpers — a clean, checked way to reach a group's
-// methods without optional-chaining across the whole surface. Each returns the
-// group interface when the adapter implements it, else null.
-// ===========================================================================
+// --- Capability narrowing helpers: reach a group's methods without
+// optional-chaining. Each returns the group interface, or null. --------------
 
 const isFn = (v: unknown): v is (...args: never[]) => unknown => typeof v === 'function'
 

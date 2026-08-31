@@ -1,35 +1,24 @@
 /**
  * amount
  * ------
- * The single source of truth for rendering raw integer balances/amounts into
- * human-readable display strings. Every adapter's `totalDisplay`/`availableDisplay`
- * and tx `amountDisplay` must go through here so a 1.00-unit balance never leaks
- * to the UI as its raw base-unit integer (e.g. "100000000").
- *
- * Pure, no I/O. Previously duplicated as `formatAmount` in rgb-helpers and
- * spark-helpers and as `formatUnits`/`formatSats` in arkade-helpers — those now
- * re-export from here.
+ * The single source of truth for rendering raw integer balances into display
+ * strings. Every adapter's `totalDisplay`/`availableDisplay` and tx `amountDisplay`
+ * goes through here, so a 1.00-unit balance never leaks to the UI as its raw
+ * base-unit integer. Pure, no I/O.
  */
 
 /**
  * Render a raw integer amount in an asset's display precision, e.g.
- * `formatAmount(100_000_000, 8)` → `"1.00000000"`. Always emits exactly
- * `precision` fractional digits; callers wanting a tighter rendering trim
- * trailing zeros themselves. Non-positive precision renders the integer as-is.
+ * `formatAmount(100_000_000, 8)` → `"1.00000000"`. Always emits exactly `precision`
+ * fractional digits; non-positive precision renders the integer as-is.
  *
- * MUST NOT THROW. `precision` is issuer-supplied — RGB asset precision and Spark
- * token `decimals` both come off the wire — and this function sits inside the
- * `listAssets` / `listTransactions` render loop that every adapter feeds. The
- * previous `(amount / 10**precision).toFixed(precision)` threw `RangeError` for
- * `precision > 100` (`toFixed` accepts 0-100; RGB precision is a `u8`), so one
- * dust transfer of a crafted asset took out the whole asset list and activity
- * view — denial of service on wallet enumeration, recoverable only with another
- * tool. Digit-shifting a BigInt has no such ceiling, and is exact rather than
- * float-rounded for large base-unit counts.
- *
- * Out-of-contract inputs are rendered, never thrown on: a non-finite `amount`
- * stringifies as-is (`"NaN"`, `"Infinity"`), and a fractional one is truncated —
- * the same `Math.trunc` the non-positive-precision branch has always applied.
+ * MUST NOT THROW (audit E-F1b). `precision` is issuer-supplied and this sits in
+ * the `listAssets`/`listTransactions` render loop, so the old
+ * `(amount / 10**precision).toFixed(precision)` took out the whole asset list on
+ * any asset declaring `precision > 100` (`toFixed` accepts 0-100; RGB precision
+ * is a `u8`). BigInt digit-shifting has no ceiling and is exact. Out-of-contract
+ * inputs render rather than throw: non-finite amounts stringify as-is, fractional
+ * ones are truncated.
  */
 export function formatAmount(amount: number, precision: number): string {
   if (!Number.isFinite(amount)) return String(amount)

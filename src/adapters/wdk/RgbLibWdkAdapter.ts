@@ -1,28 +1,18 @@
 /**
  * RgbLibWdkAdapter
  * ----------------
- * Wraps the local rgb-lib WDK module (@utexo/wdk-wallet-rgb) onto the stable
- * `IProtocolAdapter` contract as the RGB-L1 (on-chain) path: BTC on-chain + RGB
- * assets on-chain, with NO Lightning, channels, or swaps. It is the on-chain
- * subset of the node-backed `RlnWdkAdapter`; the two share their asset/balance/
- * status translation via `RgbCore` so they cannot drift.
+ * Wraps the local rgb-lib WDK module (@utexo/wdk-wallet-rgb) onto the
+ * `IProtocolAdapter` contract as the RGB-L1 path: BTC and RGB assets on-chain,
+ * with NO Lightning, channels, or swaps. It is the on-chain subset of the
+ * node-backed `RlnWdkAdapter`, sharing asset/balance/status translation through
+ * `RgbCore` so the two cannot drift.
  *
- * Unlike the RLN adapter (which talks to a remote rgb-lightning-node over HTTP),
- * this runs rgb-lib locally and holds keys in-process — that's why it lives in
- * the wallet engine rather than in the remote-client kaleido-sdk.
+ * Unlike the RLN adapter, this runs rgb-lib locally and holds keys in-process —
+ * hence its place in the wallet engine rather than the remote kaleido-sdk.
  *
- * Discipline: no WDK/rgb-lib types cross the contract — domain types only; the
- * module account is read as `any` and translated.
- *
- * Wired against @utexo/wdk-wallet-rgb@2.0.3's published types:
- *   - WalletManagerRgb(seed, RgbWalletConfig).getAccount() → WalletAccountRgb
- *   - account: getAddress / registerWallet()→{address,btcBalance} / listAssets()
- *     (sync array) / receiveAsset / transfer(TransferOptions) / createUtxos /
- *     signPsbt / refreshWallet / syncWallet / listTransfers / listTransactions.
- *   - NO invoice decoder, NO Lightning, NO swaps on the WDK account surface.
- * Per-asset balance rides on listAssets(); BTC balance rides on registerWallet().
- * Response field names (InvoiceReceiveData, BtcBalance, ListAssetsResponse) are
- * read defensively and should still be smoke-tested on-device.
+ * No WDK/rgb-lib types cross the contract; the module account is read as `any`.
+ * Per-asset balance rides on listAssets(); BTC balance on registerWallet().
+ * Response field names are read defensively.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -206,9 +196,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   // --- Transactions -------------------------------------------------------
   /**
-   * BTC-L1 (vanilla) transaction history from rgb-lib. `listTransactions()` is
-   * synchronous and returns the wallet's Bitcoin transactions; RGB asset detail
-   * is per-asset via `listTransfers({ asset_id })`. Fields are read defensively.
+   * BTC-L1 (vanilla) history from rgb-lib. `listTransactions()` is synchronous;
+   * RGB asset detail is per-asset via `listTransfers({ asset_id })`.
    */
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
@@ -273,8 +262,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   /**
-   * Sign a PSBT with the wallet's keys (rgb-lib signs wallet-owned inputs).
-   * Returns the contract's `{ psbt, unchanged }` shape.
+   * Sign a PSBT with the wallet's keys (rgb-lib signs wallet-owned inputs),
+   * returning the contract's `{ psbt, unchanged }` shape.
    */
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
     this.assertConnected()
@@ -310,8 +299,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 }
 
 /**
- * Normalize an rgb-sdk asset record (which may use camelCase `assetId` or
- * snake_case `asset_id`) into the shape `RgbCore.rgbNiaAsset` expects.
+ * Normalize an rgb-sdk asset record (camelCase `assetId` or snake_case `asset_id`)
+ * into the shape `RgbCore.rgbNiaAsset` expects.
  */
 function normalizeAsset(a: any): {
   asset_id: string

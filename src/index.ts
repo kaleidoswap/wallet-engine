@@ -1,6 +1,10 @@
 /**
  * @kaleidorg/wallet-engine
- * Shared wallet protocol adapters for Spark, Arkade, RGB, and Flashnet.
+ * Headless multi-protocol Bitcoin L2 wallet engine — one `IProtocolAdapter`
+ * contract over Spark, RGB-LN, RGB-L1, Liquid and Arkade, with a cross-protocol
+ * router, BIP321 unified receive and lite/advanced disclosure.
+ *
+ * This barrel is deliberately SDK-free; adapters live behind their own subpaths.
  */
 
 // Types
@@ -11,6 +15,10 @@ export type { ArkadeConfig, ArkadeVtxo, ArkadeBalance, ArkadeTransaction } from 
 export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, KaleidoswapQuote, RgbNodeInfo, TradingPair } from './types/rgb'
 export * from './types/flashnet'
 export * from './types/simplicity'
+
+// SDK-free, transport-neutral Lightning payment contract. Concrete transports
+// remain opt-in subpaths and are deliberately not imported by this barrel.
+export * from './lightning'
 
 // Adapter interface
 export {
@@ -57,12 +65,9 @@ export { setPlatform, getPlatform, getLogger, consoleLogger } from './ports'
 // Shared constants
 export { LIQUID_USDT_ASSET_ID } from './constants'
 
-// NOTE: adapters are deliberately NOT exported from this barrel — they pull
-// heavy SDKs / WDK weight an extension host does not want. Import them from the
-// opt-in sub-paths instead:
-//   @kaleidorg/wallet-engine/adapters/native  (SDK-backed + client managers)
-//   @kaleidorg/wallet-engine/adapters/wdk     (WDK-backed + createWdkRegistry)
-//   @kaleidorg/wallet-engine/swap             (Kaleidoswap RFQ wrapper)
+// Adapters are deliberately NOT exported here — they pull heavy SDK/WDK weight an
+// extension host does not want. Import them from the opt-in sub-paths:
+//   @kaleidorg/wallet-engine/adapters/native | /adapters/wdk | /swap
 
 // Cross-protocol router (chooses BETWEEN protocols)
 export {
@@ -107,9 +112,8 @@ export {
 } from './disclosure'
 
 // Arkade VTXO lifecycle + delegator management (platform-agnostic core).
-// @arkade-os/sdk is referenced by TYPE only here, so this is safe for the
-// SDK-free root barrel. The extension drives it from chrome.alarms; consumers
-// supply the VtxoManager/Wallet obtained via the native arkadeClientManager.
+// @arkade-os/sdk is referenced by TYPE only, so this is safe for the SDK-free root
+// barrel. Consumers supply the VtxoManager/Wallet from the native client manager.
 export {
   runArkadeVtxoLifecycle,
   delegateSpendableVtxos,

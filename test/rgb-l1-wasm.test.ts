@@ -4,9 +4,8 @@ import { createWdkRegistry } from '../src/registry/createWdkRegistry'
 
 /**
  * Fast unit tests for the WASM RGB-L1 backing. They inject a fake `WasmWallet`
- * account directly (bypassing connect()) so the 13 MB wasm never loads in CI —
- * the goal is to pin the adapter's translation + begin/sign/end orchestration,
- * not the rgb-lib internals (those are validated on-device + in the spike).
+ * account directly (bypassing connect()) so the 13 MB wasm never loads in CI. The
+ * goal is to pin the translation + begin/sign/end orchestration, not rgb-lib.
  */
 describe('RgbLibWasmAdapter', () => {
   function connected(account: Record<string, any>, online: any = { _online: true }) {

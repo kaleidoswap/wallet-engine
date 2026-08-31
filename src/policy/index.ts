@@ -1,27 +1,37 @@
 /**
  * Signing / spend policy
  * ----------------------
- * A pure, portable gate for fund-moving and signing operations. It centralizes
- * the checks that would otherwise be scattered across adapters and hosts:
- * per-transaction spend limits, destination allowlists, and per-app capability
- * grants (which app/deep-link/MCP-tool may do what).
+ * A pure, portable gate for fund-moving and signing operations, centralizing checks
+ * that would otherwise scatter across adapters and hosts: per-transaction spend
+ * limits, destination allowlists, and per-app capability grants.
  *
- * `evaluatePolicy` is a pure function (no I/O, no globals) so it is trivially
- * testable and maps cleanly to a native (Rust/Kotlin/Swift) port. Hosts wire it
- * in via `ProtocolManager` (opt-in: no policy ⇒ no enforcement) or call it
- * directly at their own boundary.
+ * `evaluatePolicy` is pure (no I/O, no globals), so it is trivially testable and
+ * ports cleanly to Rust/Kotlin/Swift. Hosts wire it in via `ProtocolManager`
+ * (opt-in) or call it at their own boundary.
  *
- * Design: DEFAULT-ALLOW. A policy only ever *tightens* behaviour — with no
- * policy set the engine behaves exactly as before. `mode: 'deny'` flips to
- * default-deny, where an explicit matching grant is required to proceed.
+ * DEFAULT-ALLOW: a policy only ever tightens behaviour, so with none set the engine
+ * behaves as before. `mode: 'deny'` flips to default-deny, requiring an explicit
+ * matching grant.
  */
 
 import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
 import { parseUnifiedReceiveURI, receiveMethodsOf } from '../receive/unifiedReceive'
 
-/** Fund-moving / signing operations a policy can gate. */
-export type PolicyOperation = 'send' | 'keysend' | 'signPsbt' | 'signLiquidPset' | 'signMessage' | 'swap'
+/**
+ * Fund-moving / signing operations a policy can gate. `blindLiquidPset` and
+ * `signLiquidPset` are not amount-capped — a PSET can carry multiple assets and
+ * blinded values the `amountSat` model cannot authorize, so they are gated as
+ * explicit signing grants instead.
+ */
+export type PolicyOperation =
+  | 'send'
+  | 'keysend'
+  | 'signPsbt'
+  | 'blindLiquidPset'
+  | 'signLiquidPset'
+  | 'signMessage'
+  | 'swap'
 
 export interface PolicyRequest {
   operation: PolicyOperation
@@ -115,10 +125,9 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
     return deny('AMOUNT_INVALID', `'${req.operation}' amount must be a positive safe integer`)
   }
 
-  // 1. Global per-transaction cap (applies regardless of grants/mode). When a
-  // cap is configured for an amount-op but the amount is unknown, fail CLOSED:
-  // an unknown amount must never slip past a spend limit (e.g. an amountless
-  // BOLT11 whose value the caller never resolved).
+  // 1. Global per-transaction cap, regardless of grants/mode. When a cap is set for
+  // an amount-op but the amount is unknown, fail CLOSED: an unknown amount must
+  // never slip past a spend limit (e.g. an unresolved amountless BOLT11).
   if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
     if (req.amountSat == null) {
       return deny(

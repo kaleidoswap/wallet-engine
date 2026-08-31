@@ -1,25 +1,15 @@
 /**
  * ArkadeWdkAdapter
  * ----------------
- * Wraps the Arkade WDK module (@arkade-os/wdk, over @arkade-os/sdk + boltz-swap)
- * onto the stable `IProtocolAdapter` contract. Arkade is a VTXO-based Bitcoin L2:
- * off-chain Ark transfers, an on-chain "boarding" address for funding, and Lightning
- * receive via Boltz reverse submarine swaps.
+ * Wraps the Arkade WDK module (@arkade-os/wdk) onto the `IProtocolAdapter`
+ * contract. Arkade is a VTXO-based Bitcoin L2: off-chain Ark transfers, an
+ * on-chain "boarding" address for funding, and Lightning receive via Boltz
+ * reverse submarine swaps.
  *
- * Discipline: no WDK/@arkade-os types cross the contract — domain types only;
- * module objects are read as `any`. The WDK **account** surface is the primary path;
- * the underlying @arkade-os/sdk Wallet (`account._signingWallet`) is reached only for
- * the VTXO-lifecycle ops the WDK surface does not expose (getVtxos, getBoardingUtxos,
- * onboard, offboard, rich balance summary) — ported from the native ArkadeAdapter.
- * `@arkade-os/sdk` is lazy-loaded in `connect()` so this sub-path stays SDK-free until used.
- *
- * Arkade WDK surface (from JSDoc, v0.1.4):
- *   read-only: getAddress(): string (Ark address, inherited), getBoardingAddress(): string,
- *              getBalance(): bigint, getTokenBalance(id): bigint, getTransactionHistory()
- *   account:   sendTransaction({to,value}), transfer({token,recipient,amount}),
- *              createLightningInvoice(amountSats, description?): {invoice,paymentHash},
- *              waitForLightningPayment(invoice): {txid}, getLightningLimits/Fees,
- *              arkadeSwaps (Boltz client, for Lightning send), subscribeToIncomingFunds, sign, dispose
+ * No WDK/@arkade-os types cross the contract. The WDK account surface is the
+ * primary path; the underlying sdk Wallet (`account._signingWallet`) is reached
+ * only for the VTXO-lifecycle ops WDK does not expose. `@arkade-os/sdk` is
+ * lazy-loaded in `connect()` so this sub-path stays SDK-free until used.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -69,8 +59,7 @@ export interface ArkadeAdapterConfig extends BaseProtocolConfig {
 
 /**
  * Allowlist of Arkade account methods reachable via `executeProtocolOperation`.
- * VTXO-lifecycle ops (onboard/offboard/getVtxos/getBoardingUtxos) are now typed
- * adapter methods, so they are intentionally NOT here.
+ * VTXO-lifecycle ops are typed adapter methods now, so intentionally NOT here.
  */
 const ARKADE_ALLOWED_OPS: ReadonlySet<string> = new Set([
   'waitForLightningPayment',
@@ -109,10 +98,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     await this.releasePreviousConnection()
     this.mnemonic = cfg.mnemonic
     this.network = cfg.network ?? 'mainnet'
-    // Accept either an explicit `arkadeConfig` passthrough OR the native adapter's
-    // flat fields (arkServerUrl/esploraUrl/swapProviderUrl) — so hosts can switch
-    // to this adapter without reshaping their connect config. The WDK manager
-    // spreads this straight into @arkade-os/sdk's Wallet.create.
+    // Accept an explicit `arkadeConfig` passthrough OR the native adapter's flat
+    // fields, so hosts can switch adapters without reshaping their connect config.
+    // The WDK manager spreads this straight into Wallet.create.
     const arkadeConfig =
       cfg.arkadeConfig ??
       ({
@@ -280,9 +268,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   /**
-   * Boltz reverse-swap Lightning invoice that lands funds in this Arkade wallet as a
-   * VTXO. Requires amount > 0 (Boltz can't issue an amountless invoice). The embedded
-   * SwapManager claims the VHTLC automatically once the LN payment settles.
+   * Boltz reverse-swap Lightning invoice landing funds here as a VTXO. Requires
+   * amount > 0 (Boltz can't issue an amountless invoice); the embedded SwapManager
+   * claims the VHTLC once the payment settles.
    */
   async createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
@@ -422,11 +410,10 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const history: any[] = await this.account.getTransactionHistory()
     const mapped: UnifiedTransaction[] = (history ?? []).map((t) => {
-      // @arkade-os/sdk ArkTransaction shape:
-      //   { key:{ arkTxid, commitmentTxid, boardingTxid }, type:'SENT'|'RECEIVED',
-      //     amount(sats, net), settled(boolean), createdAt(ms since epoch) }.
-      // The txid lives on `key` (unused fields are empty strings, so pick the first
-      // NON-EMPTY one — `??` would stop at `''`). Direction is the explicit `type`.
+      // ArkTransaction: { key:{arkTxid,commitmentTxid,boardingTxid}, type, amount,
+      // settled, createdAt }. The txid lives on `key` — unused fields are empty
+      // strings, so pick the first NON-EMPTY one (`??` would stop at `''`).
+      // Direction is the explicit `type`.
       const key = t?.key ?? {}
       const id = t?.txid || key.arkTxid || key.commitmentTxid || key.boardingTxid || ''
       const isSend = String(t?.type ?? '').toUpperCase() === 'SENT'
@@ -569,9 +556,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   // --- Private helpers ----------------------------------------------------
   /**
-   * Rich balance summary derived from VTXOs + boarding UTXOs (ported from the native
-   * adapter). The SDK's top-level `balance.total` omits the boarding portion, so we
-   * recompute it: available = settled + preconfirmed; total includes boarding + recoverable.
+   * Rich balance summary from VTXOs + boarding UTXOs. The SDK's `balance.total`
+   * omits the boarding portion, so recompute: available = settled + preconfirmed;
+   * total includes boarding + recoverable.
    */
   private async getWalletBalanceSummary(): Promise<{
     boardingConfirmed: number

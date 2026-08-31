@@ -1,12 +1,10 @@
 /**
  * Liquid · testnet — live integration
  * -----------------------------------
- * Connects Alice and Bob to Liquid testnet (lwk + Esplora) and checks their
- * pre-funded L-BTC balances, asset list, and receive addresses. Includes an
- * opt-in Alice→Bob L-BTC send.
- *
- * NOTE: the lwk wasm is ~10 MB and the first scan hits Esplora, so timeouts are
- * generous. Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
+ * Connects Alice and Bob to Liquid testnet (lwk + Esplora) and checks pre-funded
+ * L-BTC balances, asset list and receive addresses, plus an opt-in send. The lwk
+ * wasm is ~10 MB and the first scan hits Esplora, so timeouts are generous.
+ * Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'

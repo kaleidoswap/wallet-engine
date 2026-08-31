@@ -1,5 +1,115 @@
 import { describe, it, expect } from 'vitest'
-import { decodeBolt11, isBolt11 } from '../src/lib/bolt11'
+import { bech32 } from '@scure/base'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+
+import {
+  decodeBolt11,
+  decodeBolt11Invoice,
+  isBolt11,
+  isValidBolt11,
+  validateBolt11Invoice,
+} from '../src/lib/bolt11'
+
+const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
+const PAYMENT_HASH = Uint8Array.from({ length: 32 }, (_, index) => index)
+const PAYMENT_HASH_HEX = Array.from(PAYMENT_HASH, (byte) => byte.toString(16).padStart(2, '0')).join('')
+const SIGNING_KEY = Uint8Array.from({ length: 32 }, (_, index) => index + 1)
+const OFFICIAL_BOLT11 =
+  'lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq9qrsgq357wnc5r2ueh7ck6q93dj32dlqnls087fxdwk8qakdyafkq3yap9us6v52vjjsrvywa6rt52cm9r9zqt8r2t7mlcwspyetp5h2tztugp9lfyql'
+
+function uintWords(value: number | bigint, width?: number): number[] {
+  let remaining = BigInt(value)
+  const words: number[] = []
+  do {
+    words.unshift(Number(remaining & 31n))
+    remaining >>= 5n
+  } while (remaining > 0n)
+  while (width != null && words.length < width) words.unshift(0)
+  return words
+}
+
+function taggedField(tag: string, words: number[]): number[] {
+  const tagValue = BECH32_CHARSET.indexOf(tag)
+  if (tagValue < 0 || words.length > 1023) throw new Error('invalid test tag')
+  return [tagValue, words.length >> 5, words.length & 31, ...words]
+}
+
+function wordsToPaddedBytes(words: number[]): Uint8Array {
+  const bytes: number[] = []
+  let accumulator = 0
+  let bitCount = 0
+  for (const word of words) {
+    accumulator = (accumulator << 5) | word
+    bitCount += 5
+    while (bitCount >= 8) {
+      bitCount -= 8
+      bytes.push((accumulator >> bitCount) & 0xff)
+    }
+  }
+  if (bitCount > 0) bytes.push((accumulator << (8 - bitCount)) & 0xff)
+  return Uint8Array.from(bytes)
+}
+
+function signBolt11(hrp: string, words: number[]): number[] {
+  const prefix = new TextEncoder().encode(hrp)
+  const data = wordsToPaddedBytes(words)
+  const preimage = new Uint8Array(prefix.length + data.length)
+  preimage.set(prefix)
+  preimage.set(data, prefix.length)
+  const recovered = secp256k1.sign(sha256(preimage), SIGNING_KEY, {
+    prehash: false,
+    format: 'recovered',
+  })
+  const boltSignature = Uint8Array.from([...recovered.slice(1), recovered[0]])
+  return bech32.toWords(boltSignature)
+}
+
+function bolt11Fixture(options: {
+  hrp?: string
+  timestamp?: number
+  expirySeconds?: number
+  includePaymentHash?: boolean
+  paymentHashWords?: number[]
+  includePaymentSecret?: boolean
+  includeDescription?: boolean
+  invalidSignature?: boolean
+  extraFields?: number[][]
+} = {}): string {
+  const {
+    hrp = 'lnbc10p',
+    timestamp = 1_700_000_000,
+    expirySeconds = 3600,
+    includePaymentHash = true,
+    paymentHashWords = bech32.toWords(PAYMENT_HASH),
+    includePaymentSecret = true,
+    includeDescription = true,
+    invalidSignature = false,
+    extraFields = [],
+  } = options
+  const fields = [
+    ...(includePaymentSecret ? taggedField('s', bech32.toWords(new Uint8Array(32).fill(1))) : []),
+    ...(includePaymentHash ? taggedField('p', paymentHashWords) : []),
+    ...(includeDescription
+      ? taggedField('d', bech32.toWords(new TextEncoder().encode('test invoice')))
+      : []),
+    ...taggedField('x', uintWords(expirySeconds)),
+    ...extraFields.flat(),
+  ]
+  const data = [...uintWords(timestamp, 7), ...fields]
+  const signature = invalidSignature ? bech32.toWords(new Uint8Array(65)) : signBolt11(hrp, data)
+  return bech32.encode(hrp, [...data, ...signature], false)
+}
+
+function expectErrorCode(run: () => unknown, code: string): void {
+  let thrown: unknown
+  try {
+    run()
+  } catch (error) {
+    thrown = error
+  }
+  expect(thrown).toMatchObject({ code })
+}
 
 describe('decodeBolt11', () => {
   it('returns network with no amount for an amountless invoice', () => {
@@ -52,5 +162,149 @@ describe('isBolt11', () => {
     expect(isBolt11('  lnbcrt1pxyz  ')).toBe(true)
     expect(isBolt11('bc1qxyz')).toBe(false)
     expect(isBolt11('')).toBe(false)
+  })
+})
+
+describe('strict BOLT11 validation', () => {
+  it('extracts an exact amount, payment hash, timestamps, and invoice HRP identity', () => {
+    const decoded = decodeBolt11Invoice(bolt11Fixture())
+
+    expect(decoded).toEqual({
+      amountMsat: '1',
+      paymentHash: PAYMENT_HASH_HEX,
+      createdAtUnixSeconds: 1_700_000_000,
+      expiresAtUnixSeconds: 1_700_003_600,
+      network: {
+        chain: 'bitcoin',
+        hrp: 'bc',
+        networkId: 'bitcoin',
+        evidence: 'invoice-hrp',
+      },
+    })
+  })
+
+  it('keeps amountless invoices amountless and defaults expiry to one hour', () => {
+    const fields = [
+      ...taggedField('s', bech32.toWords(new Uint8Array(32).fill(1))),
+      ...taggedField('p', bech32.toWords(PAYMENT_HASH)),
+      ...taggedField('d', bech32.toWords(new TextEncoder().encode('test invoice'))),
+    ]
+    const data = [...uintWords(1_700_000_000, 7), ...fields]
+    const amountless = bech32.encode(
+      'lntb',
+      [...data, ...signBolt11('lntb', data)],
+      false,
+    )
+
+    const decoded = decodeBolt11Invoice(amountless)
+    expect(decoded.amountMsat).toBeUndefined()
+    expect(decoded).toMatchObject({
+      createdAtUnixSeconds: 1_700_000_000,
+      expiresAtUnixSeconds: 1_700_003_600,
+      network: { hrp: 'tb', networkId: 'testnet-or-signet' },
+    })
+  })
+
+  it('enforces expiry and an allowlisted HRP before payment', () => {
+    const invoice = bolt11Fixture({ hrp: 'lntb10p', timestamp: 1000, expirySeconds: 60 })
+
+    expectErrorCode(
+      () => validateBolt11Invoice(invoice, { allowedHrps: ['bc'], nowUnixSeconds: 1050 }),
+      'NETWORK_MISMATCH',
+    )
+    expectErrorCode(
+      () => validateBolt11Invoice(invoice, { allowedHrps: ['tb'], nowUnixSeconds: 1060 }),
+      'INVOICE_EXPIRED',
+    )
+    expect(validateBolt11Invoice(invoice, { allowedHrps: ['tb'], nowUnixSeconds: 1059 })).toMatchObject({
+      paymentHash: PAYMENT_HASH_HEX,
+    })
+  })
+
+  it('rejects checksum failures, missing or malformed payment hashes, and duplicate identity fields', () => {
+    const valid = bolt11Fixture()
+    const badChecksum = `${valid.slice(0, -1)}${valid.endsWith('q') ? 'p' : 'q'}`
+    const duplicatePaymentHash = bolt11Fixture({
+      extraFields: [taggedField('p', bech32.toWords(PAYMENT_HASH))],
+    })
+
+    const checksumError = (() => {
+      try {
+        decodeBolt11Invoice(badChecksum)
+      } catch (error) {
+        return error
+      }
+    })()
+    expect(checksumError).toMatchObject({ code: 'INVALID_INVOICE', cause: undefined })
+    expect(String(checksumError)).not.toContain(badChecksum)
+    expectErrorCode(
+      () => decodeBolt11Invoice(bolt11Fixture({ includePaymentHash: false })),
+      'INVALID_INVOICE',
+    )
+    expectErrorCode(
+      () => decodeBolt11Invoice(bolt11Fixture({ paymentHashWords: [0] })),
+      'INVALID_INVOICE',
+    )
+    expectErrorCode(() => decodeBolt11Invoice(duplicatePaymentHash), 'INVALID_INVOICE')
+    expect(isValidBolt11(valid)).toBe(true)
+    expect(isValidBolt11(badChecksum)).toBe(false)
+  })
+
+  it('verifies the signature and mandatory payment identity fields', () => {
+    expectErrorCode(() => decodeBolt11Invoice(bolt11Fixture({ invalidSignature: true })), 'INVALID_INVOICE')
+    expectErrorCode(
+      () => decodeBolt11Invoice(bolt11Fixture({ includePaymentSecret: false })),
+      'INVALID_INVOICE',
+    )
+    expectErrorCode(
+      () => decodeBolt11Invoice(bolt11Fixture({ includeDescription: false })),
+      'INVALID_INVOICE',
+    )
+  })
+
+  it('decodes and verifies the official BOLT11 reference vector', () => {
+    expect(decodeBolt11Invoice(OFFICIAL_BOLT11)).toMatchObject({
+      paymentHash: '0001020304050607080900010203040506070809000102030405060708090102',
+      createdAtUnixSeconds: 1_496_314_658,
+      expiresAtUnixSeconds: 1_496_318_258,
+      network: { hrp: 'bc', networkId: 'bitcoin' },
+    })
+  })
+
+  it('rejects non-integral pico-BTC amounts instead of rounding them', () => {
+    expectErrorCode(() => decodeBolt11Invoice(bolt11Fixture({ hrp: 'lnbc1p' })), 'INVALID_AMOUNT')
+  })
+})
+
+describe('BOLT11 feature bits', () => {
+  // BOLT 9: even bits are mandatory, odd bits may be ignored. The spec's own
+  // test vector sets exactly bits 8 (var_onion_optin) and 14 (payment_secret).
+  const featureField = (bitvector: number | bigint) => taggedField('9', uintWords(bitvector))
+
+  it('accepts the mandatory features this payer supports', () => {
+    const invoice = bolt11Fixture({ extraFields: [featureField((1 << 8) | (1 << 14))] })
+    expect(validateBolt11Invoice(invoice, { allowExpired: true }).paymentHash).toBe(PAYMENT_HASH_HEX)
+  })
+
+  it('accepts the official test vector, which carries a features field', () => {
+    expect(isValidBolt11(OFFICIAL_BOLT11)).toBe(true)
+  })
+
+  it('rejects an unknown mandatory (even) feature bit', () => {
+    const invoice = bolt11Fixture({ extraFields: [featureField(1 << 20)] })
+    expectErrorCode(() => validateBolt11Invoice(invoice, { allowExpired: true }), 'INVALID_INVOICE')
+    expect(() => validateBolt11Invoice(invoice, { allowExpired: true })).toThrow(/feature bit 20/)
+  })
+
+  it('ignores an unknown optional (odd) feature bit', () => {
+    const invoice = bolt11Fixture({ extraFields: [featureField(1 << 21)] })
+    expect(validateBolt11Invoice(invoice, { allowExpired: true }).paymentHash).toBe(PAYMENT_HASH_HEX)
+  })
+
+  it('rejects a duplicated features field', () => {
+    const invoice = bolt11Fixture({
+      extraFields: [featureField(1 << 14), featureField(1 << 14)],
+    })
+    expectErrorCode(() => validateBolt11Invoice(invoice, { allowExpired: true }), 'INVALID_INVOICE')
   })
 })

@@ -1,24 +1,17 @@
 /**
  * Integration-test configuration
  * ------------------------------
- * These are *live* tests that connect real WDK adapters to real test networks
- * using two pre-funded wallets, **Alice** and **Bob**:
+ * Live tests connecting real WDK adapters to real test networks with two pre-funded
+ * wallets, Alice and Bob: SPARK on regtest, LIQUID on testnet, ARKADE and RGB_L1 on
+ * mutinynet (signet).
  *
- *   | Protocol | Network            | Backing adapter        |
- *   |----------|--------------------|------------------------|
- *   | SPARK    | regtest            | SparkWdkAdapter        |
- *   | LIQUID   | testnet            | LiquidWdkAdapter       |
- *   | ARKADE   | mutinynet (signet) | ArkadeWdkAdapter       |
- *   | RGB_L1   | mutinynet (signet) | RgbLibWdkAdapter       |
- *
- * Nothing here runs in the default `npm test` unit run — the suites live under
- * `test/integration/**` (excluded by `vitest.config.ts`) and only run via
- * `npm run test:integration`. Even then, each suite SKIPS unless the required
+ * None of this runs in the default `npm test` — the suites live under
+ * `test/integration/**` (excluded by vitest.config.ts) and only run via
+ * `npm run test:integration`. Even then each suite SKIPS unless its
  * secrets/endpoints are present, so a missing `.env` never fails CI.
  *
- * Configure by exporting env vars or filling in `test/integration/.env`
- * (see `.env.example`). Mnemonics have NO defaults and are never committed —
- * without them every suite skips.
+ * Configure via env vars or `test/integration/.env`. Mnemonics have NO defaults and
+ * are never committed.
  */
 
 /** Read an env var, falling back to a default (or `undefined`). */
@@ -47,16 +40,13 @@ export const WALLETS: readonly WalletFixture[] = [ALICE, BOB]
 export const HAVE_WALLETS = Boolean(ALICE.mnemonic && BOB.mnemonic)
 
 /**
- * Send/transfer tests move real (test-network) funds and are slow + stateful,
- * so they stay OFF unless explicitly opted in with `RUN_SEND_TESTS=1`.
+ * Send/transfer tests move real (test-network) funds and are slow + stateful, so
+ * they stay OFF unless opted in with `RUN_SEND_TESTS=1`.
  */
 export const RUN_SEND_TESTS = flag('RUN_SEND_TESTS')
 
-// ---------------------------------------------------------------------------
-// Per-protocol network + endpoint config. Endpoints have sensible public
-// defaults for the target test network; override any of them via env if the
-// public endpoint moves or you run your own.
-// ---------------------------------------------------------------------------
+// Per-protocol network + endpoint config. Endpoints default to public servers for
+// the target test network; override any of them via env.
 
 export const SPARK = {
   /** Spark runs on regtest for these tests (no extra endpoints needed). */
@@ -67,13 +57,10 @@ export const SPARK = {
 export const LIQUID = {
   network: 'testnet' as const,
   /**
-   * Waterfalls quick-sync by default — the same server the extension uses
-   * (rate-extension/src/lib/config.ts). The server-side waterfalls scan is ONE
-   * request; the alternative ~40-request gap-limit scan against the public
-   * blockstream esplora gets rate-limited, which triggers lwk_node's backoff
-   * sleep — a browser-only API that throws "Cannot access browser window" under
-   * Node. Override the endpoint with LIQUID_ESPLORA_URL; disable quick-sync
-   * with LIQUID_WATERFALLS=0 (then point LIQUID_ESPLORA_URL at a plain esplora).
+   * Waterfalls quick-sync by default — one request, versus a ~40-request gap-limit
+   * scan that gets rate-limited by the public blockstream esplora, triggering
+   * lwk_node's backoff sleep (a browser-only API that throws under Node). Override
+   * with LIQUID_ESPLORA_URL; disable via LIQUID_WATERFALLS=0.
    */
   esploraUrl: env('LIQUID_ESPLORA_URL', 'https://waterfalls.liquidwebwallet.org/liquidtestnet/api')!,
   waterfalls: !/^(0|false|no)$/i.test(process.env.LIQUID_WATERFALLS?.trim() ?? ''),
@@ -100,8 +87,8 @@ export const RGB_L1 = {
 }
 
 /**
- * Per-wallet on-disk data directory for the stateful rgb-lib wallet. Kept under
- * the OS temp dir keyed by wallet name so Alice and Bob never share state.
+ * Per-wallet on-disk data directory for the stateful rgb-lib wallet, under the OS
+ * temp dir keyed by wallet name so Alice and Bob never share state.
  */
 export function rgbDataDir(wallet: WalletFixture): string {
   const base = env('RGB_DATA_DIR', `${process.env.TMPDIR ?? '/tmp'}/wallet-engine-it/rgb`)!

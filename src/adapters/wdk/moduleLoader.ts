@@ -1,16 +1,13 @@
 /**
  * WDK Module Loader (platform-injectable)
  * ---------------------------------------
- * WDK modules are heavy native/WASM packages. How they're loaded differs per host:
- *  - Node / Vite (extension): dynamic `import()` works fine.
- *  - React Native / Metro: dynamic import of node_modules packages is unreliable;
- *    the app injects a STATIC `require()` instead (mirrors rate's existing
- *    `setSdkFactory` pattern for the native SDKs).
+ * WDK modules are heavy native/WASM packages, and how they load differs per host:
+ * dynamic `import()` works under Node/Vite, but is unreliable under React
+ * Native/Metro, where the app injects a STATIC `require()` instead.
  *
- * Adapters call `loadWdkModule(pkgName, () => import(pkgName))`. If the host has
- * registered a loader for that package, it's used; otherwise the inline dynamic
- * import fallback runs. The fallback's import specifier is a string literal so
- * bundlers can still analyze it.
+ * Adapters call `loadWdkModule(pkgName, () => import(pkgName))`: a host-registered
+ * loader wins, otherwise the inline fallback runs. The fallback's specifier is a
+ * string literal so bundlers can still analyze it.
  */
 
 export type WdkModuleLoader = () => any | Promise<any>

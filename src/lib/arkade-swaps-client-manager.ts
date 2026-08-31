@@ -1,21 +1,14 @@
 /**
  * Arkade Swaps Client Manager
  *
- * Singleton that owns an `ArkadeSwaps` instance from `@arkade-os/boltz-swap`.
- * Provides Boltz-based swaps between Arkade VTXOs and Lightning / on-chain BTC.
+ * Singleton owning an `ArkadeSwaps` from `@arkade-os/boltz-swap`: Boltz-based swaps
+ * between Arkade VTXOs and Lightning / on-chain BTC. Init is non-blocking, so
+ * callers use `getClient()` and fall back when `isInitialized()` is false.
+ * Lifecycle: `initialize(wallet)` on adapter connect, `dispose()` on disconnect.
  *
- * Initialization is non-blocking: callers should attempt to use the client
- * via `getClient()` and gracefully fall back when `isInitialized()` is false
- * (e.g. on cold-start before the post-unlock init has finished).
- *
- * Lifecycle:
- *   - Arkade adapter connect  → `initialize(wallet)`
- *   - Arkade adapter disconnect → `dispose()`
- *
- * The default repository is IndexedDB-backed so pending submarine / reverse /
- * chain swaps survive a service-worker restart and are auto-claimed/refunded by
- * the embedded `SwapManager`. Non-browser hosts (React Native) must inject a
- * platform-appropriate `swapRepository` via `initialize(wallet, { swapRepository })`.
+ * The default repository is IndexedDB-backed so pending swaps survive a
+ * service-worker restart and are auto-claimed by the embedded `SwapManager`.
+ * Non-browser hosts must inject a platform-appropriate `swapRepository`.
  */
 
 import { ArkadeSwaps, IndexedDbSwapRepository } from "@arkade-os/boltz-swap";
@@ -56,10 +49,10 @@ class ArkadeSwapsClientManager {
   private readonly session = new WalletSessionGuard({ name: "ArkadeSwapsClientManager" });
 
   /**
-   * Initialize the swaps client with a connected Arkade wallet.
-   * Concurrent calls for the SAME wallet share the in-flight handshake. A call
-   * for a different wallet, or one arriving after a dispose(), supersedes the
-   * pending attempt and builds its own — the superseded client is disposed.
+   * Initialize the swaps client with a connected Arkade wallet. Concurrent calls
+   * for the SAME wallet share the in-flight handshake; a call for a different
+   * wallet, or one arriving after a dispose(), supersedes the pending attempt and
+   * builds its own — the superseded client is disposed (findings A7, N1).
    */
   initialize(wallet: IWallet, opts?: ArkadeSwapsInitOptions): Promise<void> {
     // Same wallet, client already built → nothing to do.
@@ -141,8 +134,8 @@ class ArkadeSwapsClientManager {
   }
 
   /**
-   * Stop the embedded SwapManager and release resources. Safe to call when
-   * the client was never initialized.
+   * Stop the embedded SwapManager and release resources. Safe when never
+   * initialized.
    */
   async dispose(): Promise<void> {
     // Invalidate first so any in-flight _doInitialize sees the change even if

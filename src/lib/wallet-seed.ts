@@ -1,25 +1,20 @@
 /**
  * wallet-seed
  * -----------
- * Resolve an extension/host wallet secret to the raw seed bytes the WDK wallet
- * managers expect.
+ * Resolve a host wallet secret to the raw seed bytes the WDK wallet managers expect.
  *
  * The WDK base `WalletManager` validates a *string* secret with
- * `bip39.validateMnemonic` and throws "The seed phrase is invalid." on failure —
- * but it accepts a `Uint8Array` as raw seed bytes with NO validation. Hosts here
- * support wallets rooted on an `nsec1…` Nostr key or a raw hex private key (not
- * just BIP-39 phrases), which the native adapters resolved before use. Mirror that
- * resolution and hand the WDK managers bytes, so nsec/hex-rooted wallets connect.
+ * `bip39.validateMnemonic`, but accepts a `Uint8Array` as raw seed bytes with NO
+ * validation. Hosts here support wallets rooted on an `nsec1…` key or a raw hex
+ * private key, not just BIP-39 phrases, so mirror the native adapters' resolution
+ * and hand the managers bytes:
+ *  - `nsec1…`      → the decoded 32-byte private key (HD master seed)
+ *  - 64-hex-chars  → those 32 bytes (HD master seed)
+ *  - otherwise     → a BIP-39 mnemonic → 64-byte PBKDF2 seed
  *
- * Resolution (matches the native spark/arkade client-managers):
- *  - `nsec1…`      → the decoded 32-byte private key (used as the HD master seed)
- *  - 64-hex-chars  → those 32 bytes (used as the HD master seed)
- *  - otherwise     → treated as a BIP-39 mnemonic → 64-byte PBKDF2 seed
- *
- * NOTE ON PARITY: for BIP-39 and nsec/hex wallets the Spark path reproduces the
- * native addresses (spark-sdk receives the same effective seed). Arkade derives
- * HD keys from the seed, so BIP-39 wallets match the native BIP-86 derivation but
- * an nsec/hex-rooted Arkade wallet (native used the raw key as identity) will not.
+ * PARITY: the Spark path reproduces the native addresses for all three forms.
+ * Arkade derives HD keys from the seed, so BIP-39 wallets match the native BIP-86
+ * derivation but an nsec/hex-rooted Arkade wallet will not.
  */
 
 import { bech32 } from '@scure/base'
@@ -47,13 +42,10 @@ function nsecToBytes(input: string): Uint8Array | null {
  * Resolve a wallet secret (nsec / hex private key / BIP-39 mnemonic) to the seed
  * bytes a WDK `WalletManager` consumes.
  *
- * Throws (rather than silently deriving a wrong wallet) when the secret is none
- * of the three supported forms. `mnemonicToSeedSync` does NO validation — it
- * NFKD-normalizes and PBKDF2s *any* string — so without an explicit check a
- * corrupted secret (a typo'd phrase, a hex key that lost a character, an nsec
- * with a bad checksum) would resolve to a valid-but-different seed → a different,
- * empty HD wallet, surfacing to the user as "my funds are gone" with no error.
- * Failing loud here mirrors the WDK `WalletManager`'s own string-secret validation.
+ * Throws when the secret is none of the three forms, rather than silently deriving
+ * a wrong wallet: `mnemonicToSeedSync` does NO validation — it PBKDF2s *any* string
+ * — so a corrupted secret would resolve to a valid-but-different seed and a
+ * different, empty HD wallet, surfacing as "my funds are gone" with no error.
  */
 export function resolveWalletSeed(secret: string): Uint8Array {
   const trimmed = secret.trim()

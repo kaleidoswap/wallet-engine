@@ -171,17 +171,44 @@ describe('F4: signing ops evade all spend caps', () => {
   })
 })
 
-describe('F5: LIQUID manifest declares PSET ops the adapter may not have', () => {
-  it('protocolSupports says yes; the adapter throws NOT_SUPPORTED on non-experimental builds', async () => {
-    expect(protocolSupportsOperation('LIQUID', 'liquid-pset-sign')).toBe(true)
-    expect(protocolSupportsOperation('LIQUID', 'simplicity-compile')).toBe(true)
+describe('F5 [FIXED ON main]: LIQUID manifest no longer declares PSET ops the adapter may not have', () => {
+  // Run 1 reproduced this as "the static manifest says yes while the adapter
+  // throws". `main` closed it in 0ce6304 ("fix(liquid): fail closed on
+  // unsupported PSET operations") by dropping the experimental ops from the
+  // static manifest and deriving them per-account from the resolved LWK
+  // binding. Asserting the FIXED property here, not the old defect.
+  it('the static manifest no longer advertises the experimental ops', () => {
+    expect(protocolSupportsOperation('LIQUID', 'liquid-pset-sign')).toBe(false)
+    expect(protocolSupportsOperation('LIQUID', 'simplicity-compile')).toBe(false)
+    // Base Liquid operations are unaffected.
+    expect(protocolSupportsOperation('LIQUID', 'onchain-send')).toBe(true)
+  })
 
+  it('a build without the experimental methods advertises neither and still refuses', async () => {
     const adapter = new LiquidWdkAdapter()
     Object.assign(adapter as any, { connected: true, account: {} }) // build without experimental methods
+    expect(adapter.capabilities).not.toContain('liquid-pset-sign')
+    expect(adapter.capabilities).not.toContain('simplicity-compile')
     await expect(adapter.getSimplicityCapabilities()).resolves.toMatchObject({ available: false })
     await expect(
       adapter.signLiquidPset({ pset: 'AAAA' } as any),
     ).rejects.toThrow(/Simplicity-capable/)
+  })
+
+  it('a Simplicity-capable binding is what makes the flag appear', () => {
+    const adapter = new LiquidWdkAdapter()
+    Object.assign(adapter as any, {
+      connected: true,
+      account: {
+        getSimplicityCapabilities: () => ({
+          available: true,
+          pset: { inspect: true, sign: true },
+          simplicity: { compile: true },
+        }),
+      },
+    })
+    expect(adapter.capabilities).toContain('liquid-pset-sign')
+    expect(adapter.capabilities).toContain('simplicity-compile')
   })
 })
 

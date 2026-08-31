@@ -1,18 +1,13 @@
 /**
- * PSBT signing helper.
+ * PSBT signing helper: parses a PSBT, derives the keys matching the BIP32
+ * derivation paths in its input entries, and signs every signable input.
  *
- * Parses an incoming PSBT, derives the set of private keys that correspond
- * to BIP32 derivation paths embedded in the PSBT's input entries, attempts
- * to sign every signable input, and returns the result.
- *
- * Design invariants:
- *  - Never fabricates a signature: if no input can be signed (no BIP32 paths
- *    present, no matching key), returns { unchanged: true }.
- *  - Does NOT scan derivation paths — only signs inputs whose PSBT already
- *    carries explicit BIP32 derivation metadata. Scanning would be O(accounts
- *    × gap) and too slow for the background service worker.
- *  - Throws on malformed / non-PSBT input so the caller can surface an error
- *    to the dApp rather than silently returning garbage.
+ * Invariants:
+ *  - Never fabricates a signature — returns { unchanged: true } when nothing can
+ *    be signed.
+ *  - Signs only inputs whose PSBT carries explicit BIP32 metadata; scanning paths
+ *    would be O(accounts × gap) and too slow for the background worker.
+ *  - Throws on malformed input so the caller can surface an error to the dApp.
  */
 
 import { Transaction } from '@scure/btc-signer'
@@ -32,8 +27,8 @@ function assertPsbtMagic(bytes: Uint8Array): void {
 }
 
 /**
- * Convert a raw BIP32 path array (as stored in PSBT key-value pairs) to the
- * canonical string form. Each element ≥ 0x80000000 is a hardened step.
+ * Convert a raw BIP32 path array (as stored in PSBT key-value pairs) to canonical
+ * string form. Each element ≥ 0x80000000 is a hardened step.
  */
 function pathToString(pathArr: readonly number[]): string {
   return 'm/' + pathArr.map((n) => (n >= 0x80000000 ? `${n - 0x80000000}'` : String(n))).join('/')
@@ -49,20 +44,17 @@ export interface PsbtSignResult {
 }
 
 /**
- * Parse and attempt to sign a PSBT using keys derived from the provided
- * wallet secret.
+ * Parse and attempt to sign a PSBT with keys derived from the wallet secret.
  *
- * The secret is resolved through `resolveWalletSeed`, not `mnemonicToSeedSync`:
- * hosts root wallets on an `nsec1…` key or a raw 64-hex private key as well as
- * on a BIP-39 phrase (an nsec root is the *default* Arkade wallet), and the
- * connect paths seed their wallet managers from exactly that resolution
- * (ArkadeWdkAdapter.ts:128, RlnWdkAdapter.ts:168, SparkWdkAdapter.ts). So the HD
- * tree a PSBT's BIP32 derivations name is rooted there — deriving from anything
- * else would produce keys that match no input. `resolveWalletSeed` also throws
- * on a secret that is none of the three shapes rather than PBKDF2-ing a typo
- * into a valid-but-different, empty wallet.
+ * The secret is resolved through `resolveWalletSeed`, not `mnemonicToSeedSync`
+ * (finding A-F4): hosts root wallets on an `nsec1…` key or a raw 64-hex private
+ * key as well as on a BIP-39 phrase — an nsec root is the *default* Arkade
+ * wallet — and the connect paths seed their wallet managers from exactly that
+ * resolution, so the HD tree a PSBT's BIP32 derivations name is rooted there.
+ * `resolveWalletSeed` also throws on a secret of none of the three shapes rather
+ * than PBKDF2-ing a typo into a valid-but-different, empty wallet.
  *
- * @param psbtHex Hex-encoded PSBT bytes (without 0x prefix).
+ * @param psbtHex Hex-encoded PSBT bytes (no 0x prefix).
  * @param secret  Wallet secret: `nsec1…`, 64-char hex key, or BIP-39 mnemonic.
  */
 export function signPsbt(psbtHex: string, secret: string): PsbtSignResult {
@@ -122,14 +114,12 @@ export function signPsbt(psbtHex: string, secret: string): PsbtSignResult {
       if (!child.privateKey) continue
 
       try {
-        // No `allowedSighash` argument is passed on purpose: @scure/btc-signer
-        // then restricts signing to each input's DEFAULT sighash (SIGHASH_ALL
-        // for legacy/segwit, SIGHASH_DEFAULT for taproot) and throws on anything
-        // else. So a dApp-supplied PSBT that sets SIGHASH_NONE/SINGLE/ANYONECANPAY
-        // on an owned input — which would let the counterparty rewrite outputs —
-        // is refused here (the throw is caught below and the input left unsigned)
-        // rather than blindly signed. Passing an explicit `[SigHash.ALL]` would be
-        // WRONG: it would reject legitimate taproot inputs (default = 0, not ALL).
+        // No `allowedSighash` on purpose: @scure/btc-signer then restricts signing
+        // to each input's DEFAULT sighash and throws on anything else, so a
+        // dApp-supplied PSBT setting SIGHASH_NONE/SINGLE/ANYONECANPAY on an owned
+        // input — which would let the counterparty rewrite outputs — is refused
+        // rather than blindly signed. An explicit `[SigHash.ALL]` would be WRONG:
+        // it would reject legitimate taproot inputs (default = 0, not ALL).
         tx.signIdx(child.privateKey, idx)
         signedCount++
         break // one signature per input is enough
@@ -150,15 +140,9 @@ export function signPsbt(psbtHex: string, secret: string): PsbtSignResult {
 }
 
 /**
- * Finalize a fully-signed PSBT and extract the raw network transaction.
- *
- * Used by `webbtc.finalizePsbt`: a dApp hands back a PSBT that already carries
- * all required signatures and asks the wallet to assemble the final scriptSig /
- * witness and return the broadcastable transaction hex.
- *
- * Throws when the PSBT is malformed or not fully signed (btc-signer's
- * `finalize()` rejects an input that still lacks a signature) so the dApp gets
- * a clean error rather than a half-finalized transaction.
+ * Finalize a fully-signed PSBT and extract the raw network transaction, for
+ * `webbtc.finalizePsbt`. Throws when the PSBT is malformed or not fully signed, so
+ * the dApp gets a clean error rather than a half-finalized transaction.
  */
 export function finalizePsbt(psbtHex: string): { txHex: string; txid: string } {
   const bytes = hexToBytes(psbtHex)
@@ -186,11 +170,8 @@ export function finalizePsbt(psbtHex: string): { txHex: string; txid: string } {
 }
 
 /**
- * Decode a PSBT and return lightweight metadata for display in the
- * confirmation popup — input count, output count, and estimated value
- * transferred (sum of non-change outputs where possible).
- *
- * Never throws — returns safe defaults on malformed input.
+ * Decode a PSBT into lightweight metadata for the confirmation popup — input and
+ * output counts, and estimated value transferred. Never throws.
  */
 export function decodePsbtMeta(psbtHex: string): {
   inputCount: number

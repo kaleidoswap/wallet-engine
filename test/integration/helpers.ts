@@ -1,9 +1,7 @@
 /**
- * Integration-test helpers
- * ------------------------
- * Thin wrappers that build + connect each WDK adapter for a given wallet
- * (Alice/Bob) on its target test network, plus small assertions shared across
- * suites. All connect config comes from `config.ts`.
+ * Integration-test helpers: thin wrappers that build + connect each WDK adapter for
+ * a given wallet on its target test network, plus shared assertions. All connect
+ * config comes from `config.ts`.
  */
 
 import { expect } from 'vitest'
@@ -15,10 +13,9 @@ import { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
 import { ARKADE, LIQUID, RGB_L1, SPARK, rgbDataDir, type WalletFixture } from './config'
 
 /**
- * Retry a flaky async factory a few times with backoff. The Spark regtest
- * server intermittently drops its gRPC channel ("Channel has been shut down")
- * during wallet init; a fresh attempt almost always succeeds. Kept generic so
- * other public-endpoint suites can reuse it.
+ * Retry a flaky async factory with backoff. The Spark regtest server intermittently
+ * drops its gRPC channel during wallet init; a fresh attempt almost always
+ * succeeds. Generic so other public-endpoint suites can reuse it.
  */
 export async function withRetry<T>(
   label: string,
@@ -63,9 +60,8 @@ export async function connectSpark(wallet: WalletFixture): Promise<SparkWdkAdapt
 /** Connect a Liquid (testnet) adapter for the given wallet. */
 export async function connectLiquid(wallet: WalletFixture): Promise<LiquidWdkAdapter> {
   // The gap-limit scan against the public esplora is rate-limited, which trips
-  // lwk's browser-only backoff sleep under Node; retry so a transient
-  // rate-limit doesn't fail the whole suite. Set LIQUID_WATERFALLS=1 to avoid
-  // the multi-request scan entirely (needs a waterfalls-capable esplora).
+  // lwk's browser-only backoff sleep under Node; retry so a transient rate-limit
+  // doesn't fail the suite. LIQUID_WATERFALLS=1 avoids the multi-request scan.
   return withRetry(`connectLiquid(${wallet.name})`, async () => {
     const adapter = new LiquidWdkAdapter()
     try {
@@ -125,9 +121,8 @@ export async function safeDisconnect(adapter: IProtocolAdapter | undefined): Pro
 }
 
 /**
- * Assert a wallet is funded: its total BTC-equivalent balance is a positive,
- * finite number. Surfaces the actual balance in the failure message so an
- * un-funded fixture is obvious.
+ * Assert a wallet is funded: total BTC-equivalent balance is positive and finite.
+ * Surfaces the actual balance in the failure message.
  */
 export function assertFunded(label: string, balance: { total: number }): void {
   expect(Number.isFinite(balance.total), `${label} balance should be a finite number`).toBe(true)
@@ -135,11 +130,10 @@ export function assertFunded(label: string, balance: { total: number }): void {
 }
 
 /**
- * Pick a small, safe send amount from a wallet's spendable balance for the
- * transfer tests. These run against shared, slowly-draining test wallets, so a
- * hardcoded amount eventually exceeds the balance and fails for the wrong
- * reason. Send a small fixed amount, but fail loudly (not skip) if the wallet
- * lacks even that plus a fee buffer.
+ * Pick a small, safe send amount from a wallet's spendable balance. These run
+ * against shared, slowly-draining test wallets, so a hardcoded amount eventually
+ * exceeds the balance and fails for the wrong reason. Fails loudly (not skips) if
+ * the wallet lacks even the small amount plus a fee buffer.
  */
 export function spendableSend(total: number, label: string, target = 100, feeBuffer = 200): number {
   expect(

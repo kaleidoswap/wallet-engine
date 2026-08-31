@@ -1,23 +1,16 @@
 /**
  * LiquidWdkAdapter
  * ----------------
- * Wraps the WDK Liquid module (@kaleidorg/wdk-wallet-liquid, over lwk / Liquid Wallet
- * Kit) onto the stable `IProtocolAdapter` contract. This is the "USD" path: USDt on
- * Liquid is the lite-mode "USD" asset.
+ * Wraps the WDK Liquid module (@kaleidorg/wdk-wallet-liquid, over lwk) onto the
+ * `IProtocolAdapter` contract. This is the "USD" path: USDt on Liquid is the
+ * lite-mode "USD" asset.
  *
- * Liquid is on-chain only — no Lightning, no invoices. Receive = an address.
- * Unlike Spark, the module exposes `listAssets()` + `getTokenBalance()`, so asset
- * enumeration (incl. USDt) works natively with no upstream gap.
+ * Liquid is on-chain only — no Lightning, no invoices; receive is an address. The
+ * module exposes `listAssets()` + `getTokenBalance()`, so asset enumeration works
+ * natively.
  *
- * Discipline: no WDK/lwk types cross the contract — everything returned is a domain
- * type from ../types/base; WDK objects are held as `any`.
- *
- * WDK Liquid surface (from types/index.d.ts):
- *   manager: getAccount, getAccountByPath, getFeeRates({normal,fast}: bigint), dispose
- *   account: getAddress(): string, getBalance(): bigint, getTokenBalance(id): bigint,
- *            transfer({recipient,amount,feeRate?}), sendAsset({assetId,recipient,amount,feeRate?}),
- *            listAssets(): {asset_id,balance}[], listUnspents, listTransactions,
- *            getNetworkInfo(): {network,policy_asset,address,tip_height}, sign, dispose
+ * No WDK/lwk types cross the contract — everything returned is a domain type from
+ * ../types/base; WDK objects are held as `any`.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -39,7 +32,7 @@ import {
   ProtocolError,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
-import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
+import { PROTOCOL_OPERATIONS, type ProtocolCapability } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 
@@ -64,6 +57,40 @@ export interface LiquidSyncWarning {
   details?: { reason?: 'waterfalls_failed' }
 }
 
+/** The unblinding data of a single confidential output, as observed. */
+export interface LiquidOutputSecretsRecord {
+  /** Funding transaction id, display (big-endian) order. */
+  txid: string
+  /** Output index within `txid`. */
+  vout: number
+  /** Unblinded asset id hex (64 chars). */
+  assetId: string
+  /** Unblinded amount in the asset's smallest unit, as a decimal string. */
+  value: string
+  /** Asset blinding factor hex (64 chars). */
+  assetBlindingFactor: string
+  /** Value blinding factor hex (64 chars). */
+  valueBlindingFactor: string
+}
+
+/**
+ * Host-supplied durable store for confidential outputs' unblinding data.
+ *
+ * A confidential output's asset, amount and blinding factors are not determined by
+ * the descriptor, so restoring the mnemonic re-derives every address without
+ * reconstructing those values — they are read back out of the funding transaction.
+ * A wallet keeping no record has no second source if that read stops working.
+ *
+ * The host owns durability, per-wallet/per-network namespacing and retention; a
+ * record stays relevant until its outpoint is spent. Treat the contents as key
+ * material: the blinding factors are what make an output's amount and asset
+ * legible.
+ */
+export interface LiquidSecretsStore {
+  /** Persist a batch of newly observed records. Must be idempotent per outpoint. */
+  put(records: LiquidOutputSecretsRecord[]): void | Promise<void>
+}
+
 export interface LiquidAdapterConfig extends BaseProtocolConfig {
   protocol: 'LIQUID'
   /** BIP-39 mnemonic for this wallet. */
@@ -73,20 +100,26 @@ export interface LiquidAdapterConfig extends BaseProtocolConfig {
   /** Optional Esplora base URL override. */
   esploraUrl?: string
   /**
-   * Use the server-side "waterfalls" scan (one request) instead of a client-side gap-limit scan
-   * (~40 requests → ~10s cold). Requires `esploraUrl` to point at a waterfalls-capable server;
-   * public Blockstream Esplora is not one. Default: false.
+   * Use the server-side "waterfalls" scan (one request) rather than a client-side
+   * gap-limit scan (~40 requests, ~10s cold). Requires `esploraUrl` to be
+   * waterfalls-capable; public Blockstream Esplora is not. Default: false.
    */
   waterfalls?: boolean
   /**
-   * Explicitly allow a one-time retry through the network's built-in standard Esplora provider
-   * if Waterfalls fails. This changes providers and may disclose wallet addresses/scripts to it.
+   * Allow one retry through the network's standard Esplora provider if Waterfalls
+   * fails. This changes providers and may disclose wallet addresses to it.
    */
   allowDefaultEsploraFallback?: boolean
   /** Optional waterfalls server recipient key; encrypts the descriptor before it is sent. */
   waterfallsRecipient?: string
   /** Receives non-fatal sync warnings, including successful Waterfalls fallback. */
   onWarning?: (warning: LiquidSyncWarning) => void | Promise<void>
+  /**
+   * Durable sink for the unblinding data of confidential outputs received.
+   * Strongly recommended — a seed-only restore does not reconstruct it.
+   * See {@link LiquidSecretsStore}.
+   */
+  secretsStore?: LiquidSecretsStore
 }
 
 /** Local mirror of the lwk network union (kept here so WDK/lwk types never cross the contract). */
@@ -106,15 +139,47 @@ const KNOWN_ASSETS: Record<string, { ticker: string; name: string; precision: nu
 
 export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'LIQUID'
-  readonly capabilities = PROTOCOL_OPERATIONS.LIQUID
   readonly supportedLayers: Layer[] = getCapabilities('LIQUID').layers
+
+  /**
+   * Runtime-derived operation manifest. Base Liquid operations are always
+   * available; experimental PSET/Simplicity ones are advertised only when the
+   * account's LWK binding supports them, so the UI never offers an action the
+   * binding cannot perform (fail closed).
+   */
+  get capabilities(): readonly ProtocolCapability[] {
+    const base = PROTOCOL_OPERATIONS.LIQUID
+    const caps = this.readSimplicityCapabilitiesSync()
+    if (!caps) return base
+    const extra: ProtocolCapability[] = []
+    if (caps.pset?.inspect) extra.push('liquid-pset-inspect')
+    if (caps.pset?.sign) extra.push('liquid-pset-sign')
+    if (caps.simplicity?.compile) extra.push('simplicity-compile')
+    return extra.length ? [...base, ...extra] : base
+  }
+
+  /**
+   * Synchronous, side-effect-free read of the Simplicity capability probe.
+   * `getBindingCapabilities` only inspects the binding prototype — never the
+   * re-entrant Wollet or Esplora — so it is safe outside the opLock. Returns
+   * undefined on failure so `capabilities` fails closed.
+   */
+  private readSimplicityCapabilitiesSync(): SimplicityCapabilities | undefined {
+    const probe = this.account?.getSimplicityCapabilities
+    if (typeof probe !== 'function') return undefined
+    try {
+      const caps = probe.call(this.account)
+      return caps && typeof caps === 'object' ? (caps as SimplicityCapabilities) : undefined
+    } catch {
+      return undefined
+    }
+  }
 
   private policyAsset: string | null = null
 
-  // lwk's Wollet is NOT re-entrant: while one call is awaiting its Esplora sync,
-  // a second call into the same wasm object panics with "recursive use of an
-  // object … unsafe aliasing in rust". The dashboard fires balance + listAssets +
-  // address concurrently, so serialize every lwk operation onto one queue.
+  // lwk's Wollet is NOT re-entrant: a second call while one awaits its Esplora
+  // sync panics ("recursive use of an object"). The dashboard fires balance +
+  // listAssets + address concurrently, so serialize every lwk op onto one queue.
   private opLock: Promise<unknown> = Promise.resolve()
   private withLock<T>(op: () => T | Promise<T>): Promise<T> {
     // Run `op` after the previous op settles (success OR failure). Cast the
@@ -161,6 +226,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       allowDefaultEsploraFallback: cfg.allowDefaultEsploraFallback,
       waterfallsRecipient: cfg.waterfallsRecipient,
       onWarning: cfg.onWarning,
+      secretsStore: cfg.secretsStore,
     })
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
     this.connected = true
@@ -352,10 +418,10 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   /**
-   * Picks the "headline" movement for a tx from lwk's signed per-asset deltas:
-   * a non-L-BTC asset (e.g. USDt) if one moved, else L-BTC. Returned `amount`
-   * is a positive magnitude (direction is carried by the tx `type`); for an
-   * L-BTC send the fee is stripped since lwk's policy-asset delta includes it.
+   * Pick the headline movement for a tx from lwk's signed per-asset deltas: a
+   * non-L-BTC asset if one moved, else L-BTC. `amount` is a positive magnitude
+   * (direction rides on the tx `type`); for an L-BTC send the fee is stripped,
+   * since lwk's policy-asset delta includes it.
    */
   private primaryMovement(
     balance: Array<{ asset_id: string; value: string }>,

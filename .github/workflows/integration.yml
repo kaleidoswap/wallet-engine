@@ -51,6 +51,8 @@ jobs:
         with:
           node-version: 22
 
+      # npm, not pnpm: pnpm leaves the rgb-lib native dep unhoisted and
+      # `pnpm rebuild` no-ops on it, producing no .node artifact.
       - run: npm install --ignore-scripts --no-audit --no-fund
 
       # Only the RGB-L1 native bindings need lifecycle scripts (node-gyp build

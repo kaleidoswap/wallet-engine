@@ -1,22 +1,17 @@
 /**
  * SparkWdkAdapter
  * ---------------
- * Adapter mapping the WDK Spark module (@tetherto/wdk-wallet-spark) onto the
- * stable `IProtocolAdapter` contract. This is the reference implementation of the
- * "wrap a WDK module behind the contract" pattern (see docs/WDK_INTEGRATION_PLAN.md).
+ * Maps the WDK Spark module (@tetherto/wdk-wallet-spark) onto the
+ * `IProtocolAdapter` contract — the reference implementation of the "wrap a WDK
+ * module behind the contract" pattern (docs/WDK_INTEGRATION_PLAN.md).
  *
- * Discipline rules enforced here:
- *  - NO WDK/SDK types cross the contract boundary — everything returned is a domain
- *    type from ../types/base. The WDK objects are held as `any` internally.
- *  - The WDK **account** surface is the primary path (getAddress, getBalance,
- *    payLightningInvoice, sendTransaction, getTransfers, createLightningInvoice, …).
- *  - The raw `SparkWallet` the account wraps (`account._wallet`) is reached ONLY for
- *    the rich paths the WDK surface does not expose directly — token send + outbox,
- *    token history, L1 deposit claiming, and on-chain (cooperative-exit) withdrawal —
- *    ported verbatim from the mature native SparkAdapter (identical behaviour).
- *  - The sub-path stays free of a *static* `@buildonspark/spark-sdk` import: the SDK
- *    address helpers are lazy-loaded in `connect()`, and the one SDK-coupled lib
- *    (spark-converters, used for token-history mapping) is dynamic-imported on demand.
+ * Discipline: no WDK/SDK types cross the boundary (WDK objects are held as `any`);
+ * the WDK account surface is the primary path; the raw `SparkWallet`
+ * (`account._wallet`) is reached ONLY for what WDK does not expose — token send +
+ * outbox, token history, L1 deposit claiming, cooperative-exit withdrawal — ported
+ * verbatim from the native SparkAdapter. The sub-path avoids a static
+ * `@buildonspark/spark-sdk` import: address helpers are lazy-loaded in `connect()`
+ * and spark-converters is dynamic-imported on demand.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -165,11 +160,10 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     // out of the static import graph so this sub-path stays SDK-free until used.
     // @ts-ignore — resolved at runtime; a transitive dep of the WDK Spark module.
     this.sdk = await loadWdkModule('@buildonspark/spark-sdk', () => import('@buildonspark/spark-sdk'))
-    // Back the native sparkClientManager singleton with this adapter's underlying
-    // SparkWallet, so host glue that reads Spark through it (Flashnet AMM, the
-    // Orchestra bridge) keeps working under the WDK backend — no second wallet, no
-    // derivation drift. Lazy-imported so spark-client-manager (which statically
-    // imports spark-sdk) never enters this sub-path's static graph.
+    // Back the native sparkClientManager singleton with this adapter's SparkWallet,
+    // so host glue reading Spark through it (Flashnet AMM, Orchestra bridge) keeps
+    // working under the WDK backend — no second wallet, no derivation drift. Lazy
+    // imported so spark-client-manager never enters this sub-path's static graph.
     try {
       const { sparkClientManager } = await import('../../lib/spark-client-manager')
       sparkClientManager.adoptExternalWallet((this.account as any)?._wallet, this.network)
@@ -398,10 +392,9 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     const timestamp = Date.now()
 
     try {
-      // 1) Lightning send (WDK account). payLightningInvoice only DISPATCHES
-      //    the payment — settlement is asynchronous on the SSP and can still
-      //    fail. Poll the send request (via the raw wallet) to a terminal
-      //    state so callers get the truth plus the preimage NIP-47 requires.
+      // 1) Lightning send (WDK account). payLightningInvoice only DISPATCHES;
+      //    settlement is async on the SSP and can still fail, so poll the send
+      //    request to a terminal state for the truth plus NIP-47's preimage.
       if (isBolt11(destination)) {
         const maxFee = (request as any).maxFeeSats ?? (request as any).maxFee ?? DEFAULT_MAX_FEE_SATS
         // Amountless (0-sat) invoices require an explicit amount; the SDK
@@ -723,9 +716,9 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   /** Map a spark-sdk Transfer (proto) → domain UnifiedTransaction (fields read defensively). */
   private toUnifiedTx(t: any): UnifiedTransaction {
     // The spark-sdk Transfer proto has no direction flag — direction is whether
-    // *we* are the receiver. Compare our cached identity pubkey against the
-    // transfer's receiver/sender identity keys. Fall back to the (legacy, usually
-    // absent) direction fields only when the identity key is unknown.
+    // *we* are the receiver, so compare our cached identity pubkey against the
+    // transfer's receiver/sender keys. The legacy direction fields are a fallback
+    // only when the identity key is unknown.
     const me = this.identityPubKeyHex
     const receiverHex = toHexLower(t?.receiverIdentityPublicKey)
     const senderHex = toHexLower(t?.senderIdentityPublicKey)
@@ -797,9 +790,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   }
 
   /**
-   * Escape hatch: the underlying spark-sdk SparkWallet, for integrations that need the
-   * raw client (e.g. the flashnet Spark-DEX, which piggybacks on a SparkWallet). Returns
-   * the same instance this adapter uses. Null if not connected.
+   * Escape hatch: the underlying spark-sdk SparkWallet, for integrations needing the
+   * raw client (e.g. the flashnet Spark-DEX). Null if not connected.
    */
   getUnderlyingSparkWallet(): any {
     return (this.account as any)?._wallet ?? null

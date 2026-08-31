@@ -1,39 +1,15 @@
 /**
  * RgbLibWasmAdapter
  * -----------------
- * RGB-L1 (on-chain) backed by the BROWSER/WASM rgb-lib build
- * (`@utexo/rgb-lib-wasm`) instead of the native addon used by
- * `RgbLibWdkAdapter`. Same protocol surface (BTC on-chain + RGB assets on-chain,
- * NO Lightning/channels/swaps), same `RgbCore` translation — only the backing
- * differs, so the two cannot drift on asset/balance shape.
+ * RGB-L1 backed by the browser/wasm rgb-lib build (`@utexo/rgb-lib-wasm`) rather
+ * than the native addon in `RgbLibWdkAdapter`. Same protocol surface and the same
+ * `RgbCore` translation, so the two cannot drift; the wasm build persists to
+ * IndexedDB and needs no filesystem or Node runtime, which is what makes RGB-L1
+ * work in an MV3 service worker.
  *
- * Why a separate adapter: the native `@utexo/wdk-wallet-rgb` needs a filesystem
- * `dataDir` + a Node/Bare runtime and cannot load in a browser / MV3 service
- * worker. The wasm build is a wasm-bindgen `--target web` module that persists to
- * IndexedDB and uses only fetch / crypto / WebAssembly — so it runs node-less in
- * the extension (and on mobile). It is the path that makes self-custodial RGB-L1
- * possible without an rgb-lightning-node.
- *
- * Runtime-agnostic: the host injects an ALREADY-wasm-initialized module via
- * `registerWdkModule('@utexo/rgb-lib-wasm', () => initializedModule)`. The host
- * owns where the 13 MB `_bg.wasm` comes from (`chrome.runtime.getURL(...)` in the
- * extension; a bundled asset on mobile) and must have awaited the default
- * `init(...)` export before injecting. This adapter never touches `fetch`/URLs.
- *
- * Discipline: no rgb-lib/wasm types cross the contract — the module + wallet are
- * read as `any` and translated. Field names are read defensively and should be
- * smoke-tested on-device (validated offline: keys, wallet, address, listAssets).
- *
- * WasmWallet API used (from @utexo/rgb-lib-wasm@1.0.0-beta.2):
- *   static create(walletDataJson) → WasmWallet (IndexedDB-restoring)
- *   goOnline(skipConsistencyCheck, indexerUrl) → online
- *   getAddress() · getBtcBalance() · getAssetBalance(id) · listAssets(schemas[])
- *   blindReceive(assetId|null, assignment, duration|null, transportEndpoints, minConf)
- *   sendBegin(online, recipientMap, donation, feeRate, minConf) · signPsbt(psbt)
- *     · sendEnd(online, signedPsbt, skipSync)
- *   sendBtcBegin/sendBtcEnd · createUtxosBegin/createUtxosEnd · refresh · sync
- *   listTransactions() · listTransfers(assetId?)
- * Top-level: init() (panic/log hook) · restoreKeys(network, mnemonic) → keys.
+ * The host injects an already-initialized module via
+ * `registerWdkModule('@utexo/rgb-lib-wasm', () => initializedModule)`, so this
+ * adapter never touches fetch/URLs. No rgb-lib types cross the contract.
  */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
@@ -70,14 +46,11 @@ export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
   mnemonic: string
   /** RGB indexer (electrum/esplora) URL — required to go online. */
   indexerUrl: string
-  /**
-   * RGB proxy / transport endpoints used when generating blinded receive
-   * invoices. Optional; rgb-lib uses its defaults when omitted.
-   */
+  /** RGB proxy / transport endpoints for blinded receives; rgb-lib defaults when omitted. */
   transportEndpoints?: string[]
   /**
-   * Namespace key for this wallet's IndexedDB store (rgb-lib's `dataDir`). Lets
-   * multiple wallets/networks coexist; defaults to a network-scoped name.
+   * IndexedDB namespace key (rgb-lib's `dataDir`), so multiple wallets/networks
+   * coexist. Defaults to a network-scoped name.
    */
   dataDir?: string
   /** Max allocations per UTXO (rgb-lib tuning). Defaults to 5. */
@@ -92,10 +65,8 @@ function toRgbNetwork(network: string): string {
       return 'Mainnet'
     case 'testnet':
       return 'Testnet'
-    // KaleidoSwap's signet IS the custom signet (Mutinynet); its recipient IDs
-    // are network-tagged `SignetCustom` and won't validate against a standard
-    // `Signet` wallet (and vice-versa). Map both the explicit custom aliases and
-    // the plain `signet` we surface in the UI to rgb-lib's `SignetCustom`.
+    // KaleidoSwap's signet IS Mutinynet: its recipient IDs are tagged
+    // `SignetCustom` and won't validate against a standard `Signet` wallet.
     case 'signet':
     case 'signetcustom':
     case 'customsignet':
@@ -119,10 +90,8 @@ function toRgbNetwork(network: string): string {
 }
 
 /**
- * Wrap a WasmWallet so every method call is queued and runs to completion before
- * the next starts — rgb-lib-wasm is single-threaded and corrupts/panics on
- * concurrent (interleaved-async) access. All methods become async; call sites
- * await them.
+ * Serialize every WasmWallet call: rgb-lib-wasm is single-threaded and corrupts
+ * or panics on interleaved-async access. All methods become async.
  */
 function serializeWasmAccount<T extends object>(account: T): T {
   let chain: Promise<unknown> = Promise.resolve()
@@ -174,10 +143,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
     const keys = mod.restoreKeys(rgbNetwork, cfg.mnemonic)
     const walletData = {
-      // Scope the IndexedDB store by the rgb-lib network, NOT the host network
-      // label: rgb-lib panics ("unreachable") if a store created under one
-      // BitcoinNetwork is reopened under another (e.g. Signet → SignetCustom).
-      // Distinct networks ⇒ distinct stores; same network ⇒ persistent.
+      // Scope the store by rgb-lib network, not the host label: rgb-lib panics
+      // ("unreachable") if a store is reopened under a different BitcoinNetwork.
       dataDir: cfg.dataDir ?? `rgb-l1-${rgbNetwork.toLowerCase()}`,
       bitcoinNetwork: rgbNetwork,
       databaseType: 'Sqlite', // the enum value the wasm build accepts; IndexedDB is the actual backing
@@ -187,10 +154,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       accountXpubVanilla: keys.accountXpubVanilla ?? keys.account_xpub_vanilla,
       accountXpubColored: keys.accountXpubColored ?? keys.account_xpub_colored,
       vanillaKeychain: null,
-      // rgb-lib rejects the IFA (inflatable) schema on mainnet
-      // (Error::CannotUseIfaOnMainnet in setup_rgb) — declaring it there makes
-      // WasmWallet.create throw before the wallet can even open. Gate IFA to the
-      // test networks; mainnet is NIA-only until rgb-lib whitelists IFA.
+      // rgb-lib rejects the IFA schema on mainnet (Error::CannotUseIfaOnMainnet),
+      // which makes WasmWallet.create throw. Gate IFA to the test networks.
       supportedSchemas: rgbNetwork === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa'],
     }
 
@@ -198,11 +163,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const rawWallet = WasmWallet.create
       ? await WasmWallet.create(JSON.stringify(walletData))
       : new WasmWallet(JSON.stringify(walletData))
-    // rgb-lib-wasm is single-threaded and NOT reentrant: if a second op starts
-    // while an async one (refresh/sync/send/…) is mid-flight, its thread-locals
-    // corrupt and it panics ("Lazy instance poisoned" → RuntimeError:
-    // unreachable). Serialize every wallet call through a queue so they never
-    // overlap. (Method results are awaited at each call site.)
+    // Not reentrant: an op starting mid-flight corrupts thread-locals and panics
+    // ("Lazy instance poisoned"). Queue every wallet call so they never overlap.
     this.account = serializeWasmAccount(rawWallet)
     this.online = await this.account.goOnline(false, cfg.indexerUrl)
     this.connected = true
@@ -210,17 +172,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   /**
-   * One-time recovery for a wallet restored from a *thin* BDK snapshot (no
-   * revealed SPKs) — the state left behind when an MV3 service-worker teardown
-   * interrupts rgb-lib-wasm's async IndexedDB save. In that state an incremental
-   * `sync` can only re-query already-revealed SPKs, so it can't rediscover the
-   * on-chain BTC and the balance reads 0 even though funds exist.
-   *
-   * Strategy: after an incremental sync, if BTC still reads 0, run a `fullScan`
-   * (BIP44 stop-gap) to rebuild the UTXO set from the indexer, then `flush` so
-   * the recovered state durably persists (and normal incremental sync suffices
-   * from then on). Version-guarded — `fullScan` is absent on rgb-lib-wasm
-   * ≤ beta.2 — and best-effort so a scan failure never blocks connect.
+   * One-time recovery for a wallet restored from a thin BDK snapshot (no revealed
+   * SPKs), left behind when an MV3 teardown interrupts rgb-lib-wasm's async save.
+   * Incremental sync can't rediscover the on-chain BTC there, so balance reads 0:
+   * if BTC is still 0 after a sync, `fullScan` then `flush`. Version-guarded
+   * (`fullScan` is absent on ≤ beta.2) and best-effort.
    */
   private async recoverBtcStateIfThin(): Promise<void> {
     const fullScan = (this.account as { fullScan?: unknown } | null)?.fullScan
@@ -293,10 +249,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       // synced again — two full indexer round-trips, ~2× the cold-sync wait.
       await this.account.sync(this.online)
       await this.account.refresh(this.online, null, [], true)
-      // Durably commit the refreshed state. In MV3 the service worker is killed
-      // aggressively; without a flush the settled-transfer promotion lives only
-      // in memory and is lost on the next cold start, which re-surfaces as stale
-      // balances / "insufficient assignments" on the following send.
+      // Flush or the settled-transfer promotion lives only in memory and is lost
+      // on the next MV3 cold start, resurfacing as stale balances on the next send.
       await this.flushState()
     } catch (e) {
       // best-effort, but surface the cause — a silent failure leaves the wallet
@@ -444,10 +398,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   /**
-   * Generate an RGB receive invoice. Defaults to a blinded receive (the
-   * recipient UTXO is hidden); `witness: true` uses a witness receive (the
-   * sender creates the UTXO). rgb-lib's `Assignment` enum is `{ Fungible: <num> }`
-   * for a specific amount or the unit string `"Any"` — NOT null, and NOT bigint.
+   * Generate an RGB receive invoice — blinded by default; `witness: true` makes the
+   * sender create the UTXO. rgb-lib's `Assignment` is `{ Fungible: <num> }` or the
+   * string `"Any"` — not null, not bigint.
    */
   private async receiveRgb(opts: {
     assetId?: string | null
@@ -577,11 +530,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const recipientMap = {
       [token]: [recipient],
     }
-    // rgb-lib's `send` only spends *settled* allocations it knows about locally.
-    // Without a fresh sync+refresh right before sendBegin, a received transfer
-    // that hasn't been promoted to Settled in the local DB (e.g. after a SW
-    // restart or IndexedDB restore) is invisible to the spend, and sendBegin
-    // fails with "Insufficient total assignments" despite a non-zero UI balance.
+    // rgb-lib's `send` only spends *settled* allocations it knows locally, so
+    // without a fresh sync+refresh sendBegin fails with "Insufficient total
+    // assignments" despite a non-zero UI balance.
     await this.refreshBalances()
     const feeRate = BigInt(Math.round(params.feeRate ?? this.defaultFeeRate()))
     const unsigned: string = await this.account.sendBegin(
@@ -625,10 +576,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   // --- UTXOs / fees / metadata / transfer maintenance ---------------------
   /**
-   * List the wallet's unspent outputs and their RGB allocations
-   * (IProtocolAdapter hook). Normalizes rgb-lib's camel/snake casing and the
-   * `Outpoint` (object `{txid,vout}` or `"txid:vout"` string) into the flat shape
-   * the host consumes.
+   * List unspent outputs and their RGB allocations, normalizing rgb-lib's
+   * camel/snake casing and `Outpoint` (object or `"txid:vout"`) into a flat shape.
    */
   async listRgbUnspents(): Promise<{
     unspents: Array<{
@@ -698,9 +647,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   /**
-   * Status of a received invoice: matches the pending transfer by recipient id /
-   * invoice string and returns its rgb-lib status (WaitingCounterparty,
-   * WaitingConfirmations, Settled, Failed, …).
+   * Status of a received invoice, matched by recipient id / invoice string.
    */
   async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
     this.assertConnected()
@@ -716,8 +663,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   /**
    * Fail expired/stuck pending transfers (default: all). Stuck WaitingCounterparty
-   * transfers hold allocations and can block a later spend with "insufficient
-   * assignments"; failing then deleting them frees those allocations.
+   * transfers hold allocations and can block a later spend.
    */
   async failRgbTransfers(
     params: { batchTransferIdx?: number | null; noAssetOnly?: boolean } = {},
@@ -747,10 +693,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   /**
-   * Durably commit wallet state to IndexedDB. Best-effort and version-guarded:
-   * `flush()` was added after `@utexo/rgb-lib-wasm@1.0.0-beta.2`, so on older
-   * builds this is a no-op (the wasm persists opportunistically). A failed flush
-   * leaves in-memory state intact and is safe to retry, so we log and continue.
+   * Durably commit state to IndexedDB. Best-effort and version-guarded: `flush()`
+   * postdates beta.2, and a failed flush leaves memory state intact.
    */
   private async flushState(): Promise<void> {
     const fn = (this.account as { flush?: unknown } | null)?.flush
@@ -762,15 +706,10 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     }
   }
 
-  // ==========================================================================
-  // Backup / VSS
-  //
-  // RGB state (allocations/consignments) can't be rebuilt from the seed, so it
-  // must be backed up after every settled transfer. rgb-lib encrypts the blob
-  // client-side before it ever leaves the wallet, so the VSS server only stores
-  // ciphertext. All calls route through the serialized account queue, so a
-  // backup can't interleave with a concurrent wallet mutation.
-  // ==========================================================================
+  // --- Backup / VSS ---------------------------------------------------------
+  // RGB state can't be rebuilt from the seed, so it is backed up after every
+  // settled transfer. rgb-lib encrypts client-side, so VSS only stores ciphertext.
+  // Calls route through the account queue, so a backup can't interleave.
 
   /** Encrypted wallet backup bytes (rgb-lib's own format). */
   async backup(password: string): Promise<Uint8Array> {
@@ -928,8 +867,8 @@ function normalizeRgbLibTransactionAmounts(t: any): {
 }
 
 /**
- * Normalize an rgb-lib-wasm asset record into the shape `RgbCore.rgbNiaAsset`
- * expects (it may use camelCase `assetId` or snake_case `asset_id`).
+ * Normalize an rgb-lib-wasm asset record for `RgbCore.rgbNiaAsset` (it may use
+ * camelCase `assetId` or snake_case `asset_id`).
  */
 function normalizeAsset(a: any): {
   asset_id: string

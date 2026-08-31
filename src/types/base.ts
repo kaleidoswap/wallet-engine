@@ -276,10 +276,9 @@ export interface TransactionFilter {
 }
 
 /**
- * UNITS: `fromAmount`/`toAmount` are RAW base units (satoshis for BTC, the
- * asset's smallest unit otherwise) — the same convention as `Quote`. Both
- * swap paths reject fractional values, so display-unit callers fail loudly
- * instead of creating orders scaled by 10^precision.
+ * UNITS: `fromAmount`/`toAmount` are RAW base units, as with `Quote`. Both swap
+ * paths reject fractional values, so display-unit callers fail loudly instead of
+ * creating orders scaled by 10^precision.
  */
 export interface QuoteRequest {
   fromAsset: string
@@ -314,9 +313,9 @@ export interface SwapResult {
   swapId: string
   paymentHash?: string
   /**
-   * Per-swap token required to poll swap status at the maker. Issued once at
-   * execution — hosts must persist it alongside the swapId (an in-memory
-   * fallback exists but does not survive process/service-worker restarts).
+   * Per-swap token for polling status at the maker, issued once at execution. Hosts
+   * must persist it alongside the swapId — the in-memory fallback does not survive
+   * restarts.
    */
   accessToken?: string
   status: TransactionStatus

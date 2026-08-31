@@ -3,10 +3,9 @@ import { resolveArkadePrivateKeyHex } from '../src/lib/arkade-client-manager'
 import { resolveSparkMnemonicOrSeed } from '../src/lib/spark-client-manager'
 
 /**
- * Fail-loud secret resolution (M2): a corrupted secret must throw, never
- * silently derive a valid-but-different (empty) wallet. `mnemonicToSeedSync`
- * PBKDF2s ANY string, so without explicit validation a typo'd phrase or a
- * bad-checksum nsec resolves to a wallet with no funds — "my funds are gone".
+ * Fail-loud secret resolution (M2): a corrupted secret must throw, never silently
+ * derive a valid-but-different (empty) wallet. `mnemonicToSeedSync` PBKDF2s ANY
+ * string, so without validation a typo'd phrase resolves to a wallet with no funds.
  */
 
 const VALID_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'

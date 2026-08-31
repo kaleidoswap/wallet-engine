@@ -1,6 +1,5 @@
 /**
- * Protocol Manager
- * Central manager for all protocol operations
+ * Protocol Manager — central manager for all protocol operations.
  * Ported from rate-extension/src/protocols/manager/ProtocolManager.ts
  */
 
@@ -29,6 +28,7 @@ import {
   ProtocolConfig,
   ProtocolAdapterRegistry,
   asSimplicityOperations,
+  type ISimplicityOperations,
 } from '../adapters/IProtocolAdapter'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
@@ -54,24 +54,21 @@ export interface ProtocolManagerConfig {
   /** Logger override; defaults to the injected platform logger (or console). */
   logger?: Logger
   /**
-   * Generic message-verification fallback used by `verifyMessage` when the
-   * active adapter does not implement `verifyMessage` itself. Hosts inject a
-   * recoverable-ECDSA verifier (returns the signer's hex pubkey). When absent,
-   * `verifyMessage` throws NOT_SUPPORTED for adapters without native support.
+   * Fallback used by `verifyMessage` when the adapter has no native support.
+   * Hosts inject a recoverable-ECDSA verifier; absent one, `verifyMessage`
+   * throws NOT_SUPPORTED.
    */
   verifyMessageFallback?: (message: string, signature: string) => Promise<string>
   /**
-   * Optional signing/spend policy. When set, fund-moving + signing operations
-   * (sendPayment/payKeysend/executeSwap/signMessage/signPsbt/signLiquidPset) are gated through
-   * `evaluatePolicy` and throw `PolicyError` on denial. Omit for no enforcement
-   * (default, fully backward-compatible). The active grant is selected with
-   * `setActiveGrant()`.
+   * Optional signing/spend policy. When set, fund-moving and signing operations
+   * are gated through `evaluatePolicy` and throw `PolicyError` on denial. Omit
+   * for no enforcement. The active grant is selected with `setActiveGrant()`.
    */
   policy?: SigningPolicy
   /**
-   * Permit callers to obtain raw adapters while a policy is configured.
-   * Raw adapters bypass ProtocolManager policy checks, so this defaults to
-   * false whenever `policy` is present. Trusted hosts may opt in explicitly.
+   * Permit callers to obtain raw adapters while a policy is configured. Raw
+   * adapters bypass every policy check, so this defaults to false whenever
+   * `policy` is present.
    */
   allowUnsafeAdapterAccess?: boolean
 }
@@ -98,20 +95,26 @@ export class ProtocolManager {
   }
 
   /**
-   * Set (or clear) the capability grant applied to subsequent gated operations
-   * — e.g. the app/dapp/deep-link currently driving the wallet. No-op unless a
-   * policy is configured.
+   * Set (or clear) the capability grant applied to subsequent gated operations.
+   * No-op unless a policy is configured.
    */
   setActiveGrant(grantId: string | null): void {
     this.activeGrantId = grantId ?? undefined
   }
 
-  /** Gate a fund-moving/signing op through the policy. No-op when no policy is set. */
-  private enforce(operation: PolicyOperation, opts: { amountSat?: number; destination?: string } = {}): void {
+  /**
+   * Gate a fund-moving/signing op through the policy; no-op without one.
+   * `opts.protocol` overrides the protocol evaluated against, for ops routed to
+   * a fixed adapter (Liquid PSET ops always act on LIQUID).
+   */
+  private enforce(
+    operation: PolicyOperation,
+    opts: { amountSat?: number; destination?: string; protocol?: ProtocolType } = {},
+  ): void {
     enforcePolicy(
       {
         operation,
-        protocol: this.activeProtocol ?? undefined,
+        protocol: opts.protocol ?? this.activeProtocol ?? undefined,
         grantId: this.activeGrantId,
         amountSat: opts.amountSat,
         destination: opts.destination,
@@ -142,8 +145,7 @@ export class ProtocolManager {
   // ========================================================================
 
   /**
-   * Static capability manifest for a registered protocol (empty if not
-   * registered). Capabilities are static, so this works while unconfigured.
+   * Static capability manifest for a registered protocol (empty if unregistered).
    */
   getCapabilities(protocol: ProtocolType): readonly ProtocolCapability[] {
     return this.registry.get(protocol)?.capabilities ?? []
@@ -199,8 +201,8 @@ export class ProtocolManager {
   }
 
   /**
-   * Raw adapter access bypasses every manager policy gate. It is disabled by
-   * default when a policy is configured; trusted hosts must opt in explicitly.
+   * Raw adapter access bypasses every manager policy gate, so it is disabled by
+   * default when a policy is configured.
    */
   public getActiveAdapter(): IProtocolAdapter {
     this.assertUnsafeAdapterAccessAllowed()
@@ -413,9 +415,8 @@ export class ProtocolManager {
   }
 
   /**
-   * Invalidate every connected adapter's balance cache so the next read is
-   * fresh. Tolerates per-adapter failures — one slow protocol can't block the
-   * others.
+   * Invalidate every connected adapter's balance cache. Tolerates per-adapter
+   * failures so one slow protocol can't block the others.
    */
   async refreshBalances(): Promise<void> {
     const adapters = this.registry.getAll().filter((a) => a.isConnected())
@@ -451,19 +452,18 @@ export class ProtocolManager {
   }
 
   /**
-   * Sat amount a send will actually move, for policy evaluation.
+   * Sat amount a send will actually move, for policy evaluation (finding F-F1).
    *
    * The INVOICE wins whenever it encodes an amount. The adapters forward the
-   * caller's `amount` only for amountless invoices — SparkAdapter.ts:691 and
-   * RlnWdkAdapter.ts:331 both gate on `decodeBolt11(...).amountMsat == null`, a
-   * deliberate change from commit 32c351c so stale UI state or WebLN args cannot
-   * silently re-amount a payment. Preferring `request.amount` here therefore
-   * evaluated a number the adapters discard: a caller could pass a 1,000,000-sat
-   * invoice with `amount: 500` and clear a 1,000-sat cap while the wallet paid
-   * the full 1,000,000.
+   * caller's `amount` only for amountless invoices — both send paths gate on
+   * `decodeBolt11(...).amountMsat == null`, so stale UI state or WebLN args cannot
+   * silently re-amount a payment. Preferring `request.amount` here evaluated a
+   * number the adapters discard: a caller could pass a 1,000,000-sat invoice with
+   * `amount: 500` and clear a 1,000-sat cap while the wallet paid the full
+   * 1,000,000.
    *
-   * Undefined only for a truly amountless invoice with no explicit amount —
-   * which the policy engine treats as unknown and denies whenever a cap is set.
+   * Undefined only for a truly amountless invoice with no explicit amount — which
+   * the policy engine treats as unknown and denies whenever a cap is set.
    */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
     const invoiceAmountSat = decodeBolt11(request.invoice).amountSat
@@ -490,9 +490,8 @@ export class ProtocolManager {
   }
 
   /**
-   * Sign a message with the active adapter's wallet identity key (LND-style
-   * zbase32 recoverable ECDSA). Throws if the adapter doesn't implement it —
-   * callers fall back to their own mnemonic-derived signer.
+   * Sign a message with the active adapter's identity key (LND-style zbase32).
+   * Throws if unimplemented — callers fall back to their own signer.
    */
   async signMessage(message: string): Promise<string> {
     this.enforce('signMessage')
@@ -522,9 +521,8 @@ export class ProtocolManager {
   }
 
   /**
-   * Verify an LND-style zbase32 signature, returning the signer's hex pubkey.
-   * Routes to the active adapter, else the injected generic fallback, else
-   * throws NOT_SUPPORTED.
+   * Verify an LND-style zbase32 signature. Active adapter, else the injected
+   * fallback, else NOT_SUPPORTED.
    */
   async verifyMessage(message: string, signature: string): Promise<string> {
     const adapter = this.getActiveAdapterUnchecked()
@@ -541,50 +539,76 @@ export class ProtocolManager {
     )
   }
 
-  private simplicityOperations() {
-    const adapter = this.getActiveAdapterUnchecked()
+  /**
+   * Resolve the Liquid PSET group from the *registered LIQUID adapter*, never
+   * from whichever protocol is merely active: a non-Liquid adapter that happens
+   * to implement these must not receive a Liquid PSET. Fails closed.
+   */
+  private liquidSimplicityOperations(): ISimplicityOperations {
+    const adapter = this.registry.get('LIQUID')
+    if (!adapter) {
+      throw new ProtocolError(
+        'Liquid Simplicity/PSET operations require a registered LIQUID adapter',
+        'LIQUID',
+        'NOT_SUPPORTED',
+      )
+    }
     const operations = asSimplicityOperations(adapter)
     if (!operations) {
       throw new ProtocolError(
-        'Liquid Simplicity/PSET operations are not supported by the active protocol',
-        adapter.protocolName,
+        'The registered LIQUID adapter does not implement the Simplicity/PSET operation group',
+        'LIQUID',
         'NOT_SUPPORTED',
       )
     }
     return operations
   }
 
+  /**
+   * Finalize/broadcast of a Liquid PSET stays disabled until an exact-byte
+   * `LiquidSpendAuthorization` exists: a PSET can carry multiple assets and
+   * blinded values, so `amountSat` cannot authorize it safely. Fail closed.
+   */
+  private liquidSpendUnsupported(operation: string): never {
+    throw new ProtocolError(
+      `${operation} is disabled until an exact-byte Liquid spend authorization contract exists`,
+      'LIQUID',
+      'NOT_SUPPORTED',
+    )
+  }
+
   async getSimplicityCapabilities(): Promise<SimplicityCapabilities> {
-    return this.simplicityOperations().getSimplicityCapabilities()
+    return this.liquidSimplicityOperations().getSimplicityCapabilities()
   }
 
   async inspectLiquidPset(psetBase64: string): Promise<LiquidPsetReview> {
-    return this.simplicityOperations().inspectLiquidPset(psetBase64)
+    return this.liquidSimplicityOperations().inspectLiquidPset(psetBase64)
   }
 
   async blindLiquidPset(psetBase64: string): Promise<string> {
-    return this.simplicityOperations().blindLiquidPset(psetBase64)
+    this.enforce('blindLiquidPset', { protocol: 'LIQUID' })
+    return this.liquidSimplicityOperations().blindLiquidPset(psetBase64)
   }
 
   async signLiquidPset(request: LiquidPsetSignRequest): Promise<LiquidPsetSignResult> {
-    this.enforce('signLiquidPset')
-    return this.simplicityOperations().signLiquidPset(request)
+    this.enforce('signLiquidPset', { protocol: 'LIQUID' })
+    return this.liquidSimplicityOperations().signLiquidPset(request)
   }
 
-  async finalizeLiquidPset(psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
-    return this.simplicityOperations().finalizeLiquidPset(psetBase64)
+  async finalizeLiquidPset(_psetBase64: string): Promise<{ pset: string; transactionHex: string; txid: string }> {
+    this.liquidSpendUnsupported('finalizeLiquidPset')
   }
 
-  async broadcastLiquidPset(psetBase64: string): Promise<{ txid: string }> {
-    return this.simplicityOperations().broadcastLiquidPset(psetBase64)
+  async broadcastLiquidPset(_psetBase64: string): Promise<{ txid: string }> {
+    this.liquidSpendUnsupported('broadcastLiquidPset')
   }
 
   async deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }> {
-    return this.simplicityOperations().deriveSimplicityPublicKey(derivationPath)
+    return this.liquidSimplicityOperations().deriveSimplicityPublicKey(derivationPath)
   }
 
   async compileSimplicityProgram(request: SimplicityCompileRequest): Promise<SimplicityCompileResult> {
-    return this.simplicityOperations().compileSimplicityProgram(request)
+    return this.liquidSimplicityOperations().compileSimplicityProgram(request)
   }
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
@@ -643,9 +667,8 @@ export class ProtocolManager {
   // ========================================================================
 
   /**
-   * Assets across all connected protocols. Runs per-adapter calls in parallel
-   * with an 8s timeout each — a single slow/degraded backend can't freeze the
-   * whole list for every consumer of asset data.
+   * Assets across all connected protocols, in parallel with an 8s per-adapter
+   * timeout so one degraded backend can't freeze the list.
    */
   async listAllAssets(): Promise<UnifiedAsset[]> {
     const adapters = this.registry.getAll().filter((a) => a.isConnected())
@@ -662,8 +685,8 @@ export class ProtocolManager {
   }
 
   /**
-   * Transactions across all connected protocols. Parallel + per-protocol
-   * timeout, for the same reason as `listAllAssets`.
+   * Transactions across all connected protocols. Parallel + per-protocol timeout,
+   * as `listAllAssets`.
    */
   async listAllTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     const adapters = this.registry.getAll().filter((a) => a.isConnected())
@@ -714,12 +737,10 @@ export class ProtocolManager {
   }
 
   /**
-   * Asset counts across all connected protocols, in total and per protocol.
+   * Asset counts across all connected protocols, total and per protocol.
    *
-   * Fiat/BTC-denominated VALUE is intentionally NOT reported here: the engine is
-   * dependency-free and carries no price oracle, so a `value` field could only
-   * ever be a hardcoded 0 — worse than absent, because callers would trust it.
-   * The host computes value from its own rate source over these counts/assets.
+   * Fiat/BTC value is deliberately absent: the engine carries no price oracle, so
+   * a `value` field could only be a hardcoded 0 that callers would trust.
    */
   async getPortfolioSummary(): Promise<{
     totalAssets: number

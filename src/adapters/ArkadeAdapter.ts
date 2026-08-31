@@ -2,15 +2,8 @@
  * Arkade Protocol Adapter
  * Implements IProtocolAdapter using @arkade-os/sdk v0.4.x.
  *
- * SDK API facts for v0.4.x:
- *  - `wallet.getBalance()` includes `assets: { assetId, amount }[]`
- *  - `wallet.assetManager.getAssetDetails(assetId)` resolves supply + metadata
- *  - `wallet.send({ address, assets: [...] })` sends Arkade-native assets
- *  - `wallet.sendBitcoin({ address, amount })` still sends BTC
- *  - `wallet.getTransactionHistory()` → ArkTransaction[]
- *    where ArkTransaction = { key, type: TxType, amount: number, settled: boolean, createdAt: number }
- *  - `TxType.TxSent = "SENT"`, `TxType.TxReceived = "RECEIVED"`
- *  - `WalletBalance.boarding.total` (number), `.settled`, `.preconfirmed`, `.available`, `.recoverable`, `.total`
+ * Amounts are sats; `wallet.getBalance()` carries `assets: { assetId, amount }[]`
+ * and asset metadata resolves via `wallet.assetManager.getAssetDetails(assetId)`.
  */
 
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
@@ -24,6 +17,7 @@ import {
   invalidateArkadeSnapshotCache,
 } from "../lib/arkade-snapshot-cache";
 import { arkadeClientManager } from "../lib/arkade-client-manager";
+import { arkadeIntentsClientManager } from "../lib/arkade-intents-client-manager";
 import { arkadeSwapsClientManager } from "../lib/arkade-swaps-client-manager";
 import {
   Ramps,
@@ -136,8 +130,10 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
-    // Dispose Boltz swaps client first (stops SwapManager monitoring) so it
-    // doesn't try to use the wallet after we tear it down.
+    // Dispose swap clients first (stops SwapManager monitoring, closes the Intents
+    // transport) so neither uses the wallet after teardown. Defensive: Intents is
+    // host-initialized, so this no-ops when the host never wired it.
+    await arkadeIntentsClientManager.dispose();
     await arkadeSwapsClientManager.dispose();
     await arkadeClientManager.disconnect();
     this.config = null;
@@ -391,10 +387,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Generate a Boltz reverse-swap Lightning invoice that, when paid, lands
-   * the funds in this Arkade wallet as a VTXO. Requires amount > 0 — Boltz
-   * can't issue an amountless invoice. The embedded `SwapManager` claims
-   * the VHTLC automatically once the LN payment settles.
+   * Boltz reverse-swap Lightning invoice that lands the funds here as a VTXO.
+   * Requires amount > 0 — Boltz can't issue an amountless invoice. The embedded
+   * `SwapManager` claims the VHTLC once the LN payment settles.
    */
   async createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice> {
     if (!this.isConnected()) {
@@ -451,11 +446,10 @@ export class ArkadeAdapter implements IProtocolAdapter {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
 
-    // Lightning invoice → Boltz submarine swap (Arkade → Lightning).
-    // The swap library extracts the amount from the invoice itself, so
-    // amountless invoices cannot be paid this way (Boltz rejects them
-    // with "0 is less than minimal of 333"). Reject early with a clear
-    // error rather than letting Boltz's cryptic message bubble up.
+    // Lightning invoice → Boltz submarine swap. The swap library takes the amount
+    // from the invoice, so amountless invoices cannot be paid this way (Boltz
+    // rejects with "0 is less than minimal of 333"). Reject early with a clear
+    // error rather than surfacing that.
     if (isLightningInvoice(request.invoice)) {
       if (!arkadeSwapsClientManager.isInitialized()) {
         throw new ProtocolError(
@@ -553,9 +547,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
 
   /**
    * Resolve a payment's terminal state from the SDK's transaction history.
-   * `paymentHash` is the txid returned by `sendBitcoin` / `sendLightningPayment`
-   * (Boltz returns a preimage as a fallback if there's no on-chain txid yet —
-   * in that case we don't have a history row and the payment stays pending).
+   * `paymentHash` is the txid from `sendBitcoin`/`sendLightningPayment`; Boltz may
+   * return a preimage instead, in which case there is no history row yet and the
+   * payment stays pending.
    */
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     // A DISCONNECTED adapter is not reporting a pending payment — it is reporting
@@ -692,9 +686,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Get all VTXOs, sorted by batchExpiry ascending (expiry-first).
-   * This ensures UI consumers see soon-to-expire VTXOs first, and any
-   * manual coin selection naturally picks the shortest-lived coins.
+   * All VTXOs, sorted by batchExpiry ascending, so consumers see soon-to-expire
+   * VTXOs first and manual coin selection picks the shortest-lived coins.
    */
   async getVtxos(): Promise<Record<string, unknown>[]> {
     if (!this.isConnected()) {
@@ -745,8 +738,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
 
   /**
    * Onboard — settle boarding UTXOs into VTXOs via a Commitment Transaction.
-   * Requires at least one confirmed boarding UTXO.
-   * Returns the commitment txid.
+   * Requires a confirmed boarding UTXO; returns the commitment txid.
    */
   async onboard(): Promise<{ txid: string }> {
     if (!this.isConnected()) {
@@ -766,9 +758,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Offboard — collaborative exit: convert VTXOs back to an on-chain Bitcoin UTXO.
+   * Offboard — collaborative exit: VTXOs back to an on-chain UTXO.
    * @param address  Bitcoin on-chain destination (bc1/tb1)
-   * @param amount   Optional sats to offboard; undefined = exit all
+   * @param amount   Optional sats; undefined = exit all
    */
   async offboard(address: string, amount?: number): Promise<{ txid: string }> {
     if (!this.isConnected()) {
@@ -923,11 +915,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   /**
-   * Pre-select spendable BTC VTXOs for a sendBitcoin call using the
-   * expiry-first policy. Returns `undefined` (not an empty array) when no
-   * override should be applied — that lets the SDK fall back to its own
-   * selection when the fetch fails, the spendable set can't cover the target,
-   * or the target is non-positive. Mixed-asset VTXOs are filtered out.
+   * Pre-select spendable BTC VTXOs for sendBitcoin using the expiry-first policy.
+   * Returns `undefined` (not `[]`) when no override applies, letting the SDK fall
+   * back to its own selection. Mixed-asset VTXOs are filtered out.
    */
   private async selectSpendableBtcVtxos(
     wallet: Wallet,

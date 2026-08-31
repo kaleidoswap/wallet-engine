@@ -2,10 +2,10 @@ import { describe, it, expect } from 'vitest'
 import { resolveWalletSeed } from '../src/lib/wallet-seed'
 
 /**
- * resolveWalletSeed is the single choke point that turns a stored wallet secret
- * into HD seed bytes. Because `mnemonicToSeedSync` PBKDF2s *any* string without
- * validation, a corrupted secret must fail LOUD here rather than silently derive
- * a valid-but-different (empty) wallet.
+ * resolveWalletSeed is the single choke point turning a stored wallet secret into HD
+ * seed bytes. Because `mnemonicToSeedSync` PBKDF2s *any* string without validation,
+ * a corrupted secret must fail LOUD rather than silently derive a
+ * valid-but-different (empty) wallet.
  */
 describe('resolveWalletSeed', () => {
   // BIP-39 test vector (valid English mnemonic).
