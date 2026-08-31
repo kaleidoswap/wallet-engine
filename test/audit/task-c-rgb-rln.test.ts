@@ -59,21 +59,28 @@ describe('F1: RgbAdapter.getAsset ticker shadowing', () => {
     balance: { settled: 999_000, future: 999_000, spendable: 999_000 },
   }
 
-  it('an asset whose ticker equals a real asset id shadows the real asset in an exact-id lookup', async () => {
+  it('[FIXED] an asset whose ticker equals a real asset id must not shadow the exact-id lookup', async () => {
     state.client = { rln: { listAssets: async () => ({ nia: [scam, real] }) } }
     const adapter = connectedRgbAdapter()
     const found = await adapter.getAsset('rgb:real-usdt')
-    // WRONG: exact-id lookup returned the scam asset.
-    expect(found.id).toBe('rgb:scam-asset')
-    expect(found.balance.total).toBe(999_000)
+    // The contract id is the identity: the exact-id match wins over any
+    // issuer-chosen ticker, whatever order the node lists them in.
+    expect(found.id).toBe('rgb:real-usdt')
+    expect(found.balance.total).not.toBe(999_000)
   })
 
-  it('duplicate tickers make getAsset("USDT") silently return the first-listed asset', async () => {
+  it('[FIXED] duplicate tickers are ambiguous, not silently resolved to the first-listed asset', async () => {
     const scamUsdt = { ...scam, ticker: 'USDT' }
     state.client = { rln: { listAssets: async () => ({ nia: [scamUsdt, real] }) } }
     const adapter = connectedRgbAdapter()
+    await expect(adapter.getAsset('USDT')).rejects.toThrow(/Ambiguous asset ticker/)
+  })
+
+  it('[FIXED] an unambiguous ticker still resolves, for hosts that look up by symbol', async () => {
+    state.client = { rln: { listAssets: async () => ({ nia: [real] }) } }
+    const adapter = connectedRgbAdapter()
     const found = await adapter.getAsset('USDT')
-    expect(found.id).toBe('rgb:scam-asset') // not the real USDT
+    expect(found.id).toBe('rgb:real-usdt')
   })
 })
 

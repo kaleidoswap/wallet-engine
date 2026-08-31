@@ -253,12 +253,30 @@ export class RgbAdapter implements IProtocolAdapter {
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
     const assets = await this.listAssets();
-    const asset = assets.find((a) => a.id === assetId || a.ticker === assetId);
-    if (!asset) {
-      throw new ProtocolError(`Asset not found: ${assetId}`, "RGB_LN", "ASSET_NOT_FOUND");
+    // Asset identity in RGB is the contract id ONLY. `ticker` is free text
+    // chosen by the issuer, so the old `a.id === assetId || a.ticker === assetId`
+    // let an impostor asset shadow a genuine one: an issuer who sets
+    // `ticker: 'rgb:real-usdt'` and gets listed first captured even an EXACT
+    // CONTRACT-ID lookup, returning their worthless asset (and its balance) to a
+    // caller that did the right thing. Match the id first — the three sibling
+    // RGB adapters (RlnWdkAdapter, RgbLibWdkAdapter, RgbLibWasmAdapter) are all
+    // id-only, which is the intended semantics.
+    const byId = assets.find((a) => a.id === assetId);
+    if (byId) return byId;
+    // Ticker lookup stays available for hosts that resolve a user-visible
+    // symbol, but only when it is UNAMBIGUOUS — two assets sharing a ticker is
+    // exactly the impostor case, and picking the first-listed one silently
+    // prefers whichever the attacker got in front.
+    const byTicker = assets.filter((a) => a.ticker === assetId);
+    if (byTicker.length === 1) return byTicker[0];
+    if (byTicker.length > 1) {
+      throw new ProtocolError(
+        `Ambiguous asset ticker '${assetId}' — ${byTicker.length} assets share it; look up by contract id`,
+        "RGB_LN",
+        "AMBIGUOUS_ASSET",
+      );
     }
-
-    return asset;
+    throw new ProtocolError(`Asset not found: ${assetId}`, "RGB_LN", "ASSET_NOT_FOUND");
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset["balance"]> {

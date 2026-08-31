@@ -28,7 +28,7 @@ function fakeClientWithAssets(nia: any[]) {
   }
 }
 
-describe.skip('AUDIT C-F3: getAsset ticker collision', () => {
+describe('AUDIT C-F3: getAsset ticker collision', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('a lookalike issuer ticker must not resolve via getAsset', async () => {
