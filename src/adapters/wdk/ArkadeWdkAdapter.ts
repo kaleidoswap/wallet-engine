@@ -342,6 +342,16 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // Off-chain Ark transfer to an Ark address (settles immediately, zero-conf UX).
     const r: any = await this.account.sendTransaction({ to: dest, value: request.amount })
     const hash = r?.hash ?? ''
+    // Same guard as `sendBtcOnchain` below, which was applying it to the SAME SDK
+    // call ten lines away. Without it, an SDK that resolves with a sparse object
+    // instead of throwing returned `{ status: 'confirmed', txid: '' }`: the caller
+    // believes funds were sent and confirmed, and holds no identifier to track or
+    // reconcile the payment. docs/wdk-parity.md:66-67 states an Ark send returns
+    // "a tx id/hash"; :68-70 states a missing one is a send error, never silent
+    // success. This is the shape accepted for Spark in 612b856.
+    if (!hash) {
+      throw new ProtocolError('Arkade send did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
+    }
     return {
       paymentHash: hash,
       txid: hash,

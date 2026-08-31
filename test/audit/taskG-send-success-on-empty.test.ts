@@ -55,7 +55,7 @@ describe('G-F1 [FIXED]: SparkWdkAdapter.sendPayment plain Spark transfer with a 
   })
 })
 
-describe.skip('G: ArkadeWdkAdapter.sendPayment Ark transfer with a contentless SDK result', () => {
+describe('G: ArkadeWdkAdapter.sendPayment Ark transfer with a contentless SDK result', () => {
   it('must not report confirmed with an empty txid (sendBtcOnchain in the same file throws here)', async () => {
     const a = new ArkadeWdkAdapter()
     Object.assign(a as any, {
