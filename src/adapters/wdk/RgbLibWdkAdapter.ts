@@ -49,6 +49,7 @@ import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface RgbLibAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_L1'
@@ -209,11 +210,11 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
    * synchronous and returns the wallet's Bitcoin transactions; RGB asset detail
    * is per-asset via `listTransfers({ asset_id })`. Fields are read defensively.
    */
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const raw: any = await this.account.listTransactions()
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
-    return txs.map((t) => {
+    const mapped = txs.map((t) => {
       const received = Number(t.received ?? 0)
       const sent = Number(t.sent ?? 0)
       const confTime = t.confirmation_time ?? t.confirmationTime
@@ -228,6 +229,9 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         protocolData: t,
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {

@@ -62,6 +62,7 @@ import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './Rgb
 import type { RgbBalanceLike } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_L1'
@@ -370,11 +371,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   // --- Transactions -------------------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const raw: any = await this.account.listTransactions()
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
-    return txs.map((t) => {
+    const mapped = txs.map((t) => {
       const { received, sent, type } = normalizeRgbLibTransactionAmounts(t)
       const confTime = t.confirmationTime ?? t.confirmation_time
       const timestampSeconds = normalizeRgbLibTimestamp(confTime)
@@ -392,6 +393,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         },
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {

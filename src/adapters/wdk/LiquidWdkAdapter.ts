@@ -56,6 +56,7 @@ import type {
   SimplicityCompileRequest,
   SimplicityCompileResult,
 } from '../../types/simplicity'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface LiquidSyncWarning {
   code: 'LIQUID_WATERFALLS_FALLBACK'
@@ -316,7 +317,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Transactions -------------------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     // Resolve the policy (L-BTC) asset id outside the lock (cached after first).
     const policy = await this.getPolicyAsset()
@@ -328,7 +329,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       timestamp: number | null
       balance?: Array<{ asset_id: string; value: string }>
     }> = await this.withLock(() => this.account.listTransactions())
-    return txs.map((t) => {
+    const mapped = txs.map((t) => {
       const isSend = t.type === 'outgoing'
       const fee = Number(t.fee ?? 0)
       const { assetId, amount } = this.primaryMovement(t.balance ?? [], policy, fee, isSend)
@@ -345,6 +346,9 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         protocolData: { height: t.height, assetId, balance: t.balance },
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   /**

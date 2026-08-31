@@ -204,7 +204,7 @@ describe.skip('G-F7: capabilities flags must match what the adapter actually doe
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F8: listTransactions must honor the TransactionFilter contract', () => {
+describe('G-F8: listTransactions must honor the TransactionFilter contract', () => {
   it('RlnWdkAdapter applies limit', async () => {
     const txs = [1, 2, 3].map((i) => ({ txid: `t${i}`, transaction_type: 'User', received: 100 }))
     const adapter = connected(new RlnWdkAdapter(), { listTransactions: async () => ({ transactions: txs }) })
@@ -232,14 +232,26 @@ describe.skip('G-F8: listTransactions must honor the TransactionFilter contract'
     expect(r).toHaveLength(1) // ACTUAL (bug): 3 — _filter ignored (LiquidWdkAdapter.ts:302)
   })
 
-  it('ArkadeWdkAdapter returns newest-first like the Spark/RGB adapters', async () => {
+  // ORDERING: run 1 claimed the ordering divergence as part of G-F8 and this case
+  // demanded newest-first. Verified in run 2 as NOT contract-backed —
+  // `listTransactions` has no JSDoc, `TransactionFilter` has no field docs, and
+  // `UnifiedTransaction` carries no ordering note; four adapters pass SDK order
+  // through and imposing a sort reorders what every existing consumer sees (it
+  // broke two pre-existing test/liquid.test.ts cases that read txs[0]/txs[1]
+  // positionally). The divergence is real and is carried in REPORT-2 as a product
+  // decision; this case now pins the ACTUAL order so a future change to it is a
+  // deliberate one, rather than asserting an expectation nothing requires.
+  it('ArkadeWdkAdapter passes SDK order through (ordering is unspecified — see REPORT-2)', async () => {
     const history = [
       { key: { arkTxid: 'old' }, type: 'RECEIVED', amount: 1, settled: true, createdAt: 1000 },
       { key: { arkTxid: 'new' }, type: 'RECEIVED', amount: 1, settled: true, createdAt: 9000 },
     ]
     const adapter = connected(new ArkadeWdkAdapter(), { getTransactionHistory: async () => history })
     const r = await adapter.listTransactions()
-    expect(r[0].id).toBe('new') // ACTUAL (bug): SDK order, unsorted
+    expect(r.map((t) => t.id)).toEqual(['old', 'new'])
+    // …and the filter's slice is applied on top of that order.
+    const page2 = await adapter.listTransactions({ limit: 1, offset: 1 })
+    expect(page2.map((t) => t.id)).toEqual(['new'])
   })
 })
 

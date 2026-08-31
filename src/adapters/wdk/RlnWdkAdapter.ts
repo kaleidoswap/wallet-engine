@@ -49,6 +49,7 @@ import { KaleidoswapSwap, type SwapQuoteRequest } from '../../swap/KaleidoswapSw
 import { resolveWalletSeed } from '../../lib/wallet-seed'
 import { decodeBolt11 } from '../../lib/bolt11'
 import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -411,7 +412,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
 
   // --- Transactions / payments -------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const r: any = await this.account.listTransactions()
     const txs: any[] = r?.transactions ?? []
@@ -423,7 +424,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     // sent` always took `received`, which is 0 on a send. A full-wallet drain
     // displayed in history as "received 0". Matches the sibling adapters
     // (RgbLibWdkAdapter.ts:214, RgbLibWasmAdapter.ts:851-885).
-    return txs.map((t) => {
+    const mapped = txs.map((t) => {
       const received = Number(t.received ?? 0)
       const sent = Number(t.sent ?? 0)
       return {
@@ -437,6 +438,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
         protocolData: t,
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {

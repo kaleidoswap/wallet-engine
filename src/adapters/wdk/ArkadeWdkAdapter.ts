@@ -49,6 +49,7 @@ import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(value.trim())
 const isLightningInvoice = (value: string): boolean => {
@@ -405,10 +406,10 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Transactions -------------------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const history: any[] = await this.account.getTransactionHistory()
-    return (history ?? []).map((t) => {
+    const mapped: UnifiedTransaction[] = (history ?? []).map((t) => {
       // @arkade-os/sdk ArkTransaction shape:
       //   { key:{ arkTxid, commitmentTxid, boardingTxid }, type:'SENT'|'RECEIVED',
       //     amount(sats, net), settled(boolean), createdAt(ms since epoch) }.
@@ -429,6 +430,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         protocolData: t,
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
