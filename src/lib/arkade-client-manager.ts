@@ -426,8 +426,23 @@ class ArkadeClientManager {
     // Stop any existing subscription first
     this.stopIncomingFundsListener();
 
-    this.wallet
+    // Claim the slot SYNCHRONOUSLY. Setting it in the .then() below let two
+    // calls made before the subscribe resolved both pass the duplicate guard —
+    // two live subscriptions, with `_stopIncomingFunds` retaining only the last
+    // stop function, so the earlier one could never be stopped and repeated
+    // connect cycles grew them without bound.
+    this._listenerStarted = true;
+    // The session this listener belongs to. A disconnect()/reset() bumps it, so
+    // both the late-landing subscription and the callback itself can tell that
+    // the wallet they belong to is gone.
+    const generation = this._teardownGeneration;
+    const wallet = this.wallet;
+
+    wallet
       .notifyIncomingFunds((notification) => {
+        // Never deliver a notification for a wallet the host has torn down —
+        // that is a stale listener firing into the next wallet's session.
+        if (generation !== this._teardownGeneration) return;
         try {
           onIncoming(notification);
         } catch (err) {
@@ -435,12 +450,27 @@ class ArkadeClientManager {
         }
       })
       .then((stop) => {
+        if (generation !== this._teardownGeneration) {
+          // Teardown landed while the subscribe was pending. Installing now
+          // would leave a live listener on a torn-down wallet that no
+          // stopIncomingFundsListener() call can reach.
+          try {
+            stop();
+          } catch {
+            /* ignore */
+          }
+          log.info(
+            "[ArkadeClientManager] Incoming funds subscription superseded by teardown — stopped",
+          );
+          return;
+        }
         this._stopIncomingFunds = stop;
-        this._listenerStarted = true;
         log.info("[ArkadeClientManager] Incoming funds listener started");
       })
       .catch((err) => {
         log.error("[ArkadeClientManager] Failed to start incoming funds listener:", err);
+        // Release the slot so a retry (or the next wallet) can subscribe.
+        if (generation === this._teardownGeneration) this._listenerStarted = false;
       });
   }
 
