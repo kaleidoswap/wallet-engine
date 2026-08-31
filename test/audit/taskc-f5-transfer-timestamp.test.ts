@@ -19,7 +19,7 @@ import { kaleidoClientManager } from '../../src/lib/kaleido-client-manager'
  * RgbAdapter.listTransactions sorts and applies fromTimestamp/toTimestamp
  * filters in ms, so RGB on-chain transfer history is dropped/misordered.
  */
-describe.skip('AUDIT C-F5: transfer timestamp units', () => {
+describe('AUDIT C-F5: transfer timestamp units', () => {
   afterEach(() => vi.restoreAllMocks())
 
   it('created_at (seconds) must be converted to ms like the other converters', () => {

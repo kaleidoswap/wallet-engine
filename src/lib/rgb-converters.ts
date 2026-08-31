@@ -157,7 +157,14 @@ export function convertTransferToTransaction(
     id: (transfer.txid as string) || `tx_${Date.now()}`,
     type: mapTransferType(transfer.kind as string | undefined),
     status: mapTransferStatus(transfer.status as string | undefined),
-    timestamp: (transfer.created_at as number) || Date.now(),
+    // `Transfer.created_at` is unix SECONDS (kaleido-sdk node-types.d.ts:3765-3771,
+    // `@example 1691160765`). The engine convention is ms — both sibling
+    // converters in this file convert (`convertSwapToTransaction` :165-166,
+    // `convertPaymentToTransaction` :193-195). Passing seconds through put every
+    // on-chain RGB transfer at ~1970, so `RgbAdapter.listTransactions`'
+    // `fromTimestamp` filter dropped all of them and the merged history sorted
+    // them last, always.
+    timestamp: transfer.created_at ? (transfer.created_at as number) * 1000 : Date.now(),
     amount: (transfer.amount as number) || 0,
     amountDisplay: formatAmount((transfer.amount as number) || 0, 8),
     fee: transfer.fee as number | undefined,
