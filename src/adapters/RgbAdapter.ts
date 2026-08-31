@@ -363,10 +363,17 @@ export class RgbAdapter implements IProtocolAdapter {
         client.rln.listTransfers({ asset_id: filter.asset }) as Promise<{
           transfers?: Record<string, unknown>[];
         }>,
-        client.rln.listPayments().catch(() => ({ payments: [] })) as Promise<{
+        // No per-leg `.catch` default. Swallowing a failing rail returned a
+        // history silently MISSING every LN payment (or every swap) while
+        // presenting it as complete: a user reconciling an asset's balance
+        // against its activity sees sats they cannot account for, and nothing
+        // signals that a whole rail is absent. The transfers leg above already
+        // fails the call; the three now behave alike. (There is no `partial`
+        // flag on the result to degrade to — see REPORT-2.)
+        client.rln.listPayments() as Promise<{
           payments?: Record<string, unknown>[];
         }>,
-        client.rln.listSwaps().catch(() => ({ maker: [], taker: [] })) as Promise<{
+        client.rln.listSwaps() as Promise<{
           maker?: Record<string, unknown>[];
           taker?: Record<string, unknown>[];
         }>,

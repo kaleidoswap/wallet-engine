@@ -64,7 +64,7 @@ beforeEach(() => {
   }
 })
 
-describe.skip('G: RgbAdapter.listTransactions must not present partial history as complete', () => {
+describe('G: RgbAdapter.listTransactions must not present partial history as complete', () => {
   it('baseline: all three rails merged when healthy', async () => {
     const txs = await adapter().listTransactions({ asset: 'BTC' })
     expect(txs.length).toBe(2) // transfer + payment
