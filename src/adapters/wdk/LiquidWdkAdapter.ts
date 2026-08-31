@@ -210,7 +210,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // One lock acquisition for the whole read — the account calls inside must be
     // RAW (not the locked getBtcBalance/getPolicyAsset) to avoid self-deadlock.
     return this.withLock(async () => {
-      const policy = await this.getPolicyAsset()
+      const policy = await this.requirePolicyAsset()
       const out: UnifiedAsset[] = []
 
       // L-BTC (policy asset)
@@ -509,6 +509,36 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- helpers ------------------------------------------------------------
+  /**
+   * The network's policy asset (L-BTC), or a hard failure.
+   *
+   * `getPolicyAsset()` deliberately swallows a `getNetworkInfo()` failure into
+   * `''` and leaves it uncached so the next call retries. That is fine as a
+   * caching decision but NOT as an input to a balance or history view: with
+   * `policy === ''`, `listAssets()` emitted the synthetic L-BTC entry under
+   * `id: ''` AND the raw policy-asset entry from `account.listAssets()` (the
+   * dedupe `if (a.asset_id === policy) continue` can never match), so the same
+   * funds were listed twice. Fail loudly instead — a retryable error beats a
+   * balance that double-counts (audit finding G-F14).
+   *
+   * Used by `listAssets` only. `listTransactions` deliberately keeps the soft
+   * `getPolicyAsset()`: there, an empty policy costs a mislabelled headline asset
+   * and an unstripped fee on an L-BTC send — a display inaccuracy, not
+   * double-counted funds — and failing the whole history because network info is
+   * momentarily down is worse than showing it slightly wrong. Carried in REPORT-2.
+   */
+  private async requirePolicyAsset(): Promise<string> {
+    const policy = await this.getPolicyAsset()
+    if (!policy) {
+      throw new ProtocolError(
+        'Liquid network info unavailable — cannot identify the policy asset (L-BTC)',
+        'LIQUID',
+        'NETWORK_INFO_UNAVAILABLE',
+      )
+    }
+    return policy
+  }
+
   private async getPolicyAsset(): Promise<string> {
     if (this.policyAsset) return this.policyAsset
     let policy = ''

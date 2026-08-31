@@ -308,7 +308,7 @@ describe('G-F13: a second connect() must not leak the previous manager/account',
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F14: LiquidWdkAdapter must not double-list L-BTC when getNetworkInfo fails', () => {
+describe('G-F14: LiquidWdkAdapter must not double-list L-BTC when getNetworkInfo fails', () => {
   it('listAssets has no empty-id / duplicate L-BTC entries', async () => {
     const adapter = connected(new LiquidWdkAdapter(), {
       getBalance: async () => 1000n,
@@ -317,11 +317,33 @@ describe.skip('G-F14: LiquidWdkAdapter must not double-list L-BTC when getNetwor
       },
       listAssets: async () => [{ asset_id: 'policy-asset-id', balance: '500' }],
     })
-    const assets = await adapter.listAssets()
-    // ACTUAL (bug): [ {id: '' (L-BTC)}, {id: 'policy-asset-id'} ] — same funds
-    // twice, one under an empty id (LiquidWdkAdapter.ts:486-496 + :229).
-    for (const a of assets) expect(a.id).not.toBe('')
-    expect(assets).toHaveLength(1)
+    // Pre-fix ACTUAL: [ {id: '' (L-BTC)}, {id: 'policy-asset-id'} ] — the same
+    // funds listed twice, one under an empty id (LiquidWdkAdapter.ts + the dedupe
+    // `if (a.asset_id === policy) continue`, which can never match '').
+    //
+    // The invariant is "never present an empty-id or duplicated L-BTC entry".
+    // Two outcomes satisfy it and the contract picks neither (`UnifiedAsset.id`
+    // has no non-empty invariant): reject, or return a clean list. Note the
+    // "clean list" option is NOT unambiguously better — the raw policy-asset entry
+    // would then be emitted with `layer: 'LIQUID_ASSET'`, so the user's L-BTC would
+    // bucket as an issued asset rather than BTC (see `liteBucketOf`). The adapter
+    // now rejects: it cannot produce a correct asset list without knowing which
+    // asset is L-BTC, and `getPolicyAsset()` leaves the failure uncached so the
+    // next call retries.
+    let assets: Awaited<ReturnType<LiquidWdkAdapter['listAssets']>> | null = null
+    let rejected = false
+    try {
+      assets = await adapter.listAssets()
+    } catch {
+      rejected = true
+    }
+    if (!rejected) {
+      for (const a of assets!) expect(a.id).not.toBe('')
+      const ids = assets!.map((a) => a.id)
+      expect(new Set(ids).size, 'no duplicate asset ids').toBe(ids.length)
+    }
+    // Whichever way, the empty-id/duplicate pair must not be what a host sees.
+    expect(rejected || (assets !== null && assets.every((a) => a.id !== ''))).toBe(true)
   })
 })
 
