@@ -292,6 +292,25 @@ export class ProtocolManager {
     }
   }
 
+  /**
+   * Tear down every registered adapter. This is the LOCK PATH — the CHANGELOG
+   * names it as such, and a host calls it when the user locks the wallet.
+   *
+   * Every adapter is attempted, in parallel, under the same {@link
+   * DISCONNECT_TIMEOUT_MS} bound as `disconnect(protocol)`, so one hung SDK
+   * cannot stop the others being torn down. Routing is invalidated
+   * synchronously, before any third-party cleanup is awaited.
+   *
+   * REJECTS when any adapter failed or timed out, naming them, with the
+   * individual reasons on `details`. It previously resolved and only logged
+   * those failures, so a host awaiting it showed a locked wallet while a
+   * still-connected adapter went on signing — the exact state this method exists
+   * to prevent, reported as success. Resolution now means every adapter really
+   * is down; a rejection means the host must not present the wallet as locked.
+   *
+   * A rejection is not a reason to retry blindly: the successful adapters are
+   * already torn down, and `getAllConnectionInfo()` reports which are not.
+   */
   async disconnectAll(): Promise<void> {
     const adapters = this.registry.getAll()
     for (const adapter of adapters) this.bumpConnectionGeneration(adapter.protocolName)
@@ -300,14 +319,25 @@ export class ProtocolManager {
     const results = await Promise.allSettled(
       adapters.map((adapter) => this.disconnectAdapterBounded(adapter)),
     )
+    const failures: { protocol: ProtocolType; reason: unknown }[] = []
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
         this.log.error(
           `[ProtocolManager] Error disconnecting ${adapters[index].protocolName}:`,
           result.reason,
         )
+        failures.push({ protocol: adapters[index].protocolName, reason: result.reason })
       }
     })
+    if (failures.length > 0) {
+      throw new ProtocolError(
+        `Failed to disconnect ${failures.map((f) => f.protocol).join(', ')} — ` +
+          `the wallet is NOT fully locked`,
+        failures[0].protocol,
+        'DISCONNECT_INCOMPLETE',
+        failures,
+      )
+    }
   }
 
   private disconnectAdapterBounded(adapter: IProtocolAdapter): Promise<void> {
