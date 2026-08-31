@@ -520,7 +520,7 @@ export class SparkAdapter implements IProtocolAdapter {
       const [btcTxs, tokenTxs] = await Promise.all([btcTxsPromise, tokenTxsPromise]);
       const allTxs = [...btcTxs, ...tokenTxs].sort((a, b) => b.timestamp - a.timestamp);
 
-      return allTxs.filter((tx) => {
+      const matched = allTxs.filter((tx) => {
         if (!filter) return true;
         if (
           filter.asset &&
@@ -535,6 +535,24 @@ export class SparkAdapter implements IProtocolAdapter {
         if (filter.toTimestamp && tx.timestamp > filter.toTimestamp) return false;
         return true;
       });
+
+      // Honour `limit` on the MERGED result. `limit` is pushed into each leg's
+      // RPC, but two legs each returning up to `limit` rows merge to up to twice
+      // that — and the recorded-send / synthesized-offline-record paths are not
+      // paged at all. Measured before this cap: `listTransactions({ limit: 5 })`
+      // returned 16 rows. Capping here is what makes the documented page size
+      // true (audit finding G-F8, Spark half).
+      //
+      // ORDER IS NOT TOUCHED: the newest-first sort above already ran, and this
+      // takes a prefix of it.
+      //
+      // `offset` is deliberately NOT re-applied here. It is already pushed into
+      // the BTC leg's RPC, so slicing the merged array by it a second time would
+      // drop rows the caller never saw. Sound merge-level pagination would have
+      // to over-fetch `offset + limit` from every leg and page the union — a
+      // different paging model, and a larger change than making the count
+      // honest. Carried as an open item.
+      return matched.slice(0, Math.max(0, limit));
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ProtocolError(
