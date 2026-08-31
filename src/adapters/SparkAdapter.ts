@@ -1239,9 +1239,22 @@ export class SparkAdapter implements IProtocolAdapter {
       // INVOICE_CREATED, TRANSFER_CREATED, etc.
       return { status: "Pending" };
     } catch (error: unknown) {
+      // A lookup that FAILED is not a Pending payment. Mapping the gateway's error
+      // to `Pending` made a receive-flow poll wait forever on an invoice whose
+      // status could not be read, and the host could never distinguish "not paid
+      // yet" from "we could not check" — so it could neither retry nor warn.
+      // Both RGB siblings propagate here (`RgbAdapter`/`RlnWdkAdapter`
+      // getInvoiceStatus), and this adapter's `sendPayment` already throws.
+      // `Pending` stays for the genuinely-unknown-but-answered cases above
+      // (untracked invoice, no request row) (audit finding G-F3).
       const msg = error instanceof Error ? error.message : String(error);
       log.warn("[SparkAdapter] Invoice status check failed:", msg);
-      return { status: "Pending" };
+      throw new ProtocolError(
+        `Failed to check invoice status: ${msg}`,
+        "SPARK",
+        "INVOICE_STATUS_ERROR",
+        error instanceof Error ? error : undefined,
+      );
     }
   }
 

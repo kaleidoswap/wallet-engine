@@ -97,7 +97,7 @@ describe.skip('G-F2: getPaymentStatus must not report a lookup failure as pendin
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F3: SparkAdapter.getInvoiceStatus must not map RPC failure to Pending', () => {
+describe('G-F3: SparkAdapter.getInvoiceStatus must not map RPC failure to Pending', () => {
   it('a throwing gateway must surface as an error', async () => {
     vi.spyOn(sparkClientManager, 'isInitialized').mockReturnValue(true)
     vi.spyOn(sparkClientManager, 'getWallet').mockReturnValue({
