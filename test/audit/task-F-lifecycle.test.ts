@@ -39,22 +39,24 @@ function stubAdapter(protocolName: ProtocolType) {
   return { adapter: adapter as unknown as IProtocolAdapter, state }
 }
 
-describe('F6: ProtocolManager.connect re-connects a live adapter with no teardown', () => {
-  it('second connect runs against the still-connected adapter; disconnect is never called', async () => {
+describe('F6 [FIXED]: ProtocolManager.connect tears down the live adapter first', () => {
+  it('a wallet switch disposes the previous session before the new connect', async () => {
     const { adapter, state } = stubAdapter('SPARK')
     const manager = new ProtocolManager()
     manager.registerAdapter(adapter)
 
     await manager.connect('SPARK', { protocol: 'SPARK', mnemonic: 'wallet-A' } as any)
-    // Wallet switch WITHOUT disconnect — the manager neither rejects nor tears down.
+    // Wallet switch WITHOUT an explicit disconnect — the host's normal path.
     await manager.connect('SPARK', { protocol: 'SPARK', mnemonic: 'wallet-B' } as any)
 
     expect(state.connectCalls).toHaveLength(2)
-    // The second connect entered adapter.connect() while the adapter was STILL
-    // connected to wallet A…
-    expect(state.connectCalls[1].wasAlreadyConnected).toBe(true)
-    // …and no disconnect disposed wallet A's manager/account in between.
-    expect(state.disconnectCalls).toBe(0)
+    // Was: `expect(state.connectCalls[1].wasAlreadyConnected).toBe(true)` and
+    // `expect(state.disconnectCalls).toBe(0)`. The second connect used to enter
+    // adapter.connect() while the adapter was STILL connected to wallet A, with
+    // nothing disposing A's manager/account — the mechanism that made the A7
+    // cross-wallet leak deterministic.
+    expect(state.connectCalls[1].wasAlreadyConnected).toBe(false)
+    expect(state.disconnectCalls).toBe(1)
   })
 
   it('sanity: an explicit disconnect between connects IS observed', async () => {

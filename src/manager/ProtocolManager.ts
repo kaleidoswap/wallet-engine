@@ -264,6 +264,36 @@ export class ProtocolManager {
         throw new ProtocolError(`Connection invalidated: ${protocol}`, protocol, 'CONNECTION_INVALIDATED')
       }
 
+      // Tear the live session down before installing a new one. Without this the
+      // previous wallet's client was simply dropped undisposed — the mechanism
+      // that made the A7 cross-wallet leak deterministic (audit finding F-F6).
+      //
+      // Bounded, and its failure is logged rather than propagated: every
+      // adapter's `disconnect()` revokes local signing capability synchronously
+      // before awaiting any third-party teardown, so a rejection here means only
+      // that the OLD SDK's cleanup failed. Refusing the new connection over that
+      // would leave the host unable to switch wallets because the wallet it is
+      // leaving is wedged. Same policy as the adapter-side
+      // `BaseWdkAdapter.releasePreviousConnection()` (32eea17), which this makes
+      // redundant-but-harmless: that hook early-returns once the manager has run.
+      if (adapter.isConnected()) {
+        try {
+          await this.disconnectAdapterBounded(adapter)
+        } catch (error: unknown) {
+          this.log.warn(
+            `[ProtocolManager] Error tearing down the previous ${protocol} session:`,
+            error,
+          )
+        }
+        if (!this.isConnectionCurrent(protocol, generation)) {
+          throw new ProtocolError(
+            `Connection invalidated: ${protocol}`,
+            protocol,
+            'CONNECTION_INVALIDATED',
+          )
+        }
+      }
+
       await adapter.connect(config)
       if (!this.isConnectionCurrent(protocol, generation)) {
         await this.disconnectAdapterBounded(adapter)
