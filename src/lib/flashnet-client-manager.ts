@@ -41,15 +41,39 @@ function normalizePoolsResponse(response: unknown): unknown[] {
 class FlashnetClientManager {
   private client: FlashnetClient | null = null
   private initPromise: Promise<void> | null = null
+  /**
+   * The wallet the in-flight `initPromise` is for. Sharing an in-flight init is
+   * only correct for the SAME wallet — returning wallet A's promise to wallet
+   * B's caller silently drops B's init and leaves the Flashnet client bound to
+   * A's SparkWallet (and A's keys) inside B's session.
+   */
+  private initWallet: SparkWallet | null = null
+  /**
+   * Bumped by every disconnect() and by a wallet switch. An in-flight
+   * `doInitialize` captures it and refuses to install its client, network or
+   * history backfill if it changed while the SDK init was pending.
+   */
+  private teardownGeneration = 0
   private poolId: string | null = null
   private network: FlashnetNetwork | null = null
 
   initialize(wallet: SparkWallet, sparkNetwork?: SparkConfig['network']): Promise<void> {
-    if (this.initPromise) return this.initPromise
-    this.initPromise = this.doInitialize(wallet, sparkNetwork).finally(() => {
-      this.initPromise = null
+    // Same wallet → share the in-flight init, as before.
+    if (this.initPromise && this.initWallet === wallet) return this.initPromise
+    // Different wallet → the pending init belongs to someone else. Invalidate it
+    // (the generation guard stops it installing) and start a fresh one.
+    if (this.initPromise) this.teardownGeneration++
+    this.initWallet = wallet
+    const promise = this.doInitialize(wallet, sparkNetwork).finally(() => {
+      // Only the newest init clears the slot; an older one settling later must
+      // not wipe a newer in-flight init.
+      if (this.initPromise === promise) {
+        this.initPromise = null
+        this.initWallet = null
+      }
     })
-    return this.initPromise
+    this.initPromise = promise
+    return promise
   }
 
   private async doInitialize(
@@ -60,6 +84,8 @@ class FlashnetClientManager {
       await this.disconnect()
     }
 
+    // Captured AFTER the re-init disconnect above, which bumps the counter itself.
+    const generation = this.teardownGeneration
     const network = getFlashnetNetworkForSpark(sparkNetwork)
     if (!network) {
       throw new Error('Flashnet is only available when Spark is on mainnet or regtest.')
@@ -69,8 +95,23 @@ class FlashnetClientManager {
       // The SDK accepts SparkWallet | IssuerSparkWallet but doesn't export a
       // shared base — the cast keeps the call site honest while letting the
       // rest of the file enjoy real types from the SDK.
-      this.client = new FlashnetClient(wallet as never)
-      await this.client.initialize()
+      const client = new FlashnetClient(wallet as never)
+      await client.initialize()
+
+      // A disconnect()/wallet switch landed while the SDK init was pending. This
+      // client is bound to the previous wallet; installing it now would undo the
+      // teardown and put the next session on the previous wallet's keys.
+      if (generation !== this.teardownGeneration) {
+        log.info('[FlashnetClientManager] Init superseded by teardown — discarding client')
+        try {
+          await client.cleanup()
+        } catch (cleanupError) {
+          log.warn('[FlashnetClientManager] Error cleaning up superseded client:', cleanupError)
+        }
+        return
+      }
+
+      this.client = client
       this.network = network
 
       try {
@@ -97,9 +138,13 @@ class FlashnetClientManager {
       // Best-effort and async: never blocks or fails wallet init.
       void this.backfillSwapHistory(wallet)
     } catch (error) {
-      this.client = null
-      this.poolId = null
-      this.network = null
+      // Only clear state if this init still owns the session; a stale failure
+      // must not tear down a newer, successful one.
+      if (generation === this.teardownGeneration) {
+        this.client = null
+        this.poolId = null
+        this.network = null
+      }
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`Failed to initialize FlashnetClient: ${message}`)
     }
@@ -221,6 +266,8 @@ class FlashnetClientManager {
     this.poolId = null
     this.network = null
     this.initPromise = null
+    this.initWallet = null
+    this.teardownGeneration++
   }
 }
 
