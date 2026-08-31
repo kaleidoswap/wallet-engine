@@ -599,6 +599,17 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
+    // MONEY PATH — gate on the adapter's own connection state, not merely on
+    // whether a node URL is configured. `hasNode()` reads the client manager's
+    // config; `isConnected()` also requires that THIS adapter completed a
+    // handshake and has not been disconnected. They diverge whenever the module
+    // singleton is initialised without a successful `connect()` — which 321ac98
+    // closed for the failed-connect route by resetting the manager, but which any
+    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
+    // A disconnected adapter must not be able to spend (audit finding G-F6).
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
     if (!kaleidoClientManager.hasNode()) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     }
@@ -646,6 +657,17 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
+    // MONEY PATH — gate on the adapter's own connection state, not merely on
+    // whether a node URL is configured. `hasNode()` reads the client manager's
+    // config; `isConnected()` also requires that THIS adapter completed a
+    // handshake and has not been disconnected. They diverge whenever the module
+    // singleton is initialised without a successful `connect()` — which 321ac98
+    // closed for the failed-connect route by resetting the manager, but which any
+    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
+    // A disconnected adapter must not be able to spend (audit finding G-F6).
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
     if (!kaleidoClientManager.hasNode()) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     }
@@ -997,6 +1019,17 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async sendAsset(params: Record<string, unknown>): Promise<unknown> {
+    // MONEY PATH — gate on the adapter's own connection state, not merely on
+    // whether a node URL is configured. `hasNode()` reads the client manager's
+    // config; `isConnected()` also requires that THIS adapter completed a
+    // handshake and has not been disconnected. They diverge whenever the module
+    // singleton is initialised without a successful `connect()` — which 321ac98
+    // closed for the failed-connect route by resetting the manager, but which any
+    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
+    // A disconnected adapter must not be able to spend (audit finding G-F6).
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
     if (!kaleidoClientManager.hasNode()) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     }
@@ -1041,6 +1074,17 @@ export class RgbAdapter implements IProtocolAdapter {
     amount: number;
     feeRate?: number;
   }): Promise<unknown> {
+    // MONEY PATH — gate on the adapter's own connection state, not merely on
+    // whether a node URL is configured. `hasNode()` reads the client manager's
+    // config; `isConnected()` also requires that THIS adapter completed a
+    // handshake and has not been disconnected. They diverge whenever the module
+    // singleton is initialised without a successful `connect()` — which 321ac98
+    // closed for the failed-connect route by resetting the manager, but which any
+    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
+    // A disconnected adapter must not be able to spend (audit finding G-F6).
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
     if (!kaleidoClientManager.hasNode()) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     }
