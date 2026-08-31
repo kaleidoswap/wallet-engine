@@ -36,7 +36,7 @@ registerWdkModule('@utexo/wdk-wallet-rgb', () => ({
   },
 }))
 
-describe.skip('G: RgbLibWdkAdapter.connect must fail when indexer registration fails', () => {
+describe('G: RgbLibWdkAdapter.connect must fail when indexer registration fails', () => {
   it('connect() rejects and isConnected() stays false when registerWallet fails', async () => {
     const a = new RgbLibWdkAdapter()
     await expect(

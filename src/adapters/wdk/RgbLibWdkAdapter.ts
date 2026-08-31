@@ -84,8 +84,15 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       transportEndpoint: cfg.transportEndpoint,
     })
     this.account = await this.manager.getAccount()
-    // rgb-lib needs the wallet registered with the indexer before first use.
-    await this.account.registerWallet?.().catch(() => {})
+    // rgb-lib needs the wallet registered with the indexer before first use, and
+    // `getBtcBalance()` below depends on it. The old `.catch(() => {})` let
+    // connect() RESOLVE when registration failed (indexer 404/500, firewall), so
+    // `isConnected()` reported true and every later balance/history call operated
+    // on an unregistered wallet — the UI showed the wallet online while its data
+    // source was broken. Let the rejection fail connect(); `releasePreviousConnection`
+    // above means a failed connect leaves no half-built session behind, and the
+    // sibling `RgbLibWasmAdapter.connect` awaits its `goOnline` with no catch.
+    await this.account.registerWallet?.()
     this.connected = true
   }
 
