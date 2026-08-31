@@ -24,7 +24,7 @@ function connectedRln(account: any) {
   return adapter
 }
 
-describe.skip('AUDIT C-F2: decodeInvoice expiry', () => {
+describe('AUDIT C-F2: decodeInvoice expiry', () => {
   it('an invoice created 2h ago with expiry_sec=3600 must decode as already expired', async () => {
     const nowSec = Math.floor(Date.now() / 1000)
     const adapter = connectedRln({

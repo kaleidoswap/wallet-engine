@@ -324,7 +324,16 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       amount: d?.amt_msat != null ? Math.floor(d.amt_msat / 1000) : d?.amount,
       amountMsat: d?.amt_msat,
       description: d?.description,
-      expiresAt: d?.expiry_sec ? Date.now() + d.expiry_sec * 1000 : (d?.expiration_timestamp ?? 0) * 1000,
+      // `expiry_sec` is a DURATION from the invoice's own `timestamp` (creation,
+      // unix seconds — both on `DecodeLNInvoiceResponse`, node-types.d.ts:2888-2906).
+      // Computing `Date.now() + expiry_sec` ignored `timestamp`, so an invoice
+      // created 2h ago with a 1h expiry decoded as expiring in ANOTHER hour: a dead
+      // invoice read as live to any caller gating a payment or refund on `expiresAt`.
+      expiresAt: d?.expiry_sec
+        ? (d?.timestamp != null
+            ? (Number(d.timestamp) + Number(d.expiry_sec)) * 1000
+            : Date.now() + d.expiry_sec * 1000)
+        : (d?.expiration_timestamp ?? 0) * 1000,
       destination: d?.payee_pubkey ?? d?.recipient_id ?? '',
       asset_id: d?.asset_id,
       asset_amount:
