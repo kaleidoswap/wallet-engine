@@ -125,7 +125,17 @@ describe('F2: RgbAdapter.getAssetBalance precision drop (RgbAdapter.ts:281)', ()
 })
 
 // ── F3: history converters hardcode precision 8 for asset amounts ──────────
-describe('F3: RGB history converters assume precision 8 (rgb-converters.ts:139,174,202)', () => {
+/*
+ * [E-F3 FIXED] These three cases call the converters with NO precision argument
+ * and therefore still get 8 — that default is deliberate and unchanged (it is
+ * the BTC convention, correct for sats). What was broken was that
+ * `RgbAdapter.listTransactions` never passed the real precision, so every RGB
+ * row rendered at 8 with no way for a caller to say otherwise. The converters
+ * now take a precision, the adapter resolves it per asset, and
+ * test/audit/regression-EF3-history-precision.test.ts pins both halves. These
+ * cases are kept as the default-behaviour pins their comments now describe.
+ */
+describe('F3: RGB history converters default to precision 8 (rgb-converters.ts:154,190,224)', () => {
   it('on-chain transfer of 500 precision-0 units displays "0.00000500"', () => {
     const tx = convertTransferToTransaction({
       txid: 'tx1',
@@ -136,7 +146,7 @@ describe('F3: RGB history converters assume precision 8 (rgb-converters.ts:139,1
     })
     console.log(`received 500 units -> amountDisplay "${tx.amountDisplay}"`)
     expect(tx.amount).toBe(500)
-    expect(tx.amountDisplay).toBe('0.00000500') // BUG: understates by 10^8
+    expect(tx.amountDisplay).toBe('0.00000500') // no precision passed -> default 8
   })
 
   it('LN asset payment of 500 precision-0 units displays "0.00000500"', () => {
@@ -147,7 +157,7 @@ describe('F3: RGB history converters assume precision 8 (rgb-converters.ts:139,1
       created_at: 1_700_000_000,
       asset_amount: 500,
     })
-    expect(tx.amountDisplay).toBe('0.00000500') // BUG
+    expect(tx.amountDisplay).toBe('0.00000500') // no precision passed -> default 8
   })
 
   it('swap qty_from of 500 precision-0 units displays "0.00000500"', () => {
@@ -155,7 +165,7 @@ describe('F3: RGB history converters assume precision 8 (rgb-converters.ts:139,1
       { payment_hash: 'sp1', status: 'Completed', requested_at: 1_700_000_000, qty_from: 500 },
       'taker',
     )
-    expect(tx.amountDisplay).toBe('0.00000500') // BUG
+    expect(tx.amountDisplay).toBe('0.00000500') // no precision passed -> default 8
   })
 })
 

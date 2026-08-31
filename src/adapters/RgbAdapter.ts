@@ -392,8 +392,24 @@ export class RgbAdapter implements IProtocolAdapter {
         }>,
       ]);
 
+      // Resolve every asset whose base units appear in a row, so history renders
+      // at the asset's own precision rather than the BTC default of 8 (a 500-unit
+      // precision-0 receive displayed as "0.00000500" — and history is what a
+      // merchant checks before treating an invoice as paid). Three different
+      // assets can be involved: the requested asset for transfers, each payment's
+      // own `asset_id`, and each swap's `from_asset`, which need not be the
+      // requested one. Deduplicated and fetched in parallel, so a history with
+      // one counter-asset costs one extra round trip, not one per row.
+      const precisionOf = await this.resolveAssetPrecisions(client, [
+        filter.asset,
+        ...(paymentsResponse.payments ?? []).map((p) => p.asset_id as string | null | undefined),
+        ...[...(swapsResponse.maker ?? []), ...(swapsResponse.taker ?? [])].map(
+          (s) => s.from_asset as string | null | undefined,
+        ),
+      ]);
+
       const transferTxs = (transfersResponse.transfers ?? []).map((transfer) =>
-        convertTransferToTransaction(transfer),
+        convertTransferToTransaction(transfer, precisionOf(filter.asset)),
       );
 
       const paymentTxs = (paymentsResponse.payments ?? [])
@@ -405,7 +421,9 @@ export class RgbAdapter implements IProtocolAdapter {
           }
           return paymentAssetId === filter.asset;
         })
-        .map((payment) => convertPaymentToTransaction(payment));
+        .map((payment) =>
+          convertPaymentToTransaction(payment, precisionOf(payment.asset_id as string | null)),
+        );
 
       const isAssetBtc = filter.asset === "BTC" || filter.asset?.toLowerCase() === "btc";
       const matchesSwapAsset = (swap: Record<string, unknown>): boolean => {
@@ -415,13 +433,17 @@ export class RgbAdapter implements IProtocolAdapter {
         if (isAssetBtc) return fromAsset === null || toAsset === null;
         return fromAsset === filter.asset || toAsset === filter.asset;
       };
+      // `qty_from` is in the swap's FROM asset, which on a to-leg match is the
+      // counter-asset, not `filter.asset`.
+      const swapPrecision = (swap: Record<string, unknown>): number =>
+        precisionOf(swap.from_asset as string | null);
       const swapTxs = [
         ...(swapsResponse.maker ?? [])
           .filter(matchesSwapAsset)
-          .map((swap) => convertSwapToTransaction(swap, "maker")),
+          .map((swap) => convertSwapToTransaction(swap, "maker", swapPrecision(swap))),
         ...(swapsResponse.taker ?? [])
           .filter(matchesSwapAsset)
-          .map((swap) => convertSwapToTransaction(swap, "taker")),
+          .map((swap) => convertSwapToTransaction(swap, "taker", swapPrecision(swap))),
       ];
 
       const merged = [...transferTxs, ...paymentTxs, ...swapTxs];
@@ -439,6 +461,39 @@ export class RgbAdapter implements IProtocolAdapter {
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to list transactions");
     }
+  }
+
+  /**
+   * Resolve the display precision of each asset a history call renders amounts
+   * in, as a lookup keyed by asset id.
+   *
+   * BTC — which the node encodes as a missing/`"BTC"` asset id — is 8 by
+   * definition and costs no round trip. Every other id is looked up once via
+   * `getAssetMetadata`, deduplicated, in parallel. A response that omits
+   * `precision` falls back to 8, matching `getAssetBalance` (41bc6bf); a lookup
+   * that THROWS fails the whole call, matching this method's own rail policy
+   * (e92aa0b) — a history rendered at a fabricated precision is wrong in the same
+   * silent way as one missing a rail, and there is no `partial` flag to degrade to.
+   */
+  private async resolveAssetPrecisions(
+    client: ReturnType<typeof kaleidoClientManager.getClient>,
+    assetIds: (string | null | undefined)[],
+  ): Promise<(assetId: string | null | undefined) => number> {
+    const isBtc = (id: string | null | undefined): boolean =>
+      !id || id === "BTC" || id.toLowerCase() === "btc";
+
+    const wanted = [...new Set(assetIds.filter((id) => !isBtc(id)) as string[])];
+    const entries = await Promise.all(
+      wanted.map(async (assetId) => {
+        const metadata = (await client.rln.getAssetMetadata({ asset_id: assetId })) as {
+          precision?: number;
+        };
+        return [assetId, metadata?.precision ?? 8] as const;
+      }),
+    );
+    const byId = new Map<string, number>(entries);
+
+    return (assetId) => (isBtc(assetId) ? 8 : (byId.get(assetId as string) ?? 8));
   }
 
   async getTransaction(txId: string, assetId?: string): Promise<UnifiedTransaction> {

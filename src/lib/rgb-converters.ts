@@ -149,9 +149,14 @@ export function convertNodeAssetToUnified(asset: Record<string, unknown>): Unifi
  * On-chain RGB transfer from `client.rln.listTransfers()`. `asset` is left
  * as an empty placeholder; the caller (Activity view) joins on `asset_id`
  * to populate it via the asset inventory.
+ *
+ * @param precision Display precision of the transferred asset. Defaults to 8,
+ *   the BTC convention — which understates every non-8-precision asset by
+ *   10^(8-p), so a caller that can resolve the real precision must pass it.
  */
 export function convertTransferToTransaction(
   transfer: Record<string, unknown>,
+  precision: number = 8,
 ): UnifiedTransaction {
   return {
     id: (transfer.txid as string) || `tx_${Date.now()}`,
@@ -166,7 +171,9 @@ export function convertTransferToTransaction(
     // them last, always.
     timestamp: transfer.created_at ? (transfer.created_at as number) * 1000 : Date.now(),
     amount: (transfer.amount as number) || 0,
-    amountDisplay: formatAmount((transfer.amount as number) || 0, 8),
+    // ASSET base units → the asset's own precision. `fee` below stays at 8: it
+    // is the on-chain miner fee, denominated in sats regardless of the asset.
+    amountDisplay: formatAmount((transfer.amount as number) || 0, precision),
     fee: transfer.fee as number | undefined,
     feeDisplay: formatAmount((transfer.fee as number) || 0, 8),
     asset: {} as UnifiedAsset, // Would need to be populated
@@ -183,10 +190,15 @@ export function convertTransferToTransaction(
  *
  * Timestamp resolution: prefer `completed_at`, then `initiated_at`, then
  * `requested_at` (all in seconds — converted to ms here).
+ *
+ * @param precision Display precision of the swap's FROM asset (`qty_from`'s
+ *   unit). Defaults to 8, the BTC convention — correct only when the from-leg
+ *   is BTC, so a caller that can resolve the real precision must pass it.
  */
 export function convertSwapToTransaction(
   swap: Record<string, unknown>,
   side: "maker" | "taker",
+  precision: number = 8,
 ): UnifiedTransaction {
   const paymentHash = (swap.payment_hash as string) || `swap_${Date.now()}`;
   const requestedAt = (swap.requested_at as number | undefined) ?? 0;
@@ -201,7 +213,10 @@ export function convertSwapToTransaction(
     status: mapSwapStatus(swap.status as string | undefined),
     timestamp,
     amount: qtyFrom,
-    amountDisplay: formatAmount(qtyFrom, 8),
+    // `qty_from` is denominated in the swap's FROM asset — which is not
+    // necessarily the asset whose history was requested, so the caller resolves
+    // and passes that asset's precision. `fee` is a literal 0 in sats.
+    amountDisplay: formatAmount(qtyFrom, precision),
     fee: 0,
     feeDisplay: formatAmount(0, 8),
     asset: {} as UnifiedAsset,
@@ -214,8 +229,15 @@ export function convertSwapToTransaction(
  * outbound is determined by the `inbound` flag (we render as receive vs
  * send). Amount resolution prefers `asset_amount` (for RGB-asset payments)
  * then falls back to converting the BTC msat figure to sats.
+ *
+ * @param precision Display precision of the payment's RGB asset. Applied only on
+ *   the `asset_amount` branch — the `amt_msat` fallback yields sats, which are
+ *   always rendered at 8. Defaults to 8.
  */
-export function convertPaymentToTransaction(payment: Record<string, unknown>): UnifiedTransaction {
+export function convertPaymentToTransaction(
+  payment: Record<string, unknown>,
+  precision: number = 8,
+): UnifiedTransaction {
   const inbound = Boolean(payment.inbound);
   const assetAmount = (payment.asset_amount as number | null | undefined) ?? null;
   const amtMsat = (payment.amt_msat as number | null | undefined) ?? null;
@@ -229,7 +251,11 @@ export function convertPaymentToTransaction(payment: Record<string, unknown>): U
     status: mapPaymentStatus(payment.status as string | undefined),
     timestamp,
     amount,
-    amountDisplay: formatAmount(amount, 8),
+    // MIXED UNIT: `amount` above is asset base units when the payment carried an
+    // `asset_amount`, and SATS when it fell back to `amt_msat / 1000`. Only the
+    // first is denominated in the asset, so only the first uses its precision;
+    // the sats branch is BTC and stays at 8 whatever the caller passes.
+    amountDisplay: formatAmount(amount, assetAmount !== null ? precision : 8),
     fee: 0,
     feeDisplay: formatAmount(0, 8),
     asset: {} as UnifiedAsset,

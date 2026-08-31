@@ -46,6 +46,12 @@ describe('AUDIT C-F5: transfer timestamp units', () => {
         }),
         listPayments: async () => ({ payments: [] }),
         listSwaps: async () => ({ maker: [], taker: [] }),
+        // listTransactions resolves each asset's display precision (E-F3), the
+        // same way getAssetBalance already did (41bc6bf). Declared on the SDK
+        // client at node_modules/kaleido-sdk/dist/rln-client.d.ts:51 — this fake
+        // simply predates the call. Precision is irrelevant to this test, which
+        // asserts timestamp-unit handling.
+        getAssetMetadata: async () => ({ precision: 8 }),
       },
     }
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
