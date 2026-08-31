@@ -156,6 +156,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const cfg = config as RgbLibWasmAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RgbLibWasmAdapter requires a mnemonic', 'RGB_L1', 'CONFIG')
     if (!cfg.indexerUrl) throw new ProtocolError('RgbLibWasmAdapter requires an indexerUrl', 'RGB_L1', 'CONFIG')
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     this.transportEndpoints = cfg.transportEndpoints ?? []
     const rgbNetwork = toRgbNetwork(this.network)

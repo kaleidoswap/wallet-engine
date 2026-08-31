@@ -154,6 +154,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const cfg = config as RlnAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB_LN', 'CONFIG')
     if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB_LN', 'CONFIG')
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     this.makerUrl = cfg.makerUrl ?? ''
     this.swap = null

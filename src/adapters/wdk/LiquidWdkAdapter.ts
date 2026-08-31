@@ -148,6 +148,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     if (!cfg.mnemonic) {
       throw new ProtocolError('LiquidWdkAdapter requires a mnemonic', 'LIQUID', 'CONFIG')
     }
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-liquid', () => import('@kaleidorg/wdk-wallet-liquid'))

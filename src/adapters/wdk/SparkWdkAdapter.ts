@@ -143,6 +143,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     if (!cfg.mnemonic) {
       throw new ProtocolError('SparkWdkAdapter requires a mnemonic', 'SPARK', 'CONFIG')
     }
+    await this.releasePreviousConnection()
     this.mnemonic = cfg.mnemonic
     this.network = cfg.network ?? 'mainnet'
     // Injectable loader (RN injects a static require; Node/Vite use the import fallback).

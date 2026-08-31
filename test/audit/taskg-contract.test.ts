@@ -282,7 +282,7 @@ describe('G-F12: sendBtcOnchain must not return ok:true with an empty txid', () 
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F13: a second connect() must not leak the previous manager/account', () => {
+describe('G-F13: a second connect() must not leak the previous manager/account', () => {
   it('LiquidWdkAdapter disposes the first manager on re-connect', async () => {
     const managers: any[] = []
     class FakeManager {

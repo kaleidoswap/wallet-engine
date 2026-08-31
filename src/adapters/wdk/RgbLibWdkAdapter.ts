@@ -72,6 +72,7 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const cfg = config as RgbLibAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RgbLibWdkAdapter requires a mnemonic', 'RGB_L1', 'CONFIG')
     if (!cfg.dataDir) throw new ProtocolError('RgbLibWdkAdapter requires a dataDir', 'RGB_L1', 'CONFIG')
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as an optional dep; resolved at runtime.
     const mod = await loadWdkModule('@utexo/wdk-wallet-rgb', () => import('@utexo/wdk-wallet-rgb'))

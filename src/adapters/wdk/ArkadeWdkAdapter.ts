@@ -105,6 +105,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       swapProviderUrl?: string
     }
     if (!cfg.mnemonic) throw new ProtocolError('ArkadeWdkAdapter requires a mnemonic', 'ARKADE', 'CONFIG')
+    await this.releasePreviousConnection()
     this.mnemonic = cfg.mnemonic
     this.network = cfg.network ?? 'mainnet'
     // Accept either an explicit `arkadeConfig` passthrough OR the native adapter's

@@ -17,6 +17,7 @@
 
 import { ProtocolType, ProtocolError } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
+import { log } from '../../lib/log'
 
 export abstract class BaseWdkAdapter {
   abstract readonly protocolName: ProtocolType
@@ -35,6 +36,33 @@ export abstract class BaseWdkAdapter {
 
   isConnected(): boolean {
     return this.connected
+  }
+
+  /**
+   * Tear down a live session before a re-connect installs a new manager/account
+   * pair. Subclasses overwrite `this.manager`/`this.account` unconditionally in
+   * their own `connect()`, so without this the previous pair was abandoned
+   * UNDISPOSED — still holding keys, still able to sign — and for RGB-L1 two
+   * wallet instances raced on the same dataDir/IndexedDB.
+   *
+   * `ProtocolManager.connect()` calls `adapter.connect(config)` directly and never
+   * `adapter.disconnect()` (audit finding F-F6), so a wallet switch arrives here
+   * with the previous wallet still live. The native client managers already
+   * disconnect-then-reinit; this is that parity (audit finding G-F13).
+   *
+   * Call it AFTER config validation, so an invalid config cannot tear down a
+   * working session.
+   */
+  protected async releasePreviousConnection(): Promise<void> {
+    if (!this.connected && !this.account && !this.manager) return
+    try {
+      await this.disconnect()
+    } catch (error: unknown) {
+      // `disconnect()` revokes the local state synchronously before awaiting any
+      // third-party teardown, so a rejection here means only that the previous
+      // SDK's cleanup failed. That must not block the new connection.
+      log.warn(`[${this.constructor.name}] Error tearing down the previous connection:`, error)
+    }
   }
 
   /** Tear down the account + manager (whichever teardown hooks they expose) and reset state. */
