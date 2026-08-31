@@ -46,6 +46,40 @@ describe('A1: initialize() must not hand back another wallet\'s in-flight init',
     expect((sparkClientManager.getWallet() as { marker: string }).marker).toBe('WALLET_B')
   })
 
+  // The case above routes through disconnect(), so it is really the A2
+  // generation guard doing the work — reverting the wallet-identity KEY alone
+  // still passes it. This one exercises A1 on its own: a bare wallet switch,
+  // no teardown, while A's handshake is still pending. That is the sequence the
+  // finding describes ("switching wallets while wallet A's SDK handshake was
+  // still pending handed wallet B's caller A's promise"), and nothing covered it
+  // until the post-merge revert-proof looked for a failing test and found none.
+  it('a wallet switch mid-handshake with NO disconnect still binds to the new wallet', async () => {
+    const a = deferred<{ wallet: object }>()
+    const b = deferred<{ wallet: object }>()
+    const seedsSeen: string[] = []
+    sparkClientManager.setSdkFactory({
+      initializeWallet: ({ mnemonicOrSeed }: any) => {
+        seedsSeen.push(String(mnemonicOrSeed))
+        return String(mnemonicOrSeed).includes('seed-a') ? a.promise : b.promise
+      },
+    } as any)
+
+    const initA = sparkClientManager.initialize(cfg('seed-a'))
+    // No disconnect(): straight to wallet B while A is still in flight.
+    const initB = sparkClientManager.initialize(cfg('seed-b'))
+    expect(initA, "B's caller must not be handed A's in-flight promise").not.toBe(initB)
+
+    a.resolve({ wallet: fakeWallet('WALLET_A') })
+    await initA.catch(() => {})
+    b.resolve({ wallet: fakeWallet('WALLET_B') })
+    await initB
+
+    // B's own secret must have reached the SDK — not just A's, reused.
+    expect(seedsSeen).toContain('seed-b')
+    expect((sparkClientManager.getWallet() as { marker: string }).marker).toBe('WALLET_B')
+    expect(sparkClientManager.getConfig()?.network).toBe('regtest')
+  })
+
   it('concurrent initialize() for the SAME wallet still shares one handshake', async () => {
     const a = deferred<{ wallet: object }>()
     let calls = 0
