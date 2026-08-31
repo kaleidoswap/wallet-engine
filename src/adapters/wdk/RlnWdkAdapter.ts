@@ -48,6 +48,7 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { KaleidoswapSwap, type SwapQuoteRequest } from '../../swap/KaleidoswapSwap'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
 import { decodeBolt11 } from '../../lib/bolt11'
+import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -471,7 +472,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
           },
         ],
       },
-      feeRate: params.feeRate ?? params.fee_rate,
+      feeRate: params.feeRate ?? params.fee_rate ?? this.defaultFeeRate(),
       donation: params.donation ?? false,
       minConfirmations: params.minConfirmations ?? params.min_confirmations ?? 1,
     })
@@ -503,10 +504,23 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       up_to: params.upTo ?? false,
       num: params.num ?? 3,
       size: params.size ?? 3000,
-      fee_rate: params.feeRate ?? (await this.estimateRgbFee(6)).fee_rate,
+      // Floor a cold-started node's 1 sat/vB estimate on mainnet — the estimate
+      // is the node's opinion, not a policy, and this adapter never consulted
+      // `resolveRgbFeeRatePolicy`.
+      fee_rate: params.feeRate ?? Math.max((await this.estimateRgbFee(6)).fee_rate, this.defaultFeeRate()),
       skip_sync: false,
     })
     return { success: true }
+  }
+
+  /**
+   * Fee rate to use when neither the caller nor the node supplied a usable one.
+   * `sendRgb`/`createUtxos` previously forwarded `undefined` (WDK's own 3 sat/vB
+   * default) or a bare `?? 1`, so mainnet RGB spends could build below the floor
+   * the engine defines for exactly this case.
+   */
+  private defaultFeeRate(): number {
+    return this.network === 'mainnet' ? MAINNET_FEE_FLOOR.normal : 1
   }
 
   async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {

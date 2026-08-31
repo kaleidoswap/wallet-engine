@@ -29,7 +29,7 @@ import { MAINNET_FEE_FLOOR } from '../../src/lib/rgb-fee-policy'
  *     estimate with `?? 1` fallback (RlnWdkAdapter.ts:494,503).
  */
 
-describe.skip('AUDIT C-F6: mainnet fee floor bypass', () => {
+describe('AUDIT C-F6: mainnet fee floor bypass', () => {
   it('a) RgbAdapter with no `network` in config must fail CLOSED to the mainnet floor, not 1 sat/vB', async () => {
     const adapter = new RgbAdapter()
     // Host omitted `network` — optional per BaseProtocolConfig.

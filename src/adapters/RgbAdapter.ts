@@ -836,7 +836,16 @@ export class RgbAdapter implements IProtocolAdapter {
     return resolveRgbFeeRatePolicy({
       provided,
       urgency,
-      network: this.config?.network ?? null,
+      // An ABSENT network must fail toward the mainnet floor, not away from it.
+      // `BaseProtocolConfig.network` is optional with no documented default, and
+      // the policy maps an unknown network to 1 sat/vB (documented, and correct
+      // for regtest/signet). A host that omits `network` while pointed at a
+      // mainnet node therefore built real mainnet transactions at 1 sat/vB —
+      // unconfirmable, with no engine-level RBF path, locking the wallet's UTXOs
+      // and RGB allocations. Both WDK RGB adapters already default an absent
+      // network to 'mainnet' (RlnWdkAdapter.ts:143, RgbLibWasmAdapter.ts:158);
+      // this is that parity. Overpaying on regtest/signet costs nothing.
+      network: this.config?.network ?? 'mainnet',
       estimateFn: async (blocks) => {
         try {
           const { fee_rate } = await this.estimateRgbFee(blocks);

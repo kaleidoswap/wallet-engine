@@ -13,7 +13,7 @@ import { RlnWdkAdapter } from '../../src/adapters/wdk/RlnWdkAdapter'
 import { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
 import { RgbLibWasmAdapter } from '../../src/adapters/wdk/RgbLibWasmAdapter'
 import { decodeBolt11 } from '../../src/lib/bolt11'
-import { resolveRgbFeeRatePolicy } from '../../src/lib/rgb-fee-policy'
+import { resolveRgbFeeRatePolicy, MAINNET_FEE_FLOOR } from '../../src/lib/rgb-fee-policy'
 
 // ── Mock the kaleido client manager singleton that RgbAdapter pulls in ──────
 const state = { client: null as any, initConfig: null as any }
@@ -158,7 +158,7 @@ describe('F4: no client-side invoice validation before paying', () => {
 
 // ── F5: fee-policy gaps ─────────────────────────────────────────────────────
 describe('F5: fee policy gaps', () => {
-  it('a mainnet-intended config that omits `network` gets 1 sat/vB (estimator never consulted)', async () => {
+  it('[FIXED] a config that omits `network` fails CLOSED to the mainnet path, estimator consulted', async () => {
     let estimatorCalled = false
     state.client = {
       rln: {
@@ -169,8 +169,11 @@ describe('F5: fee policy gaps', () => {
     const adapter = connectedRgbAdapter() // no `network` key — optional in BaseProtocolConfig
     await adapter.sendBtcOnchain({ address: 'bc1qexample', amount: 10_000 })
     const body = (state.client.rln.sendBtc as any).mock.calls[0][0]
-    expect(body.fee_rate).toBe(1) // stuck-grade fee on what may be a mainnet wallet
-    expect(estimatorCalled).toBe(false)
+    // An absent network must not resolve to the 1 sat/vB non-mainnet default on
+    // what may be a mainnet wallet: the estimator runs and the floor applies.
+    expect(estimatorCalled).toBe(true)
+    expect(body.fee_rate).toBe(50)
+    expect(body.fee_rate).toBeGreaterThanOrEqual(MAINNET_FEE_FLOOR.normal)
   })
 
   it('a caller-provided feeRate is forwarded uncapped (100,000 sat/vB on a 10,000 sat send)', async () => {
@@ -189,14 +192,16 @@ describe('F5: fee policy gaps', () => {
       .toBe(1)
   })
 
-  it('RlnWdkAdapter.sendAsset without feeRate sends no fee rate at all (hardcoded 3 sat/vB default downstream)', async () => {
+  it('[FIXED] RlnWdkAdapter.sendAsset without feeRate floors instead of forwarding undefined', async () => {
     const calls: any[] = []
     const adapter = connectedRln({
       sendRgb: async (p: any) => { calls.push(p); return { txid: 'x' } },
       estimateFee: async () => ({ fee_rate: 42 }),
     })
     await adapter.sendAsset({ assetId: 'rgb:x', recipientId: 'r', amount: 5, transportEndpoints: [] })
-    expect(calls[0].feeRate).toBeUndefined() // never floored, never estimated
+    // Forwarding `undefined` let WDK's own 3 sat/vB default build a mainnet RGB
+    // spend below the floor the engine defines for exactly this case.
+    expect(calls[0].feeRate).toBe(MAINNET_FEE_FLOOR.normal)
   })
 })
 
