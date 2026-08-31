@@ -289,8 +289,20 @@ export class ArkadeAdapter implements IProtocolAdapter {
     return asset.balance;
   }
 
+  /**
+   * Drop the shared snapshot so the next balance/VTXO read hits the Ark provider.
+   *
+   * The old body was an empty no-op whose comment claimed "balances are fetched
+   * live on each call" — false: every read goes through
+   * `getArkadeBalanceCached`/`getArkadeVtxosCached` (3 s TTL,
+   * arkade-snapshot-cache.ts), and only SENDS invalidated it. So a user who
+   * pulled to refresh after a deposit got a success and the same stale snapshot,
+   * for up to the TTL. `ProtocolManager.refreshBalances` documents the intent
+   * this now honours: "invalidate every connected adapter's balance cache so the
+   * next read is fresh" (audit finding G-F10).
+   */
   async refreshBalances(): Promise<void> {
-    // Balances are fetched live on each call
+    invalidateArkadeSnapshotCache();
   }
 
   // =========================================================================
