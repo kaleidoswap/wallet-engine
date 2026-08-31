@@ -42,11 +42,22 @@ describe('resolveUnifiedSend — multi-rail BIP321', () => {
     liquidAddress: 'lq1qqexampleliquidaddrxyz',
   })
 
-  it('Lightning-first default: BOLT12 offer wins over BOLT11 and on-chain', () => {
+  it('Lightning-first default: BOLT11 wins over on-chain, and the unpayable BOLT12 offer is skipped', () => {
     const res = routerWith('RGB_LN', 'LIQUID').resolveUnifiedSend(uri)
     expect(res.source).not.toBeNull()
-    expect(res.best?.rail).toBe('lno')
+    // Was `expect(res.best?.rail).toBe('lno')`. No adapter can pay a BOLT12
+    // offer (finding B-F5), so `lno` is no longer certified direct and lite
+    // mode's auto-route falls through to the BOLT11 rail the same URI carries —
+    // which IS payable. Lightning-first is preserved; the guaranteed-to-fail
+    // rail is simply not auto-selected.
+    expect(res.best?.rail).toBe('lightning')
     expect(res.best?.direct).toBe(true)
+    // The offer rail is still OFFERED — just not certified as directly payable,
+    // so an advanced-mode UI can show it and a future offer-capable adapter can
+    // flip `supportsBolt12`.
+    const lno = res.routes.find((r) => r.rail === 'lno')
+    expect(lno, 'the rail is still surfaced').toBeDefined()
+    expect(lno?.direct, 'but never as a direct route').toBe(false)
     // BOLT11 ranks ahead of the on-chain rail.
     const rails = res.routes.filter((r) => r.direct).map((r) => r.rail)
     expect(rails.indexOf('lightning')).toBeLessThan(rails.indexOf('onchain'))

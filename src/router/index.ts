@@ -33,9 +33,16 @@ function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination):
   const caps = getCapabilities(protocol)
   switch (dest.kind) {
     case 'BOLT11':
-    case 'BOLT12':
     case 'LN_ADDRESS':
       return caps.supportsLightning
+    case 'BOLT12':
+      // Paying an OFFER is a distinct capability from paying an invoice, and no
+      // adapter has it (finding B-F5). Certifying these off `supportsLightning`
+      // made `best` — the route lite mode auto-pays — a route guaranteed to fail
+      // or, worse, to pay the wrong rail: Spark's `startsWith("ln")` gate forwards
+      // an `lno1…` to BOLT11-only `payLightningInvoice`, and both Arkade matchers
+      // let it fall through to an ON-CHAIN send to the offer string.
+      return caps.supportsLightning && caps.supportsBolt12
     case 'BTC_ONCHAIN':
     case 'BIP21':
       return caps.supportsOnchain

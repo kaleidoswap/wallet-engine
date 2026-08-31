@@ -261,32 +261,47 @@ describe('F4: partial failure after initSwap discards payment_hash + access_toke
 // F5/F6/F7 — router
 // ---------------------------------------------------------------------------
 
-describe('F5: router certifies BOLT12 routes no adapter can fulfil', () => {
-  it('lno1 offer -> best.direct === true for adapters that only pay BOLT11', () => {
+describe('F5 [B-F5 FIXED]: the router no longer certifies BOLT12 routes no adapter can fulfil', () => {
+  it('lno1 offer -> no route is direct, and lite mode auto-selects nothing', () => {
     const router = routerWith('RGB_LN', 'SPARK', 'ARKADE')
     const res = router.resolveSend('lno1pgexampleofferxyz')
-    // VULNERABILITY: the router's contract is "best is always a genuinely-direct
-    // route" (router/index.ts:122-124) — yet SparkAdapter.ts:679 feeds any "ln*"
-    // string to BOLT11-only payLightningInvoice, ArkadeAdapter.ts:77-84 matches
-    // bolt11 prefixes only, and RgbAdapter.ts:496-524 has no offer flow at all.
-    expect(res.best).not.toBeNull()
-    expect(res.best!.direct).toBe(true)
-    expect(['RGB_LN', 'SPARK', 'ARKADE']).toContain(res.best!.protocol)
+    // Was: `expect(res.best!.direct).toBe(true)`. The router's contract is "best
+    // is always a genuinely-direct route" (router/index.ts) — yet SparkAdapter's
+    // `startsWith("ln")` gate feeds any "ln*" string to BOLT11-only
+    // payLightningInvoice, both Arkade matchers exclude `lno1…` so it falls
+    // through to an ON-CHAIN send to the offer string, and the RLN node has no
+    // offer flow at all. `direct` is now gated on a `supportsBolt12` capability
+    // that no manifest sets.
+    expect(res.routes.length, 'the offer is still classified and routed').toBeGreaterThan(0)
+    expect(res.routes.every((r) => !r.direct), 'none is directly payable').toBe(true)
+    expect(res.best, 'lite mode must not auto-pay an offer nobody can settle').toBeNull()
   })
 })
 
 describe('F6: crafted BIP321 URI drives lite-mode auto-pay onto the attacker rail', () => {
-  it('merchant-looking onchain address + attacker lno offer -> best is the attacker offer', () => {
+  it('[B-F5 FIXED for the lno variant] an attacker lno rail is no longer auto-selected', () => {
     const attackerOffer = 'lno1zcpq8gq7vpnq9e7v9s8ykz3attackercontrolledoffer'
     const uri = `bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?amount=0.001&lno=${attackerOffer}`
     const router = routerWith('RGB_LN')
     const res = router.resolveUnifiedSend(uri)
-    // VULNERABILITY: rails are NOT cryptographically bound (the engine's own
-    // warning, unifiedReceive.ts:146-151), yet `.best` auto-selects the
-    // Lightning-first rail with no amount/payee consistency check.
+    // Was: `expect(res.best!.rail).toBe('lno')`. `lno` is no longer a direct
+    // rail, so lite mode falls back to the merchant's own on-chain address.
     expect(res.best).not.toBeNull()
-    expect(res.best!.rail).toBe('lno')
-    expect(res.best!.value).toBe(attackerOffer)
+    expect(res.best!.rail).toBe('onchain')
+  })
+
+  it('[STILL OPEN] the rail-substitution shape itself survives on a payable rail', () => {
+    // B-F5 closed the `lno` variant as a side effect, NOT the finding. Rails are
+    // not cryptographically bound (the engine's own warning,
+    // unifiedReceive.ts:146-151) and `.best` still auto-selects the
+    // Lightning-first rail with no amount/payee consistency check — so the same
+    // attack works with a bolt11 the wallet CAN pay.
+    const attackerInvoice = 'lnbc1pattackercontrolledinvoice'
+    const uri = `bitcoin:bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080?amount=0.001&lightning=${attackerInvoice}`
+    const res = routerWith('RGB_LN').resolveUnifiedSend(uri)
+    expect(res.best).not.toBeNull()
+    expect(res.best!.rail).toBe('lightning')
+    expect(res.best!.value).toBe(attackerInvoice)
   })
 })
 
