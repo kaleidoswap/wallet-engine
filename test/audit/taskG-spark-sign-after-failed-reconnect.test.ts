@@ -1,9 +1,11 @@
 /*
- * OPEN FINDING — reproduction, not yet fixed.
+ * FIXED — this is now the finding's regression test (run 2, REPORT-2.md).
  *
- * `describe.skip` so the branch stays green: these assert the behaviour the
- * contract requires. Remove the `.skip` when the finding is fixed and each
- * becomes its regression test. See REPORT.md section 2.2.
+ * It was landed by run 1 as a committed `describe.skip`ped reproduction of a
+ * confirmed-but-unfixed finding. Run 2 verified the claim against the contract,
+ * fixed the code, and removed the `.skip` — so this file now fails if the finding
+ * regresses. The commit that removed the `.skip` records the failing output at its
+ * parent.
  */
 import { describe, expect, it, vi } from 'vitest'
 

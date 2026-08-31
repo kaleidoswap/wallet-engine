@@ -1,9 +1,18 @@
 /*
- * OPEN FINDING — reproduction, not yet fixed.
+ * OPEN — NEEDS A PRODUCT DECISION, not a patch (run 2, REPORT-2.md).
  *
- * `describe.skip` so the branch stays green: these assert the behaviour the
- * contract requires. Remove the `.skip` when the finding is fixed and each
- * becomes its regression test. See REPORT.md section 2.2.
+ * Still `describe.skip`ped, and deliberately so. The two RGB_L1 backends disagree
+ * BY DESIGN on whether RGB-colored sats count toward the BTC balance:
+ * `RgbLibWdkAdapter` reports vanilla only, `RgbLibWasmAdapter` sums, and
+ * `convertBtcBalance` documents "don't show colored sats as spendable BTC".
+ * `test/rgb-l1-wasm.test.ts` — pre-existing and NAMED for the behaviour ("adds
+ * colored BTC sats to the spendable on-chain total") — pins the summing side with
+ * exact figures, so this is a recorded decision for that adapter, not an oversight.
+ * Run 1 wrote the fix, found that test, and reverted; run 2 confirms that reading.
+ *
+ * What remains is the cross-adapter DISAGREEMENT: someone must decide which side is
+ * right and make the other match. These cases assert the vanilla-only side, so
+ * removing the `.skip` is the second half of that decision.
  */
 import { describe, expect, it } from 'vitest'
 import { RgbLibWasmAdapter } from '../../src/adapters/wdk/RgbLibWasmAdapter'

@@ -1,9 +1,20 @@
 /*
- * OPEN FINDING — reproduction, not yet fixed.
+ * Front G contract-conformance reproductions — MIXED, by verdict (run 2, REPORT-2.md).
  *
- * `describe.skip` so the branch stays green: these assert the behaviour the
- * contract requires. Remove the `.skip` when the finding is fixed and each
- * becomes its regression test. See REPORT.md section 2.2.
+ * Most blocks in this file are now UNSKIPPED regression tests: run 2 verified the
+ * claim against the contract, fixed the code, and removed the `.skip`. Each fix
+ * commit records the failing output at its parent.
+ *
+ * Two blocks document a real divergence and PASS as-is (they assert what the code
+ * does, so a change to it is deliberate): `G-F7` (capability flags vs. what the
+ * adapter actually does) and `G-F16` (`asRgbOperations` narrowing).
+ *
+ * Two blocks are still `describe.skip`ped because they are CONFIRMED but need a
+ * product decision, not a patch — the reason is on each block:
+ *   - `G-F2` lookup-failure-reported-as-pending: `TransactionStatus` has no
+ *     `unknown`/`error` member to return.
+ *   - `G-F4` RgbLibWasmAdapter colored sats: the two RGB_L1 backends disagree BY
+ *     DESIGN and `test/rgb-l1-wasm.test.ts` is named for the summed behaviour.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ArkadeWdkAdapter } from '../../src/adapters/wdk/ArkadeWdkAdapter'
@@ -200,25 +211,40 @@ describe('G-F6: RgbAdapter must not move funds after a FAILED connect()', () => 
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F7: capabilities flags must match what the adapter actually does', () => {
+describe('G-F7: capabilities flags must match what the adapter actually does', () => {
   it('a) LIQUID declares liquid-pset-sign but signLiquidPset throws NOT_SUPPORTED on a plain account', async () => {
     const adapter = connected(new LiquidWdkAdapter(), { getBalance: async () => 0n })
     expect(adapter.capabilities).toContain('liquid-pset-sign') // the static flag
     await expect(adapter.signLiquidPset({ pset: 'AAAA' } as any)).rejects.toThrow(/NOT_SUPPORTED|Simplicity/i)
   })
 
-  it('b) ARKADE declares lightning-receive but createInvoice({layer:BTC_LN}) returns an Ark address', async () => {
-    const adapter = connected(new ArkadeWdkAdapter(), { getAddress: async () => ARK_ADDR })
+  it('b) [FIXED] ARKADE honours createInvoice({layer:BTC_LN}) instead of returning an Ark address', async () => {
+    const adapter = connected(new ArkadeWdkAdapter(), {
+      getAddress: async () => ARK_ADDR,
+      createLightningInvoice: async (amount: number) => ({
+        invoice: `lnbc${amount}1pboltz`,
+        paymentHash: 'ph-boltz',
+      }),
+    })
     expect(adapter.capabilities).toContain('lightning-receive')
     const inv = await adapter.createInvoice({ amount: 1000, layer: 'BTC_LN' } as any)
-    expect(inv.invoice).toBe(ARK_ADDR) // NOT a bolt11 — the divergence, documented
-    expect(inv.paymentHash).toBe('')
+    // Fixed by audit finding F-F8: was ARK_ADDR with paymentHash ''.
+    expect(inv.invoice.startsWith('lnbc')).toBe(true)
+    expect(inv.paymentHash).toBe('ph-boltz')
+    // …and with no layer the Ark address is still the answer.
+    expect((await adapter.createInvoice({ amount: 1000 } as any)).invoice).toBe(ARK_ADDR)
   })
 
   it('c) SPARK declares asset-receive but getReceiveAddress(tokenId) throws UNSUPPORTED_ASSET', async () => {
     const adapter = connected(new SparkWdkAdapter(), {})
     expect(adapter.capabilities).toContain('asset-receive')
     await expect(adapter.getReceiveAddress('btkn1sometoken')).rejects.toThrow(/UNSUPPORTED_ASSET|only supports BTC/i)
+    // NOTE (run 2): on the WDK adapter an asset receive IS reachable, via
+    // `createInvoice({ asset })` → `createSparkTokensInvoice` — so for THIS adapter
+    // the flag is honest and run 1's claim targets the wrong method. The native
+    // `SparkAdapter` has no token-receive path at all (`createInvoice` throws
+    // UNSUPPORTED_ASSET, `createSparkInvoice` calls only `createSatsInvoice`), so
+    // there the `asset-receive` flag is a genuine over-declaration. See REPORT-2.
   })
 })
 
@@ -390,7 +416,7 @@ describe('G-F15: SparkAdapter.decodeInvoice must decode a bolt11 amount (decoder
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F16: asRgbOperations narrowing must not promise missing methods', () => {
+describe('G-F16: asRgbOperations narrowing must not promise missing methods', () => {
   it('RgbLibWdkAdapter narrows non-null but lacks decodeRgbInvoice/estimateRgbFee', () => {
     const adapter = new RgbLibWdkAdapter()
     const ops = asRgbOperations(adapter as any)
