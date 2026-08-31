@@ -85,7 +85,7 @@ afterEach(() => {
 })
 
 describe('ArkadeClientManager teardown race', () => {
-  it('F3: disconnect() during in-flight initialize() resurrects the wallet after teardown', async () => {
+  it('F3 [FIXED]: disconnect() during in-flight initialize() no longer resurrects the wallet', async () => {
     const init = arkadeClientManager.initialize(arkCfg(MNEMONIC))
     // Let _doInitialize run up to the awaited Wallet.create() call.
     await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
@@ -93,26 +93,58 @@ describe('ArkadeClientManager teardown race', () => {
     await arkadeClientManager.disconnect()
     expect(arkadeClientManager.isInitialized()).toBe(false)
 
-    // The pending SDK call resolves after teardown -> wallet installed anyway.
+    // The pending SDK call resolves AFTER teardown completed. The generation
+    // guard discards the orphan instead of installing it — a locked wallet must
+    // not come back live and signing-capable.
     sdkState.pending!.resolve(fakeArkWallet('ARK_A'))
     await init
 
-    expect(arkadeClientManager.isInitialized()).toBe(true)
-    expect((arkadeClientManager.getWallet() as { marker: string }).marker).toBe('ARK_A')
+    expect(arkadeClientManager.isInitialized()).toBe(false)
+    expect(() => arkadeClientManager.getWallet()).toThrow()
+    // …and the mnemonic-bearing config was not restored with it.
+    expect(arkadeClientManager.getConfig()).toBeNull()
   })
 
-  it('F3b: reset() during in-flight initialize() also resurrects the wallet', async () => {
+  it('F3b [FIXED]: reset() during in-flight initialize() also discards the orphan', async () => {
     const init = arkadeClientManager.initialize(arkCfg(MNEMONIC))
     await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
-    // reset() nulls _initPromise but cannot cancel the in-flight _doInitialize.
+    // reset() nulls _initPromise but cannot cancel the in-flight _doInitialize —
+    // the generation guard is what makes that safe.
     arkadeClientManager.reset()
     expect(arkadeClientManager.isInitialized()).toBe(false)
 
     sdkState.pending!.resolve(fakeArkWallet('ARK_A'))
     await init
 
+    expect(arkadeClientManager.isInitialized()).toBe(false)
+    expect(arkadeClientManager.getConfig()).toBeNull()
+  })
+
+  it('F3c [FIXED]: a wallet switch racing the handshake installs B, never A', async () => {
+    const OTHER =
+      'legal winner thank year wave sausage worth useful legal winner thank yellow'
+    const initA = arkadeClientManager.initialize(arkCfg(MNEMONIC))
+    await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
+    const pendingA = sdkState.pending!
+
+    // Host switches wallets: reset() clears the in-flight slot (disconnect()
+    // alone leaves _initPromise set, so a different config is rejected — see
+    // the availability note in REPORT-2), then B connects.
+    arkadeClientManager.reset()
+    sdkState.pending = null
+    const initB = arkadeClientManager.initialize(arkCfg(OTHER))
+    await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
+    const pendingB = sdkState.pending!
+
+    // B comes up, then A's superseded handshake lands LAST — the dangerous
+    // ordering: without the generation guard A's wallet overwrites B's.
+    pendingB.resolve(fakeArkWallet('ARK_B'))
+    await initB
+    pendingA.resolve(fakeArkWallet('ARK_A'))
+    await initA
+
     expect(arkadeClientManager.isInitialized()).toBe(true)
-    expect((arkadeClientManager.getWallet() as { marker: string }).marker).toBe('ARK_A')
+    expect((arkadeClientManager.getWallet() as { marker: string }).marker).toBe('ARK_B')
   })
 })
 

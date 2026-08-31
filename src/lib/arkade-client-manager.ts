@@ -136,6 +136,15 @@ class ArkadeClientManager {
   private _initPromise: Promise<void> | null = null;
   /** Config for the in-flight _initPromise (used for concurrent-init guard) */
   private _pendingConfig: ArkadeConfig | null = null;
+  /**
+   * Bumped by every disconnect()/reset(). An in-flight `_doInitialize` captures
+   * it and refuses to install its wallet if it changed while `Wallet.create()`
+   * was pending — otherwise a teardown that already completed is silently
+   * undone and the "locked" wallet comes back live and signing-capable
+   * (`ArkadeAdapter.isConnected()` is `isInitialized()`, so every adapter
+   * operation works again). Same guard as `SparkClientManager` (7b95f0a).
+   */
+  private _teardownGeneration = 0;
   /** Cleanup function returned by wallet.notifyIncomingFunds() */
   private _stopIncomingFunds: (() => void) | null = null;
   /** Guards against duplicate startIncomingFundsListener() calls */
@@ -188,6 +197,8 @@ class ArkadeClientManager {
     }
 
     this.config = config;
+    // Captured AFTER the re-init disconnect above, which bumps the counter itself.
+    const generation = this._teardownGeneration;
 
     try {
       const isMainnet = config.network === "mainnet";
@@ -238,7 +249,23 @@ class ArkadeClientManager {
         log.info("[ArkadeClientManager] Delegation provider configured:", config.delegatorUrl);
       }
 
-      this.wallet = await Wallet.create(walletConfig);
+      const created = await Wallet.create(walletConfig);
+
+      // A disconnect()/reset() that landed while Wallet.create() was pending has
+      // already torn this session down. Installing now would undo it: the locked
+      // wallet would come back live and signing-capable, and `this.config` (which
+      // carries the mnemonic) would be restored with it. Drop the orphan instead.
+      if (generation !== this._teardownGeneration) {
+        log.info("[ArkadeClientManager] Init superseded by teardown — discarding wallet");
+        try {
+          await (created as unknown as { dispose?: () => Promise<void> | void })?.dispose?.();
+        } catch (cleanupError: unknown) {
+          log.warn("[ArkadeClientManager] Error cleaning up superseded wallet:", cleanupError);
+        }
+        return;
+      }
+
+      this.wallet = created;
 
       // HD wallets hold funds across rotated `…/0/N` addresses. A fresh client
       // (e.g. restore on a new device) knows none of them until it runs the
@@ -269,8 +296,12 @@ class ArkadeClientManager {
         hdMode ? "hd" : "static",
       );
     } catch (error: unknown) {
-      this.wallet = null;
-      this._vtxoManager = null;
+      // Only clear the wallet if this init still owns the session; a failure here
+      // must not tear down a newer, successful one.
+      if (generation === this._teardownGeneration) {
+        this.wallet = null;
+        this._vtxoManager = null;
+      }
       const msg = error instanceof Error ? error.message : String(error);
       throw Object.assign(new Error(`Failed to initialize Arkade wallet: ${msg}`), {
         cause: error,
@@ -353,6 +384,7 @@ class ArkadeClientManager {
     }
     this.wallet = null;
     this.config = null;
+    this._teardownGeneration++;
     log.info("[ArkadeClientManager] Wallet disconnected");
   }
 
@@ -369,7 +401,9 @@ class ArkadeClientManager {
     }
     this.wallet = null;
     this.config = null;
+    this._teardownGeneration++;
     this._initPromise = null;
+    this._pendingConfig = null;
     log.info("[ArkadeClientManager] Complete reset performed");
   }
 
