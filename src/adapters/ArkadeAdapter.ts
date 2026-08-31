@@ -526,7 +526,16 @@ export class ArkadeAdapter implements IProtocolAdapter {
    * in that case we don't have a history row and the payment stays pending).
    */
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
-    if (!this.isConnected() || !paymentHash) {
+    // A DISCONNECTED adapter is not reporting a pending payment — it is reporting
+    // that it cannot look anything up. Every peer adapter throws NOT_CONNECTED in
+    // this state (SparkWdkAdapter, RlnWdkAdapter, ArkadeWdkAdapter all
+    // assertConnected; LiquidWdkAdapter propagates), so answering `pending` here
+    // denied the host even "adapter locked" as a signal and made a poll wait
+    // forever (audit finding G-F2). Nothing pins this behaviour.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
+    }
+    if (!paymentHash) {
       return { paymentHash, status: "pending" as TransactionStatus };
     }
     try {

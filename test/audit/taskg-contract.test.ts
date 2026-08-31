@@ -60,7 +60,22 @@ describe('G-F1: ArkadeWdkAdapter Ark-transfer send — confirmed with empty txid
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F2: getPaymentStatus must not report a lookup failure as pending', () => {
+/**
+ * G-F2, split by verdict in run 2.
+ *
+ * The DISCONNECTED case is fixed and unskipped below. The two lookup-failure cases
+ * stay skipped: they are CONFIRMED but need a design decision, because
+ * `TransactionStatus` (types/base.ts) has no `unknown`/`error` member to return
+ * and making a polling API throw is a breaking change for its callers.
+ *
+ * The RlnWdkAdapter case that used to live here was DELETED. `test/rln-payment-status
+ * .test.ts:45-55` — pre-existing, unskipped, passing — pins exactly that behaviour
+ * as deliberate: "returns pending (never throws) when the payment is unknown OR THE
+ * CALL FAILS". Keeping a skipped test that demands the opposite of a decision the
+ * project has already recorded is worse than having none. The underlying concern
+ * (a caller cannot distinguish in-flight from un-checkable) is carried in REPORT-2.
+ */
+describe.skip('G-F2: getPaymentStatus lookup failure reported as pending (NEEDS DESIGN)', () => {
   it('SparkWdkAdapter: getTransactionReceipt failure must surface, not return pending', async () => {
     const adapter = connected(new SparkWdkAdapter(), {
       getTransactionReceipt: async () => {
@@ -68,16 +83,6 @@ describe.skip('G-F2: getPaymentStatus must not report a lookup failure as pendin
       },
     })
     await expect(adapter.getPaymentStatus('pay-1')).rejects.toThrow()
-  })
-
-  it('RlnWdkAdapter: a listPayments failure is indistinguishable from an in-flight payment', async () => {
-    const adapter = connected(new RlnWdkAdapter(), {
-      listPayments: async () => {
-        throw new Error('node down')
-      },
-    })
-    const r = await adapter.getPaymentStatus('hash-of-a-payment-that-failed')
-    expect(r.status).not.toBe('pending') // ACTUAL (bug): 'pending'
   })
 
   it('ArkadeWdkAdapter: receipt lookup failure must surface, not return pending', async () => {
@@ -88,11 +93,15 @@ describe.skip('G-F2: getPaymentStatus must not report a lookup failure as pendin
     })
     await expect(adapter.getPaymentStatus('tx-1')).rejects.toThrow()
   })
+})
 
-  it('ArkadeAdapter (native): a DISCONNECTED adapter must throw NOT_CONNECTED, not report pending', async () => {
+describe('G-F2 (disconnected case): a disconnected adapter must not report a payment status', () => {
+  it('ArkadeAdapter (native): a DISCONNECTED adapter throws NOT_CONNECTED, not pending', async () => {
     const adapter = new ArkadeAdapter() // never connected
     expect(adapter.isConnected()).toBe(false)
-    await expect(adapter.getPaymentStatus('any-hash')).rejects.toThrow() // ACTUAL (bug): {status:'pending'}
+    // Every peer adapter throws NOT_CONNECTED in this state; answering `pending`
+    // denied the host even "adapter locked" as a signal.
+    await expect(adapter.getPaymentStatus('any-hash')).rejects.toThrow(/not connected/i)
   })
 })
 
