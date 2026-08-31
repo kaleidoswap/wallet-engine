@@ -14,7 +14,7 @@
  */
 
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
-import { mnemonicToSeedSync } from "@scure/bip39";
+import { resolveWalletSeed } from "../lib/wallet-seed";
 import { HDKey } from "@scure/bip32";
 import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 import { log } from "../lib/log";
@@ -902,7 +902,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "ARKADE", "NOT_CONNECTED");
     }
-    const seed = mnemonicToSeedSync(this.config.mnemonic);
+    const seed = resolveWalletSeed(this.config.mnemonic);
     const node = HDKey.fromMasterSeed(seed).derive("m/138'/1");
     if (!node.privateKey) {
       throw new ProtocolError(

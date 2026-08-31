@@ -1025,9 +1025,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   async signMessage(message: string): Promise<string> {
     this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'SPARK', 'NOT_CONNECTED')
-    const { mnemonicToSeedSync } = await import('@scure/bip39')
     const { HDKey } = await import('@scure/bip32')
-    const seed = mnemonicToSeedSync(this.mnemonic)
+    const seed = resolveWalletSeed(this.mnemonic)
     const root = HDKey.fromMasterSeed(seed)
     // m/138'/1 — wallet-identity message-signing key (distinct from LNURL-auth's m/138'/0).
     const node = root.derive("m/138'/1")

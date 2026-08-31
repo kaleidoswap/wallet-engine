@@ -17,7 +17,7 @@
 
 import { Transaction } from '@scure/btc-signer'
 import { HDKey } from '@scure/bip32'
-import { mnemonicToSeedSync } from '@scure/bip39'
+import { resolveWalletSeed } from './wallet-seed'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 
 // PSBT magic bytes: 0x70736274ff ("psbt" + separator 0xff)
@@ -50,12 +50,22 @@ export interface PsbtSignResult {
 
 /**
  * Parse and attempt to sign a PSBT using keys derived from the provided
- * BIP39 mnemonic.
+ * wallet secret.
  *
- * @param psbtHex  Hex-encoded PSBT bytes (without 0x prefix).
- * @param mnemonic BIP39 mnemonic for key derivation.
+ * The secret is resolved through `resolveWalletSeed`, not `mnemonicToSeedSync`:
+ * hosts root wallets on an `nsec1…` key or a raw 64-hex private key as well as
+ * on a BIP-39 phrase (an nsec root is the *default* Arkade wallet), and the
+ * connect paths seed their wallet managers from exactly that resolution
+ * (ArkadeWdkAdapter.ts:128, RlnWdkAdapter.ts:168, SparkWdkAdapter.ts). So the HD
+ * tree a PSBT's BIP32 derivations name is rooted there — deriving from anything
+ * else would produce keys that match no input. `resolveWalletSeed` also throws
+ * on a secret that is none of the three shapes rather than PBKDF2-ing a typo
+ * into a valid-but-different, empty wallet.
+ *
+ * @param psbtHex Hex-encoded PSBT bytes (without 0x prefix).
+ * @param secret  Wallet secret: `nsec1…`, 64-char hex key, or BIP-39 mnemonic.
  */
-export function signPsbt(psbtHex: string, mnemonic: string): PsbtSignResult {
+export function signPsbt(psbtHex: string, secret: string): PsbtSignResult {
   const bytes = hexToBytes(psbtHex)
   assertPsbtMagic(bytes)
 
@@ -67,7 +77,7 @@ export function signPsbt(psbtHex: string, mnemonic: string): PsbtSignResult {
     throw new Error(`Failed to parse PSBT: ${msg}`)
   }
 
-  const seed = mnemonicToSeedSync(mnemonic)
+  const seed = resolveWalletSeed(secret)
   const root = HDKey.fromMasterSeed(seed)
 
   let signedCount = 0

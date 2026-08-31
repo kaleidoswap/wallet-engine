@@ -549,9 +549,8 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async signMessage(message: string): Promise<string> {
     this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'ARKADE', 'NOT_CONNECTED')
-    const { mnemonicToSeedSync } = await import('@scure/bip39')
     const { HDKey } = await import('@scure/bip32')
-    const seed = mnemonicToSeedSync(this.mnemonic)
+    const seed = resolveWalletSeed(this.mnemonic)
     const node = HDKey.fromMasterSeed(seed).derive("m/138'/1")
     if (!node.privateKey) {
       throw new ProtocolError('Failed to derive message-signing key', 'ARKADE', 'KEY_DERIVATION_ERROR')

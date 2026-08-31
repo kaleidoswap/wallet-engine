@@ -154,20 +154,19 @@ describe('ArkadeClientManager teardown race', () => {
 const RAW_KEY = hexToBytes('11'.repeat(32))
 const NSEC = bech32.encode('nsec', bech32.toWords(RAW_KEY))
 
-describe('nsec/hex-rooted wallets: signMessage / signPsbt assume a BIP39 secret', () => {
-  it('F4: connect() accepts an nsec secret, but the signMessage derivation path throws on it', () => {
-    // connect() resolves nsec to raw key bytes (resolveWalletSeed /
-    // resolveSparkMnemonicOrSeed / resolveArkadePrivateKeyHex) — the wallet
-    // connects and operates fine. But all four signMessage implementations
-    // (SparkAdapter.ts:1137, SparkWdkAdapter.ts:977, ArkadeAdapter.ts:856,
-    // ArkadeWdkAdapter.ts:510) run mnemonicToSeedSync(rawSecret), which throws
-    // for anything that is not 12-24 words. An nsec-rooted wallet therefore
-    // CANNOT sign messages at all — every dApp "verify wallet ownership" /
-    // LNURL-style login fails with an opaque "Invalid mnemonic".
+describe('nsec/hex-rooted wallets: signMessage / signPsbt resolve the secret [A-F4 FIXED]', () => {
+  it('F4: an nsec secret is not a BIP39 mnemonic — mnemonicToSeedSync alone cannot serve it', () => {
+    // This is the underlying fact the finding rested on, and it stays true:
+    // `mnemonicToSeedSync` throws for anything that is not 12-24 wordlist
+    // words. connect() never had this problem because it resolves the secret
+    // (resolveWalletSeed / resolveSparkMnemonicOrSeed /
+    // resolveArkadePrivateKeyHex); the four signMessage paths did not, so an
+    // nsec-rooted wallet — the DEFAULT Arkade wallet type — could not sign at
+    // all. They now call `resolveWalletSeed` too.
     expect(() => mnemonicToSeedSync(NSEC)).toThrow(/Invalid mnemonic/)
   })
 
-  it('F4b: signPsbt() throws on the nsec-rooted wallet\'s own PSBT', () => {
+  it("F4b: signPsbt() signs the nsec-rooted wallet's own PSBT", () => {
     // Wallet's actual tree (raw key as master seed, as connect() resolves it).
     const root = HDKey.fromMasterSeed(RAW_KEY)
     const PATH = "m/84'/1'/0'/0/0"
@@ -184,11 +183,10 @@ describe('nsec/hex-rooted wallets: signMessage / signPsbt assume a BIP39 secret'
     tx.addOutput({ script: spk, amount: 40_000n })
     const psbtHex = bytesToHex(tx.toPSBT())
 
-    // signPsbt(psbtHex, secret) at src/lib/psbt-signer.ts:70 does
-    // mnemonicToSeedSync(secret) with no nsec/hex resolution — the same
-    // secret connect() accepted makes PSBT signing unusable.
-    expect(() => signPsbt(psbtHex, NSEC)).toThrow(/Invalid mnemonic/)
+    // signPsbt(psbtHex, secret) now resolves the secret through
+    // resolveWalletSeed, so the same secret connect() accepted signs.
+    expect(signPsbt(psbtHex, NSEC).signedCount).toBe(1)
     // Same for a raw 64-hex-char private-key secret.
-    expect(() => signPsbt(psbtHex, '11'.repeat(32))).toThrow(/Invalid mnemonic/)
+    expect(signPsbt(psbtHex, '11'.repeat(32)).signedCount).toBe(1)
   })
 })

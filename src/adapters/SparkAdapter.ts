@@ -59,7 +59,7 @@ import {
   ProtocolError,
   ConnectionError,
 } from "../types/base";
-import { mnemonicToSeedSync } from "@scure/bip39";
+import { resolveWalletSeed } from "../lib/wallet-seed";
 import { HDKey } from "@scure/bip32";
 import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 
@@ -1161,7 +1161,7 @@ export class SparkAdapter implements IProtocolAdapter {
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }
-    const seed = mnemonicToSeedSync(this.config.mnemonic);
+    const seed = resolveWalletSeed(this.config.mnemonic);
     const root = HDKey.fromMasterSeed(seed);
     // m/138'/1 — wallet-identity message-signing key, distinct from the
     // LNURL-auth hashing key at m/138'/0.
