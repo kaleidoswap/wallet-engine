@@ -658,9 +658,17 @@ export class SparkAdapter implements IProtocolAdapter {
     const lower = input.trim().toLowerCase();
 
     if (lower.startsWith("ln")) {
-      // bolt11 invoice: decode fields heuristically
+      // bolt11 invoice. `decodeBolt11` is already imported and used in this file
+      // (sendPayment), and it reads the amount out of the HRP — so returning no
+      // amount here silently defeated the pre-flight "verify what you're paying"
+      // step on a protocol that declares `lightning-send`. The payment hash is
+      // deliberately still empty: bolt11.ts states the full field decode
+      // (payment_hash, description) is left to node-side decoders.
+      const { amountSat, amountMsat } = decodeBolt11(input.trim());
       return {
         paymentHash: "",
+        amount: amountSat,
+        amountMsat,
         expiresAt: 0,
         destination: input,
       };

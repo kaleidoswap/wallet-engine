@@ -326,7 +326,7 @@ describe.skip('G-F14: LiquidWdkAdapter must not double-list L-BTC when getNetwor
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F15: SparkAdapter.decodeInvoice must decode a bolt11 amount (decoder already in scope)', () => {
+describe('G-F15: SparkAdapter.decodeInvoice must decode a bolt11 amount (decoder already in scope)', () => {
   it('lnbc2500u… decodes to 250_000 sats', async () => {
     const adapter = new SparkAdapter() // decodeInvoice has no connection requirement
     const d = await adapter.decodeInvoice('lnbc2500u1pexample')
