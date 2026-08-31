@@ -350,10 +350,18 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // Payment Operations
   // =========================================================================
 
+  /**
+   * Arkade receive is an address, not a bolt11 invoice — EXCEPT when the caller
+   * asks for Lightning via the documented `InvoiceRequest.layer` selector. ARKADE
+   * declares the `lightning-receive` operation and `capabilities` exists "so the
+   * UI can gate actions" (IProtocolAdapter.ts:90-95), so a BTC_LN request must not
+   * come back as an Ark address a host would render as a Lightning QR.
+   */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
+    if (request.layer === "BTC_LN") return this.createArkadeLightningInvoice(request);
     try {
       const wallet = arkadeClientManager.getWallet();
       const address: string = await wallet.getAddress();

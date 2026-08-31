@@ -254,9 +254,19 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Invoices -----------------------------------------------------------
-  /** Arkade on-chain receive is an address, not a bolt11 invoice (mirrors the native adapter). */
+  /**
+   * Arkade on-chain receive is an address, not a bolt11 invoice (mirrors the
+   * native adapter) — EXCEPT when the caller asks for Lightning via the
+   * documented `InvoiceRequest.layer` selector. ARKADE declares the
+   * `lightning-receive` operation (capabilities/operations.ts), and
+   * `capabilities` exists "so the UI can gate actions"
+   * (IProtocolAdapter.ts:90-95); returning an Ark address for a BTC_LN request
+   * handed a caller a non-Lightning artifact under a flag that promised one — and
+   * a host rendering `invoice` as a Lightning QR showed an Ark address.
+   */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
+    if (request.layer === 'BTC_LN') return this.createArkadeLightningInvoice(request)
     const address: string = await this.account.getAddress()
     return {
       invoice: address,
