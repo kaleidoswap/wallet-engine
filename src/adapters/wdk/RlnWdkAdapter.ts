@@ -305,15 +305,30 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const d: any = isBolt11(invoice)
       ? await this.account.decodeLNInvoice(invoice)
       : await this.account.decodeRgbInvoice(invoice)
+    // An RGB on-chain invoice carries its requested amount in `assignment`
+    // (`DecodeRGBInvoiceResponse.assignment`, kaleido-sdk node-types.d.ts:2911-2927
+    // → `AssignmentFungible { type: 'Fungible', value }`). None of the other
+    // fields read below — `amt_msat`, `amount`, `asset_amount`, `payment_hash`,
+    // `payee_pubkey`, `expiry_sec` — exist on that response at all; they belong to
+    // `DecodeLNInvoiceResponse`. So without reading `assignment` an amount-bearing
+    // RGB invoice decoded to `asset_amount: undefined` and the confirmation screen
+    // had no amount to show: the user paid blind.
+    const assignment = d?.assignment as { type?: string; value?: unknown } | undefined
+    const assignedAmount =
+      assignment && typeof assignment === 'object' && assignment.type === 'Fungible'
+        ? Number(assignment.value)
+        : undefined
     return {
       paymentHash: d?.payment_hash ?? d?.recipient_id ?? '',
+      // Sats-denominated: never stuff RGB asset units in here.
       amount: d?.amt_msat != null ? Math.floor(d.amt_msat / 1000) : d?.amount,
       amountMsat: d?.amt_msat,
       description: d?.description,
       expiresAt: d?.expiry_sec ? Date.now() + d.expiry_sec * 1000 : (d?.expiration_timestamp ?? 0) * 1000,
       destination: d?.payee_pubkey ?? d?.recipient_id ?? '',
       asset_id: d?.asset_id,
-      asset_amount: d?.asset_amount,
+      asset_amount:
+        d?.asset_amount ?? (Number.isFinite(assignedAmount) ? assignedAmount : undefined),
     }
   }
 
@@ -325,11 +340,12 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       asset_amount?: number
     }
     const invoice = request.invoice.trim()
+    const decoded = decodeBolt11(invoice)
     const body: any = { invoice }
     // Forward `amt_msat` only for amountless invoices — forwarding it for an
     // amount-bearing invoice silently re-amounts the payment to whatever the
     // caller passed (stale UI state, WebLN args) instead of the invoice amount.
-    if (request.amount != null && request.amount > 0 && decodeBolt11(invoice).amountMsat == null) {
+    if (request.amount != null && request.amount > 0 && decoded.amountMsat == null) {
       body.amt_msat = request.amount * 1000
     }
     if (req.asset_id) body.asset_id = req.asset_id
@@ -338,7 +354,15 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     return {
       paymentHash: r?.payment_hash ?? '',
       preimage: r?.payment_secret,
-      amount: Number(request.amount ?? 0),
+      // The node's `SendPaymentResponse` carries no amount and no fee
+      // (kaleido-sdk node-types.d.ts:3568-3576), and `PaymentResult.amount` is a
+      // REQUIRED field. Falling back to `request.amount ?? 0` recorded a 0-sat
+      // send for every amount-bearing invoice — which is the correct call pattern
+      // here, since the adapter deliberately does not re-amount those. Read the
+      // amount the invoice actually encodes; `decodeBolt11` is already in scope.
+      amount: Number(request.amount ?? decoded.amountSat ?? 0),
+      // Still 0: nothing in the response reports the routing fee. A status
+      // lookup is the only source, so callers must not read this as "free".
       fee: 0,
       status: mapRgbStatus(r?.status),
       timestamp: Date.now(),

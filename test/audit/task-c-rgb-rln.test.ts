@@ -113,14 +113,18 @@ function connectedRln(account: any, extra: Record<string, unknown> = {}) {
 }
 
 describe('F3: RlnWdkAdapter.decodeInvoice drops RGB on-chain invoice amounts', () => {
-  it('returns no amount at all for an amount-bearing RGB invoice (assignment is never read)', async () => {
+  it('[FIXED] reads the requested amount out of `assignment`', async () => {
     const adapter = connectedRln({
       // Real DecodeRGBInvoiceResponse shape (kaleido-sdk generated types):
       decodeRgbInvoice: async () => ({
         recipient_id: 'bcrt:utxob:cbgHUJ4e-7QyKY4U',
         recipient_type: 'Blind',
         asset_id: 'rgb:usdt',
-        assignment: { Fungible: 100 }, // <-- the requested amount lives HERE
+        // The REAL SDK shape is `AssignmentFungible { type, value }`
+        // (node-types.d.ts:2744-2755). Run 1's reproduction used `{ Fungible: 100 }`,
+        // which does not exist — and its suggested fix (`a.Fungible`) would have
+        // read undefined forever.
+        assignment: { type: 'Fungible', value: 100 }, // <-- the requested amount lives HERE
         network: 'Regtest',
         expiration_timestamp: 2_000_000_000,
         transport_endpoints: ['rpcs://proxy.example/0.2/json-rpc'],
@@ -129,8 +133,8 @@ describe('F3: RlnWdkAdapter.decodeInvoice drops RGB on-chain invoice amounts', (
     })
     const d = await adapter.decodeInvoice('rgb:icfqnK9y-wObZKTu?expiry=2000000000')
     expect(d.asset_id).toBe('rgb:usdt')
-    expect(d.asset_amount).toBeUndefined() // DROPPED: user pays blind
-    expect(d.amount).toBeUndefined()
+    expect(d.asset_amount).toBe(100) // was DROPPED: user paid blind
+    expect(d.amount).toBeUndefined() // sats-denominated; asset units must not land here
   })
 })
 
@@ -270,8 +274,8 @@ describe('F6b: RgbAdapter drops RgbConfig.jwt', () => {
 })
 
 // ── F8: PaymentResult.amount echoes the caller, not the payment ─────────────
-describe('F8: RlnWdkAdapter.sendPayment misreports the paid amount', () => {
-  it('paying a 21,000-sat amount-bearing invoice returns PaymentResult.amount = 0', async () => {
+describe('F8 [FIXED]: RlnWdkAdapter.sendPayment reports the paid amount', () => {
+  it('[FIXED] paying a 21,000-sat amount-bearing invoice records 21,000, not 0', async () => {
     const adapter = connectedRln({
       _rln: { sendPayment: async () => ({ payment_hash: 'ph', payment_secret: 'sec', status: 'Succeeded' }) },
     })
@@ -279,7 +283,7 @@ describe('F8: RlnWdkAdapter.sendPayment misreports the paid amount', () => {
     // the invoice carries it), and the node's SendPaymentResponse has no amount field.
     const r = await adapter.sendPayment({ invoice: 'lnbc210u1pexample' })
     expect(r.status).toBe('confirmed')
-    expect(r.amount).toBe(0) // recorded/displayed as a 0-sat payment
+    expect(r.amount).toBe(21_000) // was recorded/displayed as a 0-sat payment
   })
 })
 

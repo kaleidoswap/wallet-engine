@@ -37,7 +37,7 @@ function connectedRln() {
   return adapter
 }
 
-describe.skip('AUDIT C-F7: sendPayment PaymentResult fidelity', () => {
+describe('AUDIT C-F7: sendPayment PaymentResult fidelity', () => {
   it('paying a 1000-sat amount-bearing invoice must not record amount=0', async () => {
     const adapter = connectedRln()
     // lnbc10u1... encodes 10 µBTC = 1000 sats (HRP amount is the invoice amount).
