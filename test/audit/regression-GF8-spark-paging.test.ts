@@ -145,10 +145,7 @@ describe('G-F8: the Spark adapters must not return more rows than `limit`', () =
     expect(full.map((t) => t.timestamp)).toEqual([...full.map((t) => t.timestamp)].sort((a, b) => b - a))
   })
 
-  it('KNOWN LIMITATION, pinned: `offset` stays leg-level and is not re-applied', async () => {
-    // The BTC leg's RPC already received the offset. Re-slicing the merged array
-    // by it would drop rows twice. This asserts the CURRENT contract so that
-    // moving to sound merge-level pagination is a deliberate change, not a drift.
+  it('over-fetches each leg and applies `offset` to the merged result', async () => {
     let seen: unknown = null
     sparkState.wallet = {
       ...walletWith(8),
@@ -158,8 +155,7 @@ describe('G-F8: the Spark adapters must not return more rows than `limit`', () =
       },
     }
     const txs = await new SparkAdapter().listTransactions({ limit: 5, offset: 3 })
-    expect(seen, 'the offset is pushed into the leg').toEqual({ limit: 5, offset: 3 })
-    // Not offset again at the merge: a full page comes back, not 5 minus 3.
+    expect(seen, 'the leg supplies the prefix needed to page the union').toEqual({ limit: 8, offset: 0 })
     expect(txs.length).toBe(5)
   })
 })

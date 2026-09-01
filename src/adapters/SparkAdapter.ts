@@ -275,8 +275,9 @@ export class SparkAdapter implements IProtocolAdapter {
 
     try {
       const wallet = sparkClientManager.getWallet();
-      const limit = filter?.limit ?? 20;
-      const offset = filter?.offset ?? 0;
+      const limit = Math.max(0, filter?.limit ?? 20);
+      const offset = Math.max(0, filter?.offset ?? 0);
+      const fetchLimit = offset + limit;
       const requestedAsset = filter?.asset?.trim();
       const createdAfter = filter?.fromTimestamp ? new Date(filter.fromTimestamp) : undefined;
       const createdBefore =
@@ -300,8 +301,8 @@ export class SparkAdapter implements IProtocolAdapter {
             const sparkAddress = (await wallet.getSparkAddress()) as string;
             const readonlyResult = await readonlyClient.getTransfers({
               sparkAddress,
-              limit,
-              offset,
+              limit: fetchLimit,
+              offset: 0,
               createdAfter,
               createdBefore,
             });
@@ -314,7 +315,7 @@ export class SparkAdapter implements IProtocolAdapter {
               (transfer): transfer is NonNullable<typeof transfer> => !!transfer,
             ) as SparkTransfer[];
           } else {
-            btcTransfers = (await wallet.getTransfers(limit, offset)).transfers as SparkTransfer[];
+            btcTransfers = (await wallet.getTransfers(fetchLimit, 0)).transfers as SparkTransfer[];
           }
           return btcTransfers.map((t) => convertTransferToTransaction(t));
         } catch (err) {
@@ -412,7 +413,7 @@ export class SparkAdapter implements IProtocolAdapter {
                 ownerPublicKeys: [identityPubKey],
                 tokenIdentifiers:
                   requestedAsset && requestedAsset !== "BTC" ? [requestedAsset] : undefined,
-                pageSize: limit,
+                pageSize: fetchLimit,
               })
               .catch((err: unknown) => {
                 log.warn("[SparkAdapter] Failed to query token transactions:", err);
@@ -515,23 +516,9 @@ export class SparkAdapter implements IProtocolAdapter {
         return true;
       });
 
-      // Honour `limit` on the MERGED result. `limit` is pushed into each leg's
-      // RPC, but two legs each returning up to `limit` rows merge to up to twice
-      // that — and the recorded-send / synthesized-offline-record paths are not
-      // paged at all. Measured before this cap: `listTransactions({ limit: 5 })`
-      // returned 16 rows. Capping here is what makes the documented page size
-      // true (audit finding G-F8, Spark half).
-      //
-      // ORDER IS NOT TOUCHED: the newest-first sort above already ran, and this
-      // takes a prefix of it.
-      //
-      // `offset` is deliberately NOT re-applied here. It is already pushed into
-      // the BTC leg's RPC, so slicing the merged array by it a second time would
-      // drop rows the caller never saw. Sound merge-level pagination would have
-      // to over-fetch `offset + limit` from every leg and page the union — a
-      // different paging model, and a larger change than making the count
-      // honest. Carried as an open item.
-      return matched.slice(0, Math.max(0, limit));
+      // Each leg over-fetches the prefix needed for this page. Offset belongs to
+      // the sorted union, not to one leg, or interleaved token rows shift pages.
+      return matched.slice(offset, offset + limit);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ProtocolError(
