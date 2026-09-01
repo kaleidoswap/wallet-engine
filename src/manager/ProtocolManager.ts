@@ -73,6 +73,12 @@ export interface ProtocolManagerConfig {
   allowUnsafeAdapterAccess?: boolean
 }
 
+export interface BalanceRefreshResult {
+  protocol: ProtocolType
+  ok: boolean
+  error?: unknown
+}
+
 export class ProtocolManager {
   private registry: ProtocolAdapterRegistry
   private activeProtocol: ProtocolType | null = null
@@ -427,15 +433,21 @@ export class ProtocolManager {
    * failures so one slow protocol can't block the others.
    */
   async refreshBalances(): Promise<void> {
-    const adapters = this.registry.getAll().filter((a) => a.isConnected())
-    const results = await Promise.allSettled(adapters.map((a) => a.refreshBalances()))
-    // Surface per-adapter failures (consistent with listAllAssets/listAllTransactions):
-    // a silently-swallowed invalidation leaves a stale balance with no diagnostic trail.
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        this.log.error(`[ProtocolManager] Error refreshing balances for ${adapters[index].protocolName}:`, result.reason)
+    const results = await this.refreshBalancesWithResults()
+    for (const result of results) {
+      if (!result.ok) {
+        this.log.error(`[ProtocolManager] Error refreshing balances for ${result.protocol}:`, result.error)
       }
-    })
+    }
+  }
+
+  /** Refresh every connected adapter and return each outcome without rejecting the batch. */
+  async refreshBalancesWithResults(): Promise<BalanceRefreshResult[]> {
+    const adapters = this.registry.getAll().filter((adapter) => adapter.isConnected())
+    const settled = await Promise.allSettled(adapters.map((adapter) => adapter.refreshBalances()))
+    return settled.map((result, index) => result.status === 'fulfilled'
+      ? { protocol: adapters[index].protocolName, ok: true }
+      : { protocol: adapters[index].protocolName, ok: false, error: result.reason })
   }
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {

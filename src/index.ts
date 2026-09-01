@@ -136,7 +136,11 @@ export {
 } from './lib/arkade-vtxo-lifecycle'
 
 // Manager
-export { ProtocolManager, type ProtocolManagerConfig } from './manager/ProtocolManager'
+export {
+  ProtocolManager,
+  type ProtocolManagerConfig,
+  type BalanceRefreshResult,
+} from './manager/ProtocolManager'
 export {
   evaluatePolicy,
   enforcePolicy,

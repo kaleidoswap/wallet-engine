@@ -211,7 +211,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
-    await this.account.refreshTransfers?.({ skipSync: false }).catch(() => {})
+    await this.account.refreshTransfers?.({ skipSync: false })
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {

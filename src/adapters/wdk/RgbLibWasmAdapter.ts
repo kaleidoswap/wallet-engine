@@ -245,20 +245,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
-    try {
-      // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
-      // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
-      // synced again — two full indexer round-trips, ~2× the cold-sync wait.
-      await this.account.sync(this.online)
-      await this.account.refresh(this.online, null, [], true)
-      // Flush or the settled-transfer promotion lives only in memory and is lost
-      // on the next MV3 cold start, resurfacing as stale balances on the next send.
-      await this.flushState()
-    } catch (e) {
-      // best-effort, but surface the cause — a silent failure leaves the wallet
-      // showing 0 balance / no history.
-      console.error('[RGB-L1] refresh/sync failed:', e)
-    }
+    // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
+    // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
+    // synced again — two full indexer round-trips, ~2× the cold-sync wait.
+    await this.account.sync?.(this.online)
+    await this.account.refresh?.(this.online, null, [], true)
+    // Flush or the settled-transfer promotion lives only in memory and is lost
+    // on the next MV3 cold start, resurfacing as stale balances on the next send.
+    await this.flushState()
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {

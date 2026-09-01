@@ -122,12 +122,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async refreshBalances(): Promise<void> {
     this.assertConnected()
     // refreshWallet()/syncWallet() are synchronous void on the WDK account.
-    try {
-      this.account.refreshWallet?.()
-      this.account.syncWallet?.()
-    } catch {
-      /* best-effort */
-    }
+    this.account.refreshWallet?.()
+    this.account.syncWallet?.()
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {

@@ -351,6 +351,7 @@ export class RgbAdapter implements IProtocolAdapter {
       }
     } catch (error) {
       log.warn("[RgbAdapter] Could not refresh transfers:", error);
+      throw error;
     }
   }
 

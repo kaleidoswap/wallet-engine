@@ -233,9 +233,9 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
     // Drop the short-TTL coalescing cache so the next read hits the gateway,
-    // then reconcile server-side state (best-effort).
+    // then reconcile server-side state.
     invalidateSparkBalanceCache()
-    await this.account.syncWalletBalance?.().catch(() => {})
+    await this.account.syncWalletBalance?.()
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
