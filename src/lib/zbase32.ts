@@ -37,6 +37,12 @@ export function zbase32Encode(data: Uint8Array): string {
 
 export function zbase32Decode(text: string, byteLength?: number): Uint8Array {
   if (text.length === 0) return new Uint8Array(0);
+  if (byteLength != null) {
+    const expectedChars = Math.ceil((byteLength * 8) / 5);
+    if (text.length !== expectedChars) {
+      throw new Error(`Invalid zbase32 length: expected ${expectedChars} characters`);
+    }
+  }
   const expectedBytes = byteLength ?? Math.floor((text.length * 5) / 8);
   const out = new Uint8Array(expectedBytes);
   let buffer = 0;
@@ -55,6 +61,9 @@ export function zbase32Decode(text: string, byteLength?: number): Uint8Array {
         out[written++] = (buffer >>> bits) & 0xff;
       }
     }
+  }
+  if (written !== expectedBytes) {
+    throw new Error(`Invalid zbase32 length: expected ${expectedBytes} bytes`);
   }
   return out;
 }
