@@ -109,7 +109,13 @@ export class ProtocolManager {
    */
   private enforce(
     operation: PolicyOperation,
-    opts: { amountSat?: number; destination?: string; protocol?: ProtocolType } = {},
+    opts: {
+      amountSat?: number
+      assetId?: string
+      assetAmount?: string
+      destination?: string
+      protocol?: ProtocolType
+    } = {},
   ): void {
     enforcePolicy(
       {
@@ -117,6 +123,8 @@ export class ProtocolManager {
         protocol: opts.protocol ?? this.activeProtocol ?? undefined,
         grantId: this.activeGrantId,
         amountSat: opts.amountSat,
+        assetId: opts.assetId,
+        assetAmount: opts.assetAmount,
         destination: opts.destination,
       },
       this.policy,
@@ -639,16 +647,14 @@ export class ProtocolManager {
     // of sats — because 90_000 <= 100_000 numerically.
     //
     // A sat-denominated cap cannot bound an arbitrary asset without a price
-    // oracle, so don't pretend: report the amount only when it IS sats. The
-    // policy engine already fails CLOSED on an unknown amount whenever a cap is
-    // configured (AMOUNT_UNKNOWN, policy/index.ts:121-128), so an asset swap under
-    // a cap now gets an explicit, visible host decision instead of a silent unit
-    // mismatch. NOTE FOR HOSTS: this means non-BTC swaps are DENIED while
-    // `maxAmountSat` is set — see REPORT-2 "Still open" for the per-asset-cap
-    // design question that would lift that.
+    // oracle. Non-BTC swaps therefore carry their asset id and raw amount to the
+    // policy, which applies an explicit `maxAmountByAsset` entry or keeps the
+    // existing fail-closed AMOUNT_UNKNOWN denial when none exists.
     const fromIsSats = quote.fromAsset === 'BTC'
     this.enforce('swap', {
       amountSat: fromIsSats ? quote.fromAmount : undefined,
+      assetId: fromIsSats ? undefined : quote.fromAsset,
+      assetAmount: fromIsSats ? undefined : String(quote.fromAmount),
       destination: typeof receiverAddress === 'string' ? receiverAddress : undefined,
     })
     const adapter = this.getActiveAdapterUnchecked()

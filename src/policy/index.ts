@@ -39,6 +39,10 @@ export interface PolicyRequest {
   protocol?: ProtocolType
   /** Amount in satoshis for send/keysend/swap. Omitted when not known/applicable. */
   amountSat?: number
+  /** Non-BTC swap input asset. Omitted for satoshi-denominated operations. */
+  assetId?: string
+  /** Non-BTC swap input amount in base units, as a decimal string. */
+  assetAmount?: string
   /** Raw destination string (invoice/address); classified internally for kind checks. */
   destination?: string
   /** Identifies the caller/app performing the op (deep link, dapp origin, MCP tool). */
@@ -68,18 +72,28 @@ export interface SigningPolicy {
   mode?: 'allow' | 'deny'
   /** Global per-transaction spend cap (sats), applied on top of any grant cap. */
   maxAmountSat?: number
+  /**
+   * Per-asset swap caps in each asset's own base units. Decimal strings are
+   * parsed with BigInt; no price conversion or floating-point coercion occurs.
+   * When a cap policy is active, an unlisted non-BTC asset remains denied.
+   */
+  maxAmountByAsset?: Record<string, string>
   /** Per-app capability grants, resolved by `PolicyRequest.grantId`. */
   grants?: CapabilityGrant[]
 }
 
-export type PolicyDecision = { allowed: true } | { allowed: false; code: string; reason: string }
+export type PolicyDecision =
+  | { allowed: true }
+  | { allowed: false; code: string; reason: string; details?: unknown }
 
 export class PolicyError extends Error {
   readonly code: string
-  constructor(code: string, message: string) {
+  readonly details?: unknown
+  constructor(code: string, message: string, details?: unknown) {
     super(message)
     this.name = 'PolicyError'
     this.code = code
+    this.details = details
   }
 }
 
@@ -106,8 +120,12 @@ function destinationKindsOf(destination: string): DestinationKind[] {
   return kinds
 }
 
-function deny(code: string, reason: string): PolicyDecision {
-  return { allowed: false, code, reason }
+function deny(code: string, reason: string, details?: unknown): PolicyDecision {
+  return { allowed: false, code, reason, ...(details === undefined ? {} : { details }) }
+}
+
+function isDecimalBaseUnits(value: unknown): value is string {
+  return typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value)
 }
 
 /**
@@ -125,10 +143,54 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
     return deny('AMOUNT_INVALID', `'${req.operation}' amount must be a positive safe integer`)
   }
 
+  if (req.assetAmount != null && (!isDecimalBaseUnits(req.assetAmount) || req.assetAmount === '0')) {
+    return deny(
+      'AMOUNT_INVALID',
+      `'${req.operation}' asset amount must be a positive base-unit decimal string`,
+      { asset: req.assetId, amount: req.assetAmount },
+    )
+  }
+
   // 1. Global per-transaction cap, regardless of grants/mode. When a cap is set for
   // an amount-op but the amount is unknown, fail CLOSED: an unknown amount must
   // never slip past a spend limit (e.g. an unresolved amountless BOLT11).
-  if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
+  const isNonBtcSwap = req.operation === 'swap' && req.assetId != null && req.assetId !== 'BTC'
+  const hasGlobalCap = policy.maxAmountSat != null || policy.maxAmountByAsset != null
+
+  if (isNonBtcSwap && hasGlobalCap) {
+    const hasAssetCap =
+      policy.maxAmountByAsset != null &&
+      Object.prototype.hasOwnProperty.call(policy.maxAmountByAsset, req.assetId!)
+    const cap = hasAssetCap ? policy.maxAmountByAsset![req.assetId!] : undefined
+    if (cap == null) {
+      return deny(
+        'AMOUNT_UNKNOWN',
+        `'swap' amount for asset '${req.assetId}' has no configured base-unit cap`,
+        { asset: req.assetId, cap: null },
+      )
+    }
+    if (!isDecimalBaseUnits(cap)) {
+      return deny(
+        'AMOUNT_INVALID',
+        `configured cap for asset '${req.assetId}' is not a base-unit decimal string`,
+        { asset: req.assetId, cap },
+      )
+    }
+    if (req.assetAmount == null) {
+      return deny(
+        'AMOUNT_UNKNOWN',
+        `'swap' amount for asset '${req.assetId}' is unknown but a cap is set`,
+        { asset: req.assetId, cap },
+      )
+    }
+    if (BigInt(req.assetAmount) > BigInt(cap)) {
+      return deny(
+        'AMOUNT_OVER_GLOBAL_LIMIT',
+        `amount ${req.assetAmount} of asset '${req.assetId}' exceeds global limit ${cap}`,
+        { asset: req.assetId, amount: req.assetAmount, cap },
+      )
+    }
+  } else if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
     if (req.amountSat == null) {
       return deny(
         'AMOUNT_UNKNOWN',
@@ -210,5 +272,7 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
 export function enforcePolicy(req: PolicyRequest, policy?: SigningPolicy): void {
   if (!policy) return
   const d = evaluatePolicy(req, policy)
-  if (!d.allowed) throw new PolicyError(d.code, `Policy denied '${req.operation}': ${d.reason}`)
+  if (!d.allowed) {
+    throw new PolicyError(d.code, `Policy denied '${req.operation}': ${d.reason}`, d.details)
+  }
 }
