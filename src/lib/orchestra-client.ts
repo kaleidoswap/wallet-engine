@@ -60,6 +60,14 @@ export class OrchestraAuthError extends Error {
   }
 }
 
+export class OrchestraOrderNotFoundError extends Error {
+  readonly code = 'ORCHESTRA_ORDER_NOT_FOUND'
+  constructor() {
+    super('ORCHESTRA_ORDER_NOT_FOUND: Orchestra returned no order for this lookup')
+    this.name = 'OrchestraOrderNotFoundError'
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -316,9 +324,10 @@ export async function getStatus(query: {
   )
   // Wrapped shape: pull the order, attach stages so callers can use them
   // for finer-grained progress UI without a second request.
-  if (raw && typeof raw === 'object' && 'order' in raw && raw.order) {
+  if (raw && typeof raw === 'object' && 'order' in raw) {
     const wrapped = raw as OrchestraOrderLookup
-    return wrapped.stages ? { ...wrapped.order!, stages: wrapped.stages } : wrapped.order!
+    if (!wrapped.order) throw new OrchestraOrderNotFoundError()
+    return wrapped.stages ? { ...wrapped.order, stages: wrapped.stages } : wrapped.order
   }
   return raw as OrchestraOrder
 }

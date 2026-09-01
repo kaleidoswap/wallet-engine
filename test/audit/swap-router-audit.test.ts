@@ -333,8 +333,8 @@ describe('F8 [FIXED]: orchestra retries use stable idempotency keys', () => {
   })
 })
 
-describe('F9: orchestra getStatus leaks the wrapper when order is null', () => {
-  it('{quote, order: null} response -> returned "order" has undefined status and wrapper keys', async () => {
+describe('F9 [FIXED]: orchestra getStatus rejects a null wrapped order', () => {
+  it('{quote, order: null} response -> explicit not-found error', async () => {
     orchestra.setOrchestraApiKey('test-key')
     vi.stubGlobal(
       'fetch',
@@ -343,9 +343,8 @@ describe('F9: orchestra getStatus leaks the wrapper when order is null', () => {
         json: async () => ({ quote: { quoteId: 'q1' }, order: null, stages: [] }),
       })) as any,
     )
-    const order = await orchestra.getStatus({ quoteId: 'q1' })
-    // VULNERABILITY: the exact "status is undefined" failure the unwrap claims to fix.
-    expect(order.status).toBeUndefined()
-    expect((order as any).order).toBeNull() // the wrapper leaked through as the order
+    await expect(orchestra.getStatus({ quoteId: 'q1' })).rejects.toMatchObject({
+      code: 'ORCHESTRA_ORDER_NOT_FOUND',
+    })
   })
 })
