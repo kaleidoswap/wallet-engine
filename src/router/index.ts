@@ -178,7 +178,7 @@ export class CrossProtocolRouter {
     if (parsed.btcAddress) railValues.push({ rail: 'onchain', value: parsed.btcAddress })
 
     const routes: UnifiedSendRoute[] = []
-    for (const { rail, value } of railValues) {
+    for (const { value } of railValues) {
       // Classify each rail's value through the same single source of truth.
       const classified = classifyDestination(value)
       for (const protocol of classified.candidates) {
@@ -189,7 +189,9 @@ export class CrossProtocolRouter {
           adapter,
           layer: classified.layer,
           direct: canSettleDirectly(protocol, classified),
-          rail,
+          // The parameter name is only a hint; a mismatched value must be
+          // labelled by what the selected adapter will actually pay.
+          rail: railOfKind(classified.kind),
           value,
         })
       }
