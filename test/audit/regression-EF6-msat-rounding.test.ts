@@ -10,10 +10,13 @@ afterEach(() => vi.restoreAllMocks())
 describe('E-F6: one integer-sat rendering for millisatoshis', () => {
   it('native RGB decode rounds 1500 msat to 2 sats and preserves msat', async () => {
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       rln: { decodeLNInvoice: async () => ({ amt_msat: 1500 }) },
     } as never)
-    const decoded = await new RgbAdapter().decodeInvoice('lnbc15n1example')
+    const adapter = new RgbAdapter()
+    Object.assign(adapter as never, { connected: true })
+    const decoded = await adapter.decodeInvoice('lnbc15n1example')
     expect(decoded).toMatchObject({ amount: 2, amountMsat: 1500 })
   })
 

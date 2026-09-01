@@ -5,6 +5,7 @@ const state = { client: null as any }
 vi.mock('../../src/lib/kaleido-client-manager', () => ({
   kaleidoClientManager: {
     hasNode: () => true,
+    isInitialized: () => true,
     getClient: () => state.client,
     reset: () => {},
   },

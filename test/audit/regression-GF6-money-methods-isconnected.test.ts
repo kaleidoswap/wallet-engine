@@ -19,10 +19,7 @@
  * `initialize()`. Anything that calls it — a host, a sibling module, a future
  * refactor — reopens the gap. The four money paths now check both.
  *
- * SCOPE: the four fund-moving methods only. The ~20 read methods
- * (getAssetBalance, listTransactions, getBtcBalance, …) still gate on
- * `hasNode()`; standardising those is a larger change with no funds at stake,
- * and is NOT what this finding asked for.
+ * The later residual pass applies the same guard to the remaining methods.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RgbAdapter } from '../../src/adapters/RgbAdapter'

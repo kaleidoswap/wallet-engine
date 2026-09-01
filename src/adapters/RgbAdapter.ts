@@ -184,6 +184,15 @@ export class RgbAdapter implements IProtocolAdapter {
     return this.connected && kaleidoClientManager.isInitialized();
   }
 
+  private assertNodeConnected(): void {
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
+    if (!kaleidoClientManager.hasNode()) {
+      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
+    }
+  }
+
   async getConnectionInfo(): Promise<ConnectionInfo> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
@@ -293,9 +302,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset["balance"]> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     if (!assetId || !assetId.trim()) {
       throw new ProtocolError("Asset ID is required", "RGB_LN", "INVALID_ASSET_ID");
@@ -327,7 +334,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async refreshBalances(): Promise<void> {
-    if (!kaleidoClientManager.hasNode()) return;
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient() as unknown as {
@@ -352,9 +359,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -518,9 +523,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -568,9 +571,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -610,9 +611,7 @@ export class RgbAdapter implements IProtocolAdapter {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
     }
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -668,9 +667,7 @@ export class RgbAdapter implements IProtocolAdapter {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
     }
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -695,9 +692,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -729,9 +724,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -752,9 +745,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async getNodeInfo(): Promise<NodeInfo> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.getNodeInfo();
@@ -764,9 +755,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const btcBalance = await client.rln.getBtcBalance();
@@ -792,9 +781,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listChannels(): Promise<unknown[]> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const response = (await client.rln.listChannels()) as
@@ -812,9 +799,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listPayments(): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.listPayments();
@@ -824,9 +809,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       if (!options?.asset_id) {
@@ -843,9 +826,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async createRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const durationSeconds = ((params.durationSeconds as number) ||
@@ -874,9 +855,7 @@ export class RgbAdapter implements IProtocolAdapter {
       upTo?: boolean;
     } = {},
   ): Promise<{ success: boolean }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       await client.rln.createUtxos({
@@ -902,9 +881,7 @@ export class RgbAdapter implements IProtocolAdapter {
       }>;
     }>;
   }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const response = await client.rln.listUnspents();
@@ -955,9 +932,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const response = await client.rln.estimateFee({ blocks });
@@ -971,9 +946,7 @@ export class RgbAdapter implements IProtocolAdapter {
     vanilla: { settled: number; future: number; spendable: number };
     colored: { settled: number; future: number; spendable: number };
   }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const balance = await client.rln.getBtcBalance();
@@ -988,9 +961,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async decodeRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.decodeRgbInvoice({
@@ -1002,9 +973,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.getInvoiceStatus(params);
@@ -1025,9 +994,7 @@ export class RgbAdapter implements IProtocolAdapter {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
     }
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const assetId = ((params.assetId as string) || (params.asset_id as string)) as string;
@@ -1080,9 +1047,7 @@ export class RgbAdapter implements IProtocolAdapter {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
     }
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.sendBtc({

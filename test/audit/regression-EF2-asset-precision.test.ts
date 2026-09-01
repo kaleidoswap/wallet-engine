@@ -14,7 +14,12 @@ import { RgbAdapter } from '../../src/adapters/RgbAdapter'
  */
 const state = { client: null as any }
 vi.mock('../../src/lib/kaleido-client-manager', () => ({
-  kaleidoClientManager: { hasNode: () => true, getClient: () => state.client, reset: () => {} },
+  kaleidoClientManager: {
+    hasNode: () => true,
+    isInitialized: () => true,
+    getClient: () => state.client,
+    reset: () => {},
+  },
 }))
 
 function adapter() {
