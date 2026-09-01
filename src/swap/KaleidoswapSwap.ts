@@ -75,6 +75,7 @@ interface RawAtomicSwap {
 
 export class KaleidoswapSwap {
   private proto: any = null
+  private protoPromise: Promise<any> | null = null
   /**
    * In-memory fallback for per-swap status tokens (paymentHash → token). Hosts
    * should persist `SwapResult.accessToken`; this map does not survive restarts.
@@ -89,11 +90,21 @@ export class KaleidoswapSwap {
 
   private async ensure(): Promise<any> {
     if (this.proto) return this.proto
-    // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
-    const mod = await loadWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () => import('@kaleidorg/wdk-protocol-swap-kaleidoswap'))
-    const KaleidoswapProtocol = mod.default ?? mod
-    this.proto = new KaleidoswapProtocol(this.account, { baseUrl: this.config.baseUrl })
-    return this.proto
+    if (this.protoPromise) return this.protoPromise
+    const pending = (async () => {
+      // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
+      const mod = await loadWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () => import('@kaleidorg/wdk-protocol-swap-kaleidoswap'))
+      const KaleidoswapProtocol = mod.default ?? mod
+      const proto = new KaleidoswapProtocol(this.account, { baseUrl: this.config.baseUrl })
+      this.proto = proto
+      return proto
+    })()
+    this.protoPromise = pending
+    try {
+      return await pending
+    } finally {
+      if (this.protoPromise === pending) this.protoPromise = null
+    }
   }
 
   async getQuote(req: SwapQuoteRequest): Promise<Quote> {

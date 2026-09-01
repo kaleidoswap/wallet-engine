@@ -4,14 +4,7 @@
  * What this exercises and what it found. All interleavings are driven by explicit
  * deferreds, not timing.
  *
- *  N6 (LOW, reported not fixed) — `KaleidoswapSwap.ensure()` is
- *      `if (this.proto) return this.proto` around an awaited dynamic import, with
- *      no in-flight dedupe. Two concurrent `getQuote()` calls therefore each
- *      CONSTRUCT a protocol module instance; the second overwrites `this.proto`
- *      and the first is abandoned. Both quotes still return correct values (the
- *      module is bound to the same account + baseUrl), which is why this is Low —
- *      but the module whitelists HTLCs on the taker's node, so "how many of these
- *      exist" is not obviously free. Recorded, with the count asserted.
+ *  N6 (LOW, fixed) — concurrent first calls share one module construction.
  *
  *  HELD — the per-swap `accessTokens` map is keyed by payment hash, so two
  *      concurrent swaps never overwrite each other's status token.
@@ -78,8 +71,8 @@ const REQ = {
   toLayer: 'RGB_LN',
 } as never
 
-describe('N6: concurrent getQuote() double-constructs the swap protocol module', () => {
-  it('two concurrent first-calls construct two instances (no in-flight dedupe)', async () => {
+describe('N6: concurrent getQuote() single-flights the swap protocol module', () => {
+  it('two concurrent first-calls construct one shared instance', async () => {
     modState.constructed = 0
     const swap = new KaleidoswapSwap({}, { baseUrl: 'https://maker.example' })
 
@@ -88,8 +81,7 @@ describe('N6: concurrent getQuote() double-constructs the swap protocol module',
     // Both quotes are correct — the module is bound to the same account/baseUrl.
     expect(a.fromAmount).toBe(100_000)
     expect(b.fromAmount).toBe(100_000)
-    // …but two instances were built. `ensure()` has no in-flight dedupe.
-    expect(modState.constructed).toBe(2)
+    expect(modState.constructed).toBe(1)
   })
 
   it('a sequential second call reuses the instance (the cache itself works)', async () => {
