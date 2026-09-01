@@ -21,6 +21,7 @@ import type { IWallet } from "@arkade-os/sdk";
 import { loadWdkModule } from "../adapters/wdk/moduleLoader";
 import { ArkadeIntentsStore, type ArkadeIntentsRecord } from "../swap/arkade-intents-store";
 import { log } from "./log";
+import { WalletSessionGuard, type SessionAttempt } from "./wallet-session";
 
 /** The venue module's subpath — also the module-loader registry key. */
 const VENUE_MODULE = "@kaleidorg/swap-sdk/arkade";
@@ -65,15 +66,20 @@ export interface ArkadeIntentsInitOptions {
   assetSwapRepository?: unknown;
 }
 
+/** The guard's single slot: the wallet-bound venue handshake. */
+const VENUE_SLOT = "venue";
+
 class ArkadeIntentsClientManager {
   private venue: ArkadeIntentsVenueLike | null = null;
+  /** The wallet whose signing capability the live venue holds. */
+  private venueWallet: IWallet | null = null;
   private transport: unknown = null;
-  /** Serializes concurrent initialize() calls. */
-  private _initPromise: Promise<void> | null = null;
-  /** Generation of the in-flight _initPromise. */
-  private _initGeneration = 0;
-  /** Bumped by dispose() to invalidate any in-flight init. */
-  private _generation = 0;
+  /**
+   * Records wallet identity before the async module load starts. A venue can
+   * fund, claim and refund with its `IWallet`, so sharing wallet A's pending
+   * load with wallet B would put B's session on A's keys.
+   */
+  private readonly session = new WalletSessionGuard({ name: "ArkadeIntentsClientManager" });
 
   /**
    * Initialize the venue with a connected Arkade wallet. Concurrent calls of the
@@ -81,27 +87,21 @@ class ArkadeIntentsClientManager {
    * a stale init is discarded.
    */
   async initialize(wallet: IWallet, options: ArkadeIntentsInitOptions): Promise<void> {
-    if (this.venue) return;
-    if (this._initPromise && this._initGeneration === this._generation) {
-      return this._initPromise;
+    if (this.venue && this.venueWallet === wallet) return;
+    if (this.venue) {
+      this.releaseVenue(this.venue);
     }
-    const generation = this._generation;
-    this._initGeneration = generation;
-    const promise = this._doInitialize(wallet, options, generation);
-    this._initPromise = promise;
-    promise.finally(() => {
-      if (this._initPromise === promise && this._initGeneration === generation) {
-        this._initPromise = null;
-      }
-    });
-    return promise;
+    return this.session.begin(VENUE_SLOT, wallet, (attempt) =>
+      this._doInitialize(wallet, options, attempt),
+    );
   }
 
   private async _doInitialize(
     wallet: IWallet,
     options: ArkadeIntentsInitOptions,
-    generation: number,
+    attempt: SessionAttempt,
   ): Promise<void> {
+    attempt.mark();
     try {
       const mod = await loadWdkModule(VENUE_MODULE, () => {
         // Non-literal on purpose — see the module doc. Hosts register a
@@ -116,16 +116,17 @@ class ArkadeIntentsClientManager {
         store: options.store ?? ArkadeIntentsStore.fromPlatform(),
         assetSwapRepository: options.assetSwapRepository,
       }) as ArkadeIntentsVenueLike;
-      if (generation !== this._generation) {
-        log.info("[ArkadeIntentsClientManager] Stale init discarded");
-        this.closeTransport(options.transport);
-        return;
-      }
+      if (!(await attempt.claim(() => this.closeTransport(options.transport)))) return;
       this.venue = venue;
+      this.venueWallet = wallet;
       this.transport = options.transport;
       log.info("[ArkadeIntentsClientManager] Initialized");
     } catch (error) {
-      if (generation === this._generation) this.venue = null;
+      if (attempt.isCurrent) {
+        this.venue = null;
+        this.venueWallet = null;
+        this.transport = null;
+      }
       log.warn("[ArkadeIntentsClientManager] Initialization failed:", error);
       throw error;
     }
@@ -143,15 +144,25 @@ class ArkadeIntentsClientManager {
   }
 
   async dispose(): Promise<void> {
-    this._generation += 1;
+    this.session.invalidate();
     if (!this.venue && !this.transport) return;
     // The venue holds no timers or sockets; the transport may (a Nostr
     // relay pool keeps a live subscription). Close is best-effort — the
     // interface doesn't require one.
     this.closeTransport(this.transport);
     this.venue = null;
+    this.venueWallet = null;
     this.transport = null;
     log.info("[ArkadeIntentsClientManager] Disposed");
+  }
+
+  /** Release only the venue instance observed by the wallet-switch caller. */
+  private releaseVenue(expected: ArkadeIntentsVenueLike): void {
+    if (!this.session.releaseIf(this.venue, expected)) return;
+    this.closeTransport(this.transport);
+    this.venue = null;
+    this.venueWallet = null;
+    this.transport = null;
   }
 
   private closeTransport(transport: unknown): void {
