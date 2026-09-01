@@ -18,11 +18,19 @@ import { Quote, QuoteRequest, SwapResult, ProtocolError } from '../types/base'
 import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 // Fail-closed money coercion, shared with RgbAdapter's native maker path — which
 // consumes the same maker responses and used to take them raw (finding E-F4).
-import { toSwapAmount as toAmount } from '../lib/swap-money'
+import {
+  toSwapAmount as toAmount,
+  validateSwapQuoteTerms,
+} from '../lib/swap-money'
 
 export interface KaleidoswapSwapConfig {
   /** KaleidoSwap maker API base URL. */
   baseUrl: string
+  /**
+   * Maximum from-leg divergence accepted from a maker quote, in basis points.
+   * Defaults to 100 (1%); 0 requires an exact amount match.
+   */
+  maxQuoteSlippageBps?: number
 }
 
 /** Extended quote request carrying the layer hints the maker RFQ needs. */
@@ -42,6 +50,11 @@ interface RawQuote {
   price: number | string
   fee: number | string | bigint
   expiresAt: number | string
+  /** Optional echoes supported by alternate module versions/test doubles. */
+  fromAsset?: string
+  toAsset?: string
+  fromAssetId?: string
+  toAssetId?: string
 }
 interface RawSwap {
   paymentHash: string
@@ -95,12 +108,22 @@ export class KaleidoswapSwap {
       toLayer: req.toLayer,
       fromAmount: req.fromAmount,
     })
+    const terms = validateSwapQuoteTerms(
+      req,
+      {
+        fromAsset: q.fromAssetId ?? q.fromAsset ?? req.fromAsset,
+        toAsset: q.toAssetId ?? q.toAsset ?? req.toAsset,
+        fromAmount: q.tokenInAmount,
+        toAmount: q.tokenOutAmount,
+      },
+      this.config.maxQuoteSlippageBps,
+    )
     return {
       id: q.rfqId,
-      fromAsset: req.fromAsset,
-      fromAmount: toAmount(q.tokenInAmount, 'tokenInAmount'),
-      toAsset: req.toAsset,
-      toAmount: toAmount(q.tokenOutAmount, 'tokenOutAmount'),
+      fromAsset: terms.fromAsset,
+      fromAmount: terms.fromAmount,
+      toAsset: terms.toAsset,
+      toAmount: terms.toAmount,
       price: toAmount(q.price, 'price'),
       fee: { amount: toAmount(q.fee, 'fee'), asset: req.fromAsset },
       expiresAt: toAmount(q.expiresAt, 'expiresAt') * 1000,

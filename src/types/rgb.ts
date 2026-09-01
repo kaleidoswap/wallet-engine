@@ -15,6 +15,11 @@ export interface RgbConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
   makerUrl: string // Kaleidoswap maker URL
   /**
+   * Maximum maker quote from-leg divergence in basis points. Defaults to 100
+   * (1%); set 0 to require the returned amount to match exactly.
+   */
+  maxQuoteSlippageBps?: number
+  /**
    * Master mnemonic, required by the WDK RLN adapter, which derives the signing seed
    * on-device. Never transmitted to the node. Optional so legacy call sites still
    * type-check.

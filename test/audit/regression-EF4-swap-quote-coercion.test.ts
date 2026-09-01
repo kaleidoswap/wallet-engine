@@ -12,11 +12,7 @@
  * `toSwapAmount`, extracted from `KaleidoswapSwap` and imported by both — so
  * they cannot drift apart again.
  *
- * SCOPE — this is a PORT, not new validation. Nothing here compares the maker's
- * amounts or asset ids to what the user requested; `fromAsset`/`toAsset` still
- * come from the maker's response on the native path. That is finding B-F1 and
- * needs a product decision. The last case below pins that boundary so a future
- * reader can see it was left open deliberately rather than missed.
+ * B-F1 subsequently added request validation at the same shared boundary.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { RgbAdapter } from '../../src/adapters/RgbAdapter'
@@ -95,7 +91,7 @@ describe('E-F4: RgbAdapter.getSwapQuote applies the maker money coercion', () =>
     // leaving a field out — the same rationale as the executeSwap expiry guard.
     await expect(
       adapterFor(quoteResponse({ from_asset: { asset_id: 'rgb:USDT' } })).getSwapQuote(REQ),
-    ).rejects.toThrow(/from_asset\.amount/)
+    ).rejects.toThrow(/quote\.fromAmount/)
   })
 
   it('is the same function the WDK path uses, not a copy', async () => {
@@ -130,15 +126,11 @@ describe('E-F4: RgbAdapter.getSwapQuote applies the maker money coercion', () =>
     await expect(a.getSwapStatus('sw-1')).rejects.toThrow(/negative/i)
   })
 
-  it('B-F1 BOUNDARY: maker-authored asset ids are still echoed, deliberately', async () => {
-    // Left open on purpose. The maker names the assets and nothing compares them
-    // to `request.fromAsset` / `request.toAsset`. Whether the engine should
-    // re-validate and fail closed is finding B-F1, a product decision that is
-    // explicitly out of scope for the E-F4 port. If a future change closes it,
-    // THIS case is the one to flip.
-    const q = await adapterFor(
-      quoteResponse({ from_asset: { asset_id: 'rgb:WORTHLESS', amount: 1000 } }),
-    ).getSwapQuote(REQ)
-    expect(q.fromAsset, 'still the maker\'s answer, not the request\'s').toBe('rgb:WORTHLESS')
+  it('B-F1: maker-authored asset ids are checked against the request', async () => {
+    await expect(
+      adapterFor(
+        quoteResponse({ from_asset: { asset_id: 'rgb:WORTHLESS', amount: 1000 } }),
+      ).getSwapQuote(REQ),
+    ).rejects.toMatchObject({ code: 'QUOTE_ASSET_MISMATCH' })
   })
 })

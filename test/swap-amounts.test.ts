@@ -48,7 +48,7 @@ describe('KaleidoswapSwap.getQuote amount guards', () => {
     ;(swap as any).proto = {
       quoteSwap: async (opts: any) => {
         sent = opts
-        return { rfqId: 'r1', tokenInAmount: 1, tokenOutAmount: 1, price: 1, fee: 0, expiresAt: 1 }
+        return { rfqId: 'r1', tokenInAmount: REQ.fromAmount, tokenOutAmount: 1, price: 1, fee: 0, expiresAt: 1 }
       },
     }
     await swap.getQuote(REQ as any)
@@ -75,7 +75,7 @@ describe('KaleidoswapSwap.getQuote amount guards', () => {
   it('throws when a money field is negative', async () => {
     const swap = swapWithQuoteResponse({
       rfqId: 'r1',
-      tokenInAmount: 100,
+      tokenInAmount: REQ.fromAmount,
       tokenOutAmount: 5000,
       price: 50,
       fee: -1, // a hostile/buggy maker returning a negative fee

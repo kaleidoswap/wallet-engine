@@ -48,7 +48,7 @@ import {
 import { RgbConfig } from "../types/rgb";
 import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy";
-import { toSwapAmount } from "../lib/swap-money";
+import { toSwapAmount, validateSwapQuoteTerms } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
 import {
   convertBtcBalance,
@@ -1138,25 +1138,25 @@ export class RgbAdapter implements IProtocolAdapter {
         expires_at: number;
       };
 
-      // Every money field goes through the SAME fail-closed coercion the WDK
-      // path applies to the SAME maker API (`toSwapAmount`, extracted from
-      // KaleidoswapSwap). Raw, these fields let a negative `final_fee`, an
-      // amount past 2^53 (silently rounded) and a missing `price`/`expires_at`
-      // (NaN) through, on the path that then feeds `executeSwap`. `|| 0` is gone
-      // with them: defaulting a missing amount to 0 let a counterparty switch off
-      // a safety check by leaving a field out — the same rationale as the expiry
-      // guard in executeSwap below.
-      //
-      // NOT done here, deliberately: nothing compares the maker's amounts or
-      // asset ids to `request`. `fromAsset`/`toAsset` still come from the
-      // response. That is finding B-F1 and needs a product decision; see
-      // src/lib/swap-money.ts.
+      const terms = validateSwapQuoteTerms(
+        request,
+        {
+          fromAsset: quoteResponse.from_asset.asset_id,
+          toAsset: quoteResponse.to_asset.asset_id,
+          fromAmount: quoteResponse.from_asset.amount,
+          toAmount: quoteResponse.to_asset.amount,
+        },
+        this.config.maxQuoteSlippageBps,
+      );
+
+      // Money coercion and request authority are shared with the WDK path. The
+      // request's asset ids are emitted even after the maker echoes them.
       return {
         id: quoteResponse.rfq_id,
-        fromAsset: quoteResponse.from_asset.asset_id,
-        fromAmount: toSwapAmount(quoteResponse.from_asset.amount, "from_asset.amount"),
-        toAsset: quoteResponse.to_asset.asset_id,
-        toAmount: toSwapAmount(quoteResponse.to_asset.amount, "to_asset.amount"),
+        fromAsset: terms.fromAsset,
+        fromAmount: terms.fromAmount,
+        toAsset: terms.toAsset,
+        toAmount: terms.toAmount,
         price: toSwapAmount(quoteResponse.price, "price"),
         fee: {
           amount: toSwapAmount(quoteResponse.fee?.final_fee, "fee.final_fee"),
@@ -1327,7 +1327,9 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   private handleSdkError(error: unknown, context: string): never {
-    if (error instanceof NodeNotConfiguredError) {
+    if (error instanceof ProtocolError) {
+      throw error;
+    } else if (error instanceof NodeNotConfiguredError) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     } else if (error instanceof QuoteExpiredError) {
       throw new ProtocolError("Quote expired", "RGB_LN", "QUOTE_EXPIRED");

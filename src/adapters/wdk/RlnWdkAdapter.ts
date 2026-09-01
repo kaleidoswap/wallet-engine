@@ -52,6 +52,8 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   nodeUrl: string
   /** KaleidoSwap maker API base URL (for cross-asset RFQ swaps). */
   makerUrl?: string
+  /** Maximum maker quote from-leg divergence in bps. Defaults to 100 (1%). */
+  maxQuoteSlippageBps?: number
   /** BIP-44 account index (default 0). */
   accountIndex?: number
   /**
@@ -118,6 +120,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   /** KaleidoSwap maker base URL, for cross-asset RFQ swaps (Option C: swaps live in the adapter). */
   private makerUrl = ''
+  private maxQuoteSlippageBps: number | undefined
 
   /**
    * RLN swaps need a maker. `BaseWdkAdapter.supportsSwaps()` returns the STATIC
@@ -144,6 +147,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     this.makerUrl = cfg.makerUrl ?? ''
+    this.maxQuoteSlippageBps = cfg.maxQuoteSlippageBps
     this.swap = null
     this.allowPrivilegedOps = cfg.allowPrivilegedOps === true
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
@@ -167,6 +171,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       // maker-bound swap client and its URL, which must not outlive disconnect.
       this.swap = null
       this.makerUrl = ''
+      this.maxQuoteSlippageBps = undefined
       this.allowPrivilegedOps = false
     }
   }
@@ -588,7 +593,12 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     if (!this.makerUrl) {
       throw new ProtocolError('RLN swaps require a makerUrl in the adapter config', 'RGB_LN', 'CONFIG')
     }
-    if (!this.swap) this.swap = new KaleidoswapSwap(this.account, { baseUrl: this.makerUrl })
+    if (!this.swap) {
+      this.swap = new KaleidoswapSwap(this.account, {
+        baseUrl: this.makerUrl,
+        maxQuoteSlippageBps: this.maxQuoteSlippageBps,
+      })
+    }
     return this.swap
   }
 

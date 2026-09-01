@@ -84,8 +84,8 @@ afterEach(() => {
 // F1 — maker-controlled quote legs flow unchecked into execution
 // ---------------------------------------------------------------------------
 
-describe('F1: maker-inflated / substituted quote legs are not re-validated', () => {
-  it('F1a (WDK path): maker returning 100x the requested fixed leg sails through getQuote and into swap()', async () => {
+describe('F1 [FIXED]: maker quote legs are validated against the request', () => {
+  it('F1a (WDK path): rejects a maker returning 100x the requested fixed leg', async () => {
     let executed: any = null
     const swap = swapWithProto({
       quoteSwap: async () => ({
@@ -102,17 +102,13 @@ describe('F1: maker-inflated / substituted quote legs are not re-validated', () 
       ),
     })
 
-    const quote = await swap.getQuote(REQ as any)
-    // VULNERABILITY: no check that the echoed fixed leg equals the request.
-    expect(quote.fromAmount).toBe(10_000_000)
-
-    await swap.executeSwap(quote as any)
-    // ... and the inflated amount is what gets ordered at the maker.
-    expect(executed.tokenInAmount).toBe(10_000_000)
-    expect(executed.rfqId).toBe('rfq-evil')
+    await expect(swap.getQuote(REQ as any)).rejects.toMatchObject({
+      code: 'QUOTE_AMOUNT_DIVERGENCE',
+    })
+    expect(executed).toBeNull()
   })
 
-  it('F1b (native path): maker-substituted asset id + inflated amount enter the Quote and are sent to initSwap', async () => {
+  it('F1b (native path): rejects a maker-substituted asset before initSwap', async () => {
     let initBody: any = null
     const adapter = rgbAdapterWithClient({
       maker: {
@@ -136,14 +132,10 @@ describe('F1: maker-inflated / substituted quote legs are not re-validated', () 
       },
     })
 
-    const quote = await adapter.getSwapQuote(REQ as any)
-    // VULNERABILITY: asset id and amount come from the RESPONSE, not the request.
-    expect(quote.fromAsset).toBe('rgb:WORTHLESS')
-    expect(quote.fromAmount).toBe(9_000_000)
-
-    await adapter.executeSwap(quote)
-    expect(initBody.from_asset).toBe('rgb:WORTHLESS')
-    expect(initBody.from_amount).toBe(9_000_000)
+    await expect(adapter.getSwapQuote(REQ as any)).rejects.toMatchObject({
+      code: 'QUOTE_ASSET_MISMATCH',
+    })
+    expect(initBody).toBeNull()
   })
 })
 
