@@ -386,7 +386,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     // Resolve the policy (L-BTC) asset id outside the lock (cached after first).
-    const policy = await this.getPolicyAsset()
+    let policy = await this.getPolicyAsset()
     const txs: Array<{
       txid: string
       type: string
@@ -395,6 +395,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       timestamp: number | null
       balance?: Array<{ asset_id: string; value: string }>
     }> = await this.withLock(() => this.account.listTransactions())
+    if (!policy) policy = this.inferPolicyAsset(txs)
     const mapped = txs.map((t) => {
       const isSend = t.type === 'outgoing'
       const fee = Number(t.fee ?? 0)
@@ -441,6 +442,38 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     if (!policyDelta) return { amount: 0 }
     const magnitude = Math.abs(policyDelta.value)
     return { assetId: policy, amount: isSend ? Math.max(0, magnitude - fee) : magnitude }
+  }
+
+  /** Infer L-BTC only when outgoing fee deltas make one asset unambiguous. */
+  private inferPolicyAsset(
+    txs: Array<{
+      type: string
+      fee: string
+      balance?: Array<{ asset_id: string; value: string }>
+    }>,
+  ): string {
+    const outgoing = txs.filter((tx) => tx.type === 'outgoing')
+    const exactFeeAssets = new Set<string>()
+    const negativeSets: Array<Set<string>> = []
+    for (const tx of outgoing) {
+      const fee = Number(tx.fee ?? 0)
+      const negatives = (tx.balance ?? [])
+        .map((delta) => ({ assetId: delta.asset_id, value: Number(delta.value) }))
+        .filter((delta) => Number.isFinite(delta.value) && delta.value < 0)
+      if (negatives.length === 0) continue
+      negativeSets.push(new Set(negatives.map((delta) => delta.assetId)))
+      if (Number.isFinite(fee) && fee > 0) {
+        for (const delta of negatives) {
+          if (Math.abs(delta.value) === fee) exactFeeAssets.add(delta.assetId)
+        }
+      }
+    }
+    if (exactFeeAssets.size === 1) return [...exactFeeAssets][0]
+    if (negativeSets.length === 0) return ''
+    const common = [...negativeSets[0]].filter((assetId) =>
+      negativeSets.every((assets) => assets.has(assetId)),
+    )
+    return common.length === 1 ? common[0] : ''
   }
 
   /** Builds a metadata-only UnifiedAsset (balance 0) for a tx's asset id. */
@@ -591,11 +624,8 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
    * funds were listed twice. Fail loudly instead — a retryable error beats a
    * balance that double-counts (audit finding G-F14).
    *
-   * Used by `listAssets` only. `listTransactions` deliberately keeps the soft
-   * `getPolicyAsset()`: there, an empty policy costs a mislabelled headline asset
-   * and an unstripped fee on an L-BTC send — a display inaccuracy, not
-   * double-counted funds — and failing the whole history because network info is
-   * momentarily down is worse than showing it slightly wrong. Carried in REPORT-2.
+   * Used by `listAssets` only. History keeps the soft lookup and falls back to an
+   * unambiguous fee-delta inference, so a momentary outage does not hide activity.
    */
   private async requirePolicyAsset(): Promise<string> {
     const policy = await this.getPolicyAsset()
