@@ -26,19 +26,20 @@ import {
 export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset["balance"] {
   const vanilla = btcBalance.vanilla ?? { settled: 0, future: 0, spendable: 0 };
   // `future` is the projected balance once every pending tx settles, so it is
-  // what is OWNED; `spendable` is what can be sent right now and `future -
-  // spendable` is the unsettled delta. The old `total: settled, pending: future`
+  // what is OWNED; `future - settled` is the portion of that projected balance
+  // that has not confirmed. The old `total: settled, pending: future`
   // reported the projected total as "pending" (so a UI summing total+pending
   // double-counts) and hid an unconfirmed receive from `total` entirely — and it
   // disagreed with this adapter's own `getBtcBalance()`, which already uses
   // `future` as the total. One adapter must not give two answers.
   const spendable = vanilla.spendable || 0;
+  const settled = vanilla.settled || 0;
   const future = vanilla.future || 0;
-  const owned = future || vanilla.settled || spendable || 0;
+  const owned = future || settled || spendable || 0;
   return {
     total: owned,
     available: spendable,
-    pending: Math.max(0, future - spendable),
+    pending: Math.max(0, future - settled),
     totalDisplay: formatAmount(owned, 8),
     availableDisplay: formatAmount(spendable, 8),
   };
