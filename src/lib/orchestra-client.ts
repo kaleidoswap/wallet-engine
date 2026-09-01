@@ -11,6 +11,8 @@
  */
 
 import { log } from './log'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 
 const BASE_URL = 'https://orchestration.flashnet.xyz'
 
@@ -175,8 +177,20 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}` }
 }
 
-function idempotencyHeader(prefix: string): Record<string, string> {
-  return { 'X-Idempotency-Key': `${prefix}:${crypto.randomUUID()}` }
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function idempotencyHeader(prefix: string, payload: unknown): Record<string, string> {
+  const digest = bytesToHex(sha256(utf8ToBytes(canonicalJson(payload))))
+  return { 'X-Idempotency-Key': `${prefix}:${digest}` }
 }
 
 async function request<T>(
@@ -193,7 +207,7 @@ async function request<T>(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (opts?.auth) Object.assign(headers, authHeaders())
-  if (opts?.idempotency) Object.assign(headers, idempotencyHeader(opts.idempotency))
+  if (opts?.idempotency) Object.assign(headers, idempotencyHeader(opts.idempotency, opts.body))
 
   const res = await fetch(url.toString(), {
     method,

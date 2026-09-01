@@ -315,8 +315,8 @@ describe('F7: resolveSend drops the BIP21 lightning= fallback', () => {
 // F8/F9 — orchestra client
 // ---------------------------------------------------------------------------
 
-describe('F8: orchestra idempotency keys are random per request', () => {
-  it('two identical submitOrder calls send different X-Idempotency-Key headers', async () => {
+describe('F8 [FIXED]: orchestra retries use stable idempotency keys', () => {
+  it('two identical submitOrder calls send the same X-Idempotency-Key header', async () => {
     orchestra.setOrchestraApiKey('test-key')
     const keys: string[] = []
     vi.stubGlobal(
@@ -328,9 +328,8 @@ describe('F8: orchestra idempotency keys are random per request', () => {
     )
     await orchestra.submitOrder({ quoteId: 'q1', txHash: 'tx' })
     await orchestra.submitOrder({ quoteId: 'q1', txHash: 'tx' }) // the retry
-    // VULNERABILITY: a retry is indistinguishable from a new operation.
     expect(keys).toHaveLength(2)
-    expect(keys[0]).not.toBe(keys[1])
+    expect(keys[0]).toBe(keys[1])
   })
 })
 
