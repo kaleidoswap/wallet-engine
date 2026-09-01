@@ -5,6 +5,7 @@
 
 import type { AssetBalanceResponse, BtcBalanceResponse } from "kaleido-sdk/rln";
 import type { UnifiedAsset, UnifiedTransaction } from "../types/base";
+import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
 import {
   formatAmount,
   mapPaymentStatus,
@@ -224,7 +225,9 @@ export function convertPaymentToTransaction(
   const inbound = Boolean(payment.inbound);
   const assetAmount = (payment.asset_amount as number | null | undefined) ?? null;
   const amtMsat = (payment.amt_msat as number | null | undefined) ?? null;
-  const amount = assetAmount ?? (amtMsat ? Math.floor(amtMsat / 1000) : 0);
+  const amount = assetAmount ?? (amtMsat
+    ? toSafeAmountNumber(roundedMsatToSat(String(amtMsat)), "sat")
+    : 0);
   const timestamp = (payment.created_at as number | undefined)
     ? (payment.created_at as number) * 1000
     : Date.now();

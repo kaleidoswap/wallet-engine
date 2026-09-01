@@ -275,12 +275,12 @@ describe('F6: msat→sat rounding is adapter-dependent (1500 msat = 1.5 sat)', (
     })
     const dec = await adapter.decodeInvoice('lnbc15n1pxxxxxx')
     console.log(`1500 msat -> RgbAdapter.decodeInvoice amount = ${dec.amount}`)
-    expect(dec.amount).toBe(1.5) // fractional sats in an integer-sats field
+    expect(dec.amount).toBe(2)
 
     // rgb-converters payment history — src/lib/rgb-converters.ts:192 (Math.floor)
     const hist = convertPaymentToTransaction({ payment_hash: 'ph', inbound: true, amt_msat: 1500 })
     console.log(`1500 msat -> rgb-converters history amount = ${hist.amount}`)
-    expect(hist.amount).toBe(1)
+    expect(hist.amount).toBe(2)
 
     // decodeBolt11 — src/lib/bolt11.ts:46 (Math.round), feeds ProtocolManager policy amounts
     const b11 = decodeBolt11('lnbc15n1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq')
@@ -288,8 +288,7 @@ describe('F6: msat→sat rounding is adapter-dependent (1500 msat = 1.5 sat)', (
     expect(b11.amountMsat).toBe(1500)
     expect(b11.amountSat).toBe(2)
 
-    // Three code paths, three answers for the same payment: 1.5 / 1 / 2.
-    expect(new Set([dec.amount, hist.amount, b11.amountSat]).size).toBe(3)
+    expect(new Set([dec.amount, hist.amount, b11.amountSat]).size).toBe(1)
   })
 })
 

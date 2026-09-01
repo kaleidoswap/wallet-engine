@@ -2,7 +2,7 @@ import { bech32 } from '@scure/base'
 import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 
-import { parseMsat } from '../lightning/amounts'
+import { parseMsat, roundedMsatToSat, toSafeAmountNumber } from '../lightning/amounts'
 import { LightningPaymentError } from '../lightning/errors'
 
 const BECH32_CHARSET = 'qpzry9x8gf2tvdw0s3jn54khce6mua7l'
@@ -434,14 +434,14 @@ export function decodeBolt11(invoice: string): Bolt11Summary {
   if (amountMsatString == null) return { network: match[1] }
 
   const amountMsatBigInt = BigInt(amountMsatString)
-  const roundedSat = (amountMsatBigInt + 500n) / 1000n
+  const roundedSat = roundedMsatToSat(amountMsatString)
   return {
     amountMsatString,
     ...(amountMsatBigInt % 1000n === 0n
       ? { amountSatString: (amountMsatBigInt / 1000n).toString() }
       : {}),
     ...(amountMsatBigInt <= MAX_SAFE_INTEGER ? { amountMsat: Number(amountMsatBigInt) } : {}),
-    amountSat: Number(roundedSat),
+    amountSat: toSafeAmountNumber(roundedSat, 'sat'),
     network: match[1],
   }
 }

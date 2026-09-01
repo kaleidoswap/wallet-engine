@@ -43,6 +43,7 @@ import { resolveWalletSeed } from '../../lib/wallet-seed'
 import { decodeBolt11 } from '../../lib/bolt11'
 import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
+import { roundedMsatToSat, toSafeAmountNumber } from '../../lightning/amounts'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -325,7 +326,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     return {
       paymentHash: d?.payment_hash ?? d?.recipient_id ?? '',
       // Sats-denominated: never stuff RGB asset units in here.
-      amount: d?.amt_msat != null ? Math.floor(d.amt_msat / 1000) : d?.amount,
+      amount: d?.amt_msat != null
+        ? toSafeAmountNumber(roundedMsatToSat(String(d.amt_msat)), 'sat')
+        : d?.amount,
       amountMsat: d?.amt_msat,
       description: d?.description,
       // `expiry_sec` is a DURATION from the invoice's own `timestamp` (creation,

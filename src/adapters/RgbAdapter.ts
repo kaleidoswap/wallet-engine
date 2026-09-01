@@ -50,6 +50,7 @@ import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy";
 import { toSwapAmount, validateSwapQuoteTerms } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
+import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
 import {
   convertBtcBalance,
   convertNodeAssetToUnified,
@@ -580,7 +581,9 @@ export class RgbAdapter implements IProtocolAdapter {
       const amtMsat = decoded.amt_msat;
       return {
         paymentHash: decoded.payment_hash ?? "",
-        amount: amtMsat != null ? amtMsat / 1000 : undefined,
+        amount: amtMsat != null
+          ? toSafeAmountNumber(roundedMsatToSat(String(amtMsat)), "sat")
+          : undefined,
         amountMsat: amtMsat ?? undefined,
         description: decoded.description,
         expiresAt: decoded.expiry_sec ? Date.now() + decoded.expiry_sec * 1000 : 0,
