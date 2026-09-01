@@ -59,6 +59,11 @@ import {
   convertSwapToTransaction,
   convertTransferToTransaction,
 } from "../lib/rgb-converters";
+import {
+  KaleidoswapSwapStore,
+  kaleidoswapNow,
+  type KaleidoswapSwapRecord,
+} from "../swap/kaleidoswap-swap-store";
 
 /**
  * RGB Protocol Adapter Implementation using Kaleido SDK
@@ -71,10 +76,9 @@ export class RgbAdapter implements IProtocolAdapter {
 
   private connected = false;
   private config: RgbConfig | null = null;
-  /**
-   * In-memory fallback for per-swap status tokens (paymentHash → token). Hosts
-   * should persist `SwapResult.accessToken`; this map does not survive restarts.
-   */
+  private swapStore: KaleidoswapSwapStore | null = null;
+  private swapStoreIdentity: string | null = null;
+  /** Hot cache only; durable records are authoritative across restarts. */
   private swapAccessTokens = new Map<string, string>();
 
   // ========================================================================
@@ -177,6 +181,9 @@ export class RgbAdapter implements IProtocolAdapter {
     kaleidoClientManager.reset();
     this.connected = false;
     this.config = null;
+    this.swapStore = null;
+    this.swapStoreIdentity = null;
+    this.swapAccessTokens.clear();
     log.info("[RgbAdapter] Disconnected");
   }
 
@@ -1071,6 +1078,15 @@ export class RgbAdapter implements IProtocolAdapter {
     return !!this.config?.makerUrl;
   }
 
+  private recordStore(takerPubkey: string): KaleidoswapSwapStore {
+    const identity = `${this.config?.network ?? "mainnet"}:${takerPubkey}`;
+    if (!this.swapStore || this.swapStoreIdentity !== identity) {
+      this.swapStore = new KaleidoswapSwapStore(identity);
+      this.swapStoreIdentity = identity;
+    }
+    return this.swapStore;
+  }
+
   async getSwapQuote(request: QuoteRequest): Promise<Quote> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
@@ -1195,8 +1211,17 @@ export class RgbAdapter implements IProtocolAdapter {
       );
     }
 
+    let recordStore: KaleidoswapSwapStore | null = null;
+    let recordId: string | null = null;
+    let executionAttempted = false;
     try {
       const client = kaleidoClientManager.getClient();
+      const rln = client.rln as unknown as {
+        whitelistSwap(body: { swapstring: string }): Promise<void>;
+        getTakerPubkey(): Promise<string>;
+      };
+      const takerPubkey = await rln.getTakerPubkey();
+      recordStore = this.recordStore(takerPubkey);
       // The maker binds the swap to the rfq_id and these exact raw amounts —
       // there is no server-side re-quote, so the fill can never diverge from
       // the approved quote on either leg.
@@ -1208,18 +1233,32 @@ export class RgbAdapter implements IProtocolAdapter {
         to_amount: quote.toAmount,
       });
 
+      const createdAt = kaleidoswapNow();
+      recordId = rfqId;
+      await recordStore.save({
+        quoteId: rfqId,
+        paymentHash: init.payment_hash,
+        accessToken: init.access_token ?? undefined,
+        fromAsset: quote.fromAsset,
+        fromAmount: quote.fromAmount,
+        toAsset: quote.toAsset,
+        toAmount: quote.toAmount,
+        expiresAt: quote.expiresAt,
+        createdAt,
+        updatedAt: createdAt,
+        state: "initialized",
+      });
+
       // Whitelist BEFORE confirming execution: once the maker starts the
       // swap it routes the HTLC immediately, and an un-whitelisted node
       // rejects it. (rln is the NWC client shape in NWC mode, hence `any`.)
-      const rln = client.rln as unknown as {
-        whitelistSwap(body: { swapstring: string }): Promise<void>;
-        getTakerPubkey(): Promise<string>;
-      };
       await rln.whitelistSwap({ swapstring: init.swapstring });
-      const takerPubkey = await rln.getTakerPubkey();
+      await recordStore.update(rfqId, { state: "whitelisted", updatedAt: kaleidoswapNow() });
 
       // /swaps/execute responds with an HTTP-style {status: 200, message} —
       // the swap itself starts in 'Waiting'; poll getSwapStatus for truth.
+      await recordStore.update(rfqId, { state: "executing", updatedAt: kaleidoswapNow() });
+      executionAttempted = true;
       await client.maker.executeSwap({
         swapstring: init.swapstring,
         taker_pubkey: takerPubkey,
@@ -1227,6 +1266,7 @@ export class RgbAdapter implements IProtocolAdapter {
       });
 
       const accessToken = init.access_token ?? undefined;
+      await recordStore.update(rfqId, { state: "pending", updatedAt: kaleidoswapNow() });
       if (accessToken) this.swapAccessTokens.set(init.payment_hash, accessToken);
       return {
         swapId: init.payment_hash,
@@ -1234,9 +1274,19 @@ export class RgbAdapter implements IProtocolAdapter {
         accessToken,
         status: "pending",
         quote,
-        timestamp: Date.now(),
+        timestamp: kaleidoswapNow(),
       };
     } catch (error: unknown) {
+      if (executionAttempted && recordStore && recordId) {
+        try {
+          await recordStore.update(recordId, {
+            state: "execution_unknown",
+            updatedAt: kaleidoswapNow(),
+          });
+        } catch (storeError) {
+          log.error("[RgbAdapter] Failed to mark an uncertain swap execution:", storeError);
+        }
+      }
       throw this.handleSdkError(error, "Failed to execute swap");
     }
   }
@@ -1249,9 +1299,20 @@ export class RgbAdapter implements IProtocolAdapter {
 
     try {
       const client = kaleidoClientManager.getClient();
+      let recordStore = this.swapStore;
+      if (!recordStore) {
+        try {
+          const takerPubkey = await (client.rln as any).getTakerPubkey();
+          if (takerPubkey) recordStore = this.recordStore(takerPubkey);
+        } catch {
+          // Preserve legacy status lookup when an older node cannot expose a
+          // public taker identity; caller-supplied tokens still work.
+        }
+      }
+      const record = recordStore ? await recordStore.find(swapId) : null;
       const status = await client.maker.getAtomicSwapStatus({
         payment_hash: swapId,
-        access_token: accessToken ?? this.swapAccessTokens.get(swapId) ?? "",
+        access_token: accessToken ?? record?.accessToken ?? this.swapAccessTokens.get(swapId) ?? "",
       });
       const swap = (status.swap ?? status) as {
         status?: string;
@@ -1261,10 +1322,18 @@ export class RgbAdapter implements IProtocolAdapter {
         to_asset?: string | null;
       };
 
+      const mappedStatus = mapSwapStatus(swap?.status);
+      if (recordStore && record) {
+        await recordStore.update(record.quoteId, {
+          state: mappedStatus,
+          updatedAt: kaleidoswapNow(),
+        });
+      }
       return {
         swapId,
         paymentHash: swapId,
-        status: mapSwapStatus(swap?.status),
+        accessToken: accessToken ?? record?.accessToken,
+        status: mappedStatus,
         quote: {
           id: swapId,
           fromAsset: swap?.from_asset ?? "",
@@ -1279,11 +1348,43 @@ export class RgbAdapter implements IProtocolAdapter {
           expiresAt: 0,
           provider: "Kaleidoswap",
         },
-        timestamp: Date.now(),
+        timestamp: kaleidoswapNow(),
       };
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get swap status");
     }
+  }
+
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
+    const client = kaleidoClientManager.getClient();
+    const takerPubkey = await (client.rln as any).getTakerPubkey();
+    if (!takerPubkey) {
+      throw new ProtocolError(
+        "Node did not provide a wallet identity for swap recovery",
+        "RGB_LN",
+        "SWAP_RECOVERY_UNAVAILABLE",
+      );
+    }
+    return this.recordStore(takerPubkey).listIncomplete();
+  }
+
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    const records = await this.listIncompleteSwaps();
+    const record = records.find(
+      (candidate) => candidate.quoteId === identifier || candidate.paymentHash === identifier,
+    );
+    if (!record?.paymentHash) {
+      throw new ProtocolError(
+        `Swap ${identifier} has no payment hash and can only be inspected`,
+        "RGB_LN",
+        "SWAP_RECOVERY_UNAVAILABLE",
+        { quoteId: record?.quoteId ?? identifier },
+      );
+    }
+    return this.getSwapStatus(record.paymentHash, accessToken);
   }
 
   // SDK ↔ unified-shape converters live in ./converters.ts (this-free).

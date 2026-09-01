@@ -22,6 +22,11 @@ import {
   toSwapAmount as toAmount,
   validateSwapQuoteTerms,
 } from '../lib/swap-money'
+import {
+  KaleidoswapSwapStore,
+  kaleidoswapNow,
+  type KaleidoswapSwapRecord,
+} from './kaleidoswap-swap-store'
 
 export interface KaleidoswapSwapConfig {
   /** KaleidoSwap maker API base URL. */
@@ -31,6 +36,8 @@ export interface KaleidoswapSwapConfig {
    * Defaults to 100 (1%); 0 requires an exact amount match.
    */
   maxQuoteSlippageBps?: number
+  /** Stable, non-secret wallet identity used to namespace durable recovery records. */
+  walletId?: string
 }
 
 /** Extended quote request carrying the layer hints the maker RFQ needs. */
@@ -76,17 +83,17 @@ interface RawAtomicSwap {
 export class KaleidoswapSwap {
   private proto: any = null
   private protoPromise: Promise<any> | null = null
-  /**
-   * In-memory fallback for per-swap status tokens (paymentHash → token). Hosts
-   * should persist `SwapResult.accessToken`; this map does not survive restarts.
-   */
-  private accessTokens = new Map<string, string>()
+  private readonly store: KaleidoswapSwapStore
+  /** Hot cache only; the record store remains authoritative across restarts. */
+  private readonly accessTokenCache = new Map<string, string>()
 
   /**
    * @param account a connected WDK RLN account (whitelists the swap HTLC on the
    *        taker's node). Passed through to the swap module; held as `any`.
    */
-  constructor(private account: any, private config: KaleidoswapSwapConfig) {}
+  constructor(private account: any, private config: KaleidoswapSwapConfig) {
+    this.store = new KaleidoswapSwapStore(config.walletId)
+  }
 
   private async ensure(): Promise<any> {
     if (this.proto) return this.proto
@@ -158,14 +165,39 @@ export class KaleidoswapSwap {
       throw new ProtocolError('Approved quote has expired — request a fresh quote', 'RGB_LN', 'QUOTE_EXPIRED')
     }
     const proto = await this.ensure()
-    const r: RawSwap = await proto.swap({
-      rfqId: quote.id,
-      fromAssetId: quote.fromAsset,
-      toAssetId: quote.toAsset,
-      tokenInAmount: quote.fromAmount,
-      tokenOutAmount: quote.toAmount,
+    const createdAt = kaleidoswapNow()
+    await this.store.save({
+      quoteId: quote.id,
+      fromAsset: quote.fromAsset,
+      fromAmount: quote.fromAmount,
+      toAsset: quote.toAsset,
+      toAmount: quote.toAmount,
+      expiresAt: quote.expiresAt,
+      createdAt,
+      updatedAt: createdAt,
+      state: 'approved',
     })
-    if (r.paymentHash && r.accessToken) this.accessTokens.set(r.paymentHash, r.accessToken)
+    await this.store.update(quote.id, { state: 'executing', updatedAt: kaleidoswapNow() })
+    let r: RawSwap
+    try {
+      r = await proto.swap({
+        rfqId: quote.id,
+        fromAssetId: quote.fromAsset,
+        toAssetId: quote.toAsset,
+        tokenInAmount: quote.fromAmount,
+        tokenOutAmount: quote.toAmount,
+      })
+    } catch (error) {
+      await this.store.update(quote.id, { state: 'execution_unknown', updatedAt: kaleidoswapNow() })
+      throw error
+    }
+    await this.store.update(quote.id, {
+      paymentHash: r.paymentHash,
+      accessToken: r.accessToken ?? undefined,
+      state: mapAtomicStatus(r.status),
+      updatedAt: kaleidoswapNow(),
+    })
+    if (r.paymentHash && r.accessToken) this.accessTokenCache.set(r.paymentHash, r.accessToken)
     return {
       swapId: r.paymentHash,
       paymentHash: r.paymentHash,
@@ -176,19 +208,25 @@ export class KaleidoswapSwap {
         fromAmount: toAmount(r.tokenInAmount, 'tokenInAmount'),
         toAmount: toAmount(r.tokenOutAmount, 'tokenOutAmount'),
       },
-      timestamp: Date.now(),
+      timestamp: kaleidoswapNow(),
     }
   }
 
   /** Poll an atomic swap by its payment hash. */
   async getSwapStatus(paymentHash: string, accessToken?: string): Promise<SwapResult> {
     const proto = await this.ensure()
-    const token = accessToken ?? this.accessTokens.get(paymentHash) ?? ''
+    const record = await this.store.find(paymentHash)
+    const token = accessToken ?? record?.accessToken ?? this.accessTokenCache.get(paymentHash) ?? ''
     const s: RawAtomicSwap = await proto.getOrderStatus(paymentHash, token)
+    const status = mapAtomicStatus(s?.status)
+    if (record) {
+      await this.store.update(record.quoteId, { state: status, updatedAt: kaleidoswapNow() })
+    }
     return {
       swapId: s?.payment_hash ?? paymentHash,
       paymentHash: s?.payment_hash ?? paymentHash,
-      status: mapAtomicStatus(s?.status),
+      accessToken: accessToken ?? record?.accessToken,
+      status,
       quote: {
         id: s?.payment_hash ?? paymentHash,
         fromAsset: s?.from_asset ?? '',
@@ -200,8 +238,27 @@ export class KaleidoswapSwap {
         expiresAt: 0,
         provider: 'kaleidoswap',
       },
-      timestamp: Date.now(),
+      timestamp: kaleidoswapNow(),
     }
+  }
+
+  /** Enumerate durable records that have not reached a terminal maker state. */
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    return this.store.listIncomplete()
+  }
+
+  /** Resume status inspection by either the RFQ id or payment hash. */
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    const record = await this.store.find(identifier)
+    if (!record?.paymentHash) {
+      throw new ProtocolError(
+        `Swap ${identifier} has no payment hash and can only be inspected`,
+        'RGB_LN',
+        'SWAP_RECOVERY_UNAVAILABLE',
+        { quoteId: record?.quoteId ?? identifier },
+      )
+    }
+    return this.getSwapStatus(record.paymentHash, accessToken)
   }
 }
 

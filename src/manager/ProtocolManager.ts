@@ -28,8 +28,10 @@ import {
   ProtocolConfig,
   ProtocolAdapterRegistry,
   asSimplicityOperations,
+  asSwapRecoveryOperations,
   type ISimplicityOperations,
 } from '../adapters/IProtocolAdapter'
+import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
@@ -678,6 +680,34 @@ export class ProtocolManager {
       )
     }
     return adapter.executeSwap(quote)
+  }
+
+  /** Enumerate non-terminal swaps retained by the active adapter. */
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    const adapter = this.getActiveAdapterUnchecked()
+    const recovery = asSwapRecoveryOperations(adapter)
+    if (!recovery) {
+      throw new ProtocolError(
+        'Swap recovery not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED',
+      )
+    }
+    return recovery.listIncompleteSwaps()
+  }
+
+  /** Resume maker status inspection by an RFQ id or payment hash. */
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    const adapter = this.getActiveAdapterUnchecked()
+    const recovery = asSwapRecoveryOperations(adapter)
+    if (!recovery) {
+      throw new ProtocolError(
+        'Swap recovery not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED',
+      )
+    }
+    return recovery.resumeSwap(identifier, accessToken)
   }
 
   // ========================================================================

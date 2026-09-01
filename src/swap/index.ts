@@ -12,6 +12,12 @@ export {
 } from './KaleidoswapSwap'
 
 export {
+  KaleidoswapSwapStore,
+  type KaleidoswapSwapRecord,
+  type KaleidoswapSwapState,
+} from './kaleidoswap-swap-store'
+
+export {
   BoltzChainSwap,
   nextPhase,
   type BoltzChainSwapConfig,

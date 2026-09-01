@@ -37,9 +37,11 @@ export {
   type ISparkOperations,
   type IArkadeOperations,
   type ISwapOperations,
+  type ISwapRecoveryOperations,
   type IExtensibleAdapter,
   // Capability narrowing helpers.
   asSwapOperations,
+  asSwapRecoveryOperations,
   asRgbOperations,
   asSigningOperations,
   asSimplicityOperations,
@@ -48,6 +50,11 @@ export {
   asArkadeOperations,
   ProtocolAdapterRegistry,
 } from './adapters/IProtocolAdapter'
+
+export type {
+  KaleidoswapSwapRecord,
+  KaleidoswapSwapState,
+} from './swap/kaleidoswap-swap-store'
 
 // Capability manifest (differences-as-data backbone)
 export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type ProtocolCapabilities } from './capabilities'

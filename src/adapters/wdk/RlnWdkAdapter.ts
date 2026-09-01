@@ -44,6 +44,9 @@ import { decodeBolt11 } from '../../lib/bolt11'
 import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
 import { roundedMsatToSat, toSafeAmountNumber } from '../../lightning/amounts'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import type { KaleidoswapSwapRecord } from '../../swap/kaleidoswap-swap-store'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -137,6 +140,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   }
   /** Lazily-built maker swap client, bound to this connected account. */
   private swap: KaleidoswapSwap | null = null
+  private swapWalletId = ''
   /** Host opt-in for fund-moving escape-hatch ops (see RLN_PRIVILEGED_OPS). */
   private allowPrivilegedOps = false
 
@@ -156,11 +160,14 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const RlnWalletManager = mod.default ?? mod
     // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
     // BIP-39 string validation (which throws "The seed phrase is invalid").
-    this.manager = new RlnWalletManager(resolveWalletSeed(cfg.mnemonic), {
+    const walletSeed = resolveWalletSeed(cfg.mnemonic)
+    const accountIndex = cfg.accountIndex ?? 0
+    this.swapWalletId = `${this.network}:${accountIndex}:${bytesToHex(sha256(walletSeed))}`
+    this.manager = new RlnWalletManager(walletSeed, {
       nodeUrl: cfg.nodeUrl,
       apiKey: cfg.jwt ?? cfg.apiKey,
     })
-    this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
+    this.account = await this.manager.getAccount(accountIndex)
     this.connected = true
   }
 
@@ -171,6 +178,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       // Base clears manager/account/mnemonic; this adapter also holds a
       // maker-bound swap client and its URL, which must not outlive disconnect.
       this.swap = null
+      this.swapWalletId = ''
       this.makerUrl = ''
       this.maxQuoteSlippageBps = undefined
       this.allowPrivilegedOps = false
@@ -600,6 +608,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       this.swap = new KaleidoswapSwap(this.account, {
         baseUrl: this.makerUrl,
         maxQuoteSlippageBps: this.maxQuoteSlippageBps,
+        walletId: this.swapWalletId || undefined,
       })
     }
     return this.swap
@@ -631,6 +640,14 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   /** `swapId` is the atomic swap's payment hash. */
   async getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult> {
     return this.ensureSwap().getSwapStatus(swapId, accessToken)
+  }
+
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    return this.ensureSwap().listIncompleteSwaps()
+  }
+
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    return this.ensureSwap().resumeSwap(identifier, accessToken)
   }
 
   // --- Escape hatch -------------------------------------------------------

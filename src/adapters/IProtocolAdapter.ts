@@ -34,6 +34,7 @@ import {
   SwapResult,
 } from '../types/base'
 import type { ProtocolCapability } from '../capabilities/operations'
+import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { RgbConfig } from '../types/rgb'
 import type { SparkConfig } from '../types/spark'
 import type { ArkadeConfig } from '../types/arkade'
@@ -278,6 +279,13 @@ export interface ISwapOperations {
   getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult>
 }
 
+/** Additive recovery surface for adapters with durable swap records. */
+export interface ISwapRecoveryOperations {
+  listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]>
+  /** Resume maker status inspection by RFQ id or payment hash. */
+  resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult>
+}
+
 /** Generic escape hatch used by some WDK adapters (allowlisted internally). */
 export interface IExtensibleAdapter {
   executeProtocolOperation(operation: string, params: unknown): Promise<unknown>
@@ -297,6 +305,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &
   Partial<ISwapOperations> &
+  Partial<ISwapRecoveryOperations> &
   Partial<IExtensibleAdapter>
 
 // --- Capability narrowing helpers: reach a group's methods without
@@ -306,6 +315,9 @@ const isFn = (v: unknown): v is (...args: never[]) => unknown => typeof v === 'f
 
 export function asSwapOperations(a: IProtocolAdapter): ISwapOperations | null {
   return a.supportsSwaps() && isFn(a.executeSwap) && isFn(a.getSwapQuote) ? (a as ISwapOperations) : null
+}
+export function asSwapRecoveryOperations(a: IProtocolAdapter): ISwapRecoveryOperations | null {
+  return isFn(a.listIncompleteSwaps) && isFn(a.resumeSwap) ? (a as ISwapRecoveryOperations) : null
 }
 export function asRgbOperations(a: IProtocolAdapter): IRgbOperations | null {
   // Preserve the historical null result for adapters that do not opt into the
