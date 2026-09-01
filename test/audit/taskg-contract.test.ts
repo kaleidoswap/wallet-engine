@@ -5,16 +5,8 @@
  * claim against the contract, fixed the code, and removed the `.skip`. Each fix
  * commit records the failing output at its parent.
  *
- * Two blocks document a real divergence and PASS as-is (they assert what the code
- * does, so a change to it is deliberate): `G-F7` (capability flags vs. what the
- * adapter actually does) and `G-F16` (`asRgbOperations` narrowing).
- *
- * Two blocks are still `describe.skip`ped because they are CONFIRMED but need a
- * product decision, not a patch — the reason is on each block:
- *   - `G-F2` lookup-failure-reported-as-pending: `TransactionStatus` has no
- *     `unknown`/`error` member to return.
- *   - `G-F4` RgbLibWasmAdapter colored sats: the two RGB_L1 backends disagree BY
- *     DESIGN and `test/rgb-l1-wasm.test.ts` is named for the summed behaviour.
+ * The former G-F2/G-F4/G-F16 decision blocks are active regression tests now
+ * that their contracts have been specified.
  */
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { ArkadeWdkAdapter } from '../../src/adapters/wdk/ArkadeWdkAdapter'
@@ -72,37 +64,30 @@ describe('G-F1: ArkadeWdkAdapter Ark-transfer send — confirmed with empty txid
 
 // ---------------------------------------------------------------------------
 /**
- * G-F2, split by verdict in run 2.
- *
- * The DISCONNECTED case is fixed and unskipped below. The two lookup-failure cases
- * stay skipped: they are CONFIRMED but need a design decision, because
- * `TransactionStatus` (types/base.ts) has no `unknown`/`error` member to return
- * and making a polling API throw is a breaking change for its callers.
- *
- * The RlnWdkAdapter case that used to live here was DELETED. `test/rln-payment-status
- * .test.ts:45-55` — pre-existing, unskipped, passing — pins exactly that behaviour
- * as deliberate: "returns pending (never throws) when the payment is unknown OR THE
- * CALL FAILS". Keeping a skipped test that demands the opposite of a decision the
- * project has already recorded is worse than having none. The underlying concern
- * (a caller cannot distinguish in-flight from un-checkable) is carried in REPORT-2.
+ * G-F2: a thrown lookup is `unknown`, distinct from an answered lookup with no
+ * matching payment (`pending`).
  */
-describe.skip('G-F2: getPaymentStatus lookup failure reported as pending (NEEDS DESIGN)', () => {
-  it('SparkWdkAdapter: getTransactionReceipt failure must surface, not return pending', async () => {
+describe('G-F2: getPaymentStatus lookup failure returns unknown', () => {
+  it('SparkWdkAdapter distinguishes a failed receipt lookup', async () => {
     const adapter = connected(new SparkWdkAdapter(), {
       getTransactionReceipt: async () => {
         throw new Error('gateway unreachable')
       },
     })
-    await expect(adapter.getPaymentStatus('pay-1')).rejects.toThrow()
+    await expect(adapter.getPaymentStatus('pay-1')).resolves.toEqual({
+      paymentHash: 'pay-1', status: 'unknown',
+    })
   })
 
-  it('ArkadeWdkAdapter: receipt lookup failure must surface, not return pending', async () => {
+  it('ArkadeWdkAdapter distinguishes a failed receipt lookup', async () => {
     const adapter = connected(new ArkadeWdkAdapter(), {
       getTransactionReceipt: async () => {
         throw new Error('indexer down')
       },
     })
-    await expect(adapter.getPaymentStatus('tx-1')).rejects.toThrow()
+    await expect(adapter.getPaymentStatus('tx-1')).resolves.toEqual({
+      paymentHash: 'tx-1', status: 'unknown',
+    })
   })
 })
 
@@ -133,7 +118,7 @@ describe('G-F3: SparkAdapter.getInvoiceStatus must not map RPC failure to Pendin
 })
 
 // ---------------------------------------------------------------------------
-describe.skip('G-F4: RgbLibWasmAdapter.getBtcBalance must exclude RGB-colored sats (C-F2 residual)', () => {
+describe('G-F4: RgbLibWasmAdapter.getBtcBalance excludes RGB-colored sats', () => {
   it('reports vanilla-only, per the policy fixed in RgbAdapter (f35b3c4)', async () => {
     const adapter = connected(new RgbLibWasmAdapter(), {
       getBtcBalance: async () => ({
@@ -281,26 +266,16 @@ describe('G-F8: listTransactions must honor the TransactionFilter contract', () 
     expect(r).toHaveLength(1) // ACTUAL (bug): 3 — _filter ignored (LiquidWdkAdapter.ts:302)
   })
 
-  // ORDERING: run 1 claimed the ordering divergence as part of G-F8 and this case
-  // demanded newest-first. Verified in run 2 as NOT contract-backed —
-  // `listTransactions` has no JSDoc, `TransactionFilter` has no field docs, and
-  // `UnifiedTransaction` carries no ordering note; four adapters pass SDK order
-  // through and imposing a sort reorders what every existing consumer sees (it
-  // broke two pre-existing test/liquid.test.ts cases that read txs[0]/txs[1]
-  // positionally). The divergence is real and is carried in REPORT-2 as a product
-  // decision; this case now pins the ACTUAL order so a future change to it is a
-  // deliberate one, rather than asserting an expectation nothing requires.
-  it('ArkadeWdkAdapter passes SDK order through (ordering is unspecified — see REPORT-2)', async () => {
+  it('ArkadeWdkAdapter orders newest-first before pagination', async () => {
     const history = [
       { key: { arkTxid: 'old' }, type: 'RECEIVED', amount: 1, settled: true, createdAt: 1000 },
       { key: { arkTxid: 'new' }, type: 'RECEIVED', amount: 1, settled: true, createdAt: 9000 },
     ]
     const adapter = connected(new ArkadeWdkAdapter(), { getTransactionHistory: async () => history })
     const r = await adapter.listTransactions()
-    expect(r.map((t) => t.id)).toEqual(['old', 'new'])
-    // …and the filter's slice is applied on top of that order.
+    expect(r.map((t) => t.id)).toEqual(['new', 'old'])
     const page2 = await adapter.listTransactions({ limit: 1, offset: 1 })
-    expect(page2.map((t) => t.id)).toEqual(['new'])
+    expect(page2.map((t) => t.id)).toEqual(['old'])
   })
 })
 
@@ -421,12 +396,8 @@ describe('G-F15: SparkAdapter.decodeInvoice must decode a bolt11 amount (decoder
 
 // ---------------------------------------------------------------------------
 describe('G-F16: asRgbOperations narrowing must not promise missing methods', () => {
-  it('RgbLibWdkAdapter narrows non-null but lacks decodeRgbInvoice/estimateRgbFee', () => {
+  it('throws a clear error naming the first missing required method', () => {
     const adapter = new RgbLibWdkAdapter()
-    const ops = asRgbOperations(adapter as any)
-    expect(ops).not.toBeNull() // the narrowing claim
-    // …but the group it promises is not there:
-    expect((adapter as any).decodeRgbInvoice).toBeUndefined()
-    expect((adapter as any).estimateRgbFee).toBeUndefined()
+    expect(() => asRgbOperations(adapter as any)).toThrow(/decodeRgbInvoice/)
   })
 })

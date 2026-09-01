@@ -19,8 +19,9 @@ import {
 
 /**
  * `wallet.getBtcBalance()` splits BTC into vanilla and colored (RGB-allocated)
- * sub-balances. Only the vanilla portion is the BTC asset's balance — colored sats
- * are accounted under each RGB asset, and must never show as spendable BTC.
+ * sub-balances. Only the vanilla portion is the BTC asset's balance. A colored sat
+ * carries an RGB allocation; spending it as ordinary BTC destroys that asset, so
+ * colored sats are exposed only through the RGB balance views.
  */
 export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset["balance"] {
   const vanilla = btcBalance.vanilla ?? { settled: 0, future: 0, spendable: 0 };

@@ -400,7 +400,12 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     this.assertConnected()
-    const r: any = await this.account.getTransactionReceipt?.(paymentHash).catch(() => null)
+    let r: any
+    try {
+      r = await this.account.getTransactionReceipt?.(paymentHash)
+    } catch {
+      return { paymentHash, status: 'unknown' }
+    }
     const status = (r?.confirmedAt || r?.settled ? 'confirmed' : 'pending') as TransactionStatus
     return { paymentHash, status }
   }

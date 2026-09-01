@@ -9,16 +9,8 @@
  * list back — page 2 was page 1 — with no signal that the filter had been ignored
  * (audit finding G-F8).
  *
- * ORDERING IS DELIBERATELY NOT CHANGED. Nothing in the contract specifies one:
- * `listTransactions` has no JSDoc, `TransactionFilter` has no field docs, and
- * `UnifiedTransaction` carries no ordering note. `RgbAdapter`/`SparkAdapter` sort
- * newest-first and four adapters pass SDK order through, so a merged
- * multi-protocol feed does have inconsistent per-protocol ordering — but imposing
- * a sort here changes the output order every existing consumer sees (it breaks two
- * pre-existing tests that read `txs[0]`/`txs[1]` positionally), and no in-repo
- * source says which order is right. `ProtocolManager.listAllTransactions` re-sorts
- * the merged result by descending timestamp anyway. The ordering question is
- * carried in REPORT-2 as a product decision.
+ * The adapter contract specifies newest-first ordering. Sorting here before
+ * slicing makes pagination deterministic even when an SDK returns oldest-first.
  *
  * Pure: same input, same output, no `this`, no I/O.
  */
@@ -30,9 +22,10 @@ export function applyTransactionFilter(
   txs: UnifiedTransaction[],
   filter?: TransactionFilter,
 ): UnifiedTransaction[] {
-  if (!filter) return txs
+  const ordered = [...txs].sort((a, b) => b.timestamp - a.timestamp)
+  if (!filter) return ordered
 
-  const matched = txs.filter((tx) => {
+  const matched = ordered.filter((tx) => {
     if (filter.asset && tx.asset?.id !== filter.asset) return false
     if (filter.type && tx.type !== filter.type) return false
     if (filter.status && tx.status !== filter.status) return false

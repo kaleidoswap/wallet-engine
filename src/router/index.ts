@@ -60,6 +60,10 @@ function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination):
 
 export interface SendRoute {
   protocol: ProtocolType
+  /**
+   * @deprecated Calling this live adapter bypasses every `ProtocolManager`
+   * policy gate. Execute fund-moving operations through `ProtocolManager`.
+   */
   adapter: IProtocolAdapter
   layer: Layer | null
   /** True when this protocol can pay the destination directly (no swap). */
@@ -76,6 +80,10 @@ export interface SendResolution {
 
 export interface ReceiveRoute {
   protocol: ProtocolType
+  /**
+   * @deprecated This is a live raw adapter. Use `ProtocolManager` operation
+   * methods whenever an action can sign or move funds.
+   */
   adapter: IProtocolAdapter
   layer: Layer
 }
@@ -93,7 +101,11 @@ export interface UnifiedSendResolution {
   source: UnifiedReceiveParams | null
   /** Every payable rail×protocol route, ranked by preference (best first). */
   routes: UnifiedSendRoute[]
-  /** The auto-selected route (highest-priority direct route) for lite mode, or null. */
+  /**
+   * Highest-ranked direct route, or null. This is a ranking hint, not an
+   * authorisation: consult the policy-checked `ProtocolManager` before paying.
+   * See SECURITY.md: consumers must not silently auto-pay one URI method.
+   */
   best: UnifiedSendRoute | null
 }
 

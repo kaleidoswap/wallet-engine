@@ -226,10 +226,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
-    const { vanilla, colored } = await this.detailedBtcBalance()
-    const settled = vanilla.settled + colored.settled
-    const spendable = vanilla.spendable + colored.spendable
-    const future = vanilla.future + colored.future
+    const { vanilla } = await this.detailedBtcBalance()
+    // Colored sats carry RGB allocations; spending them as ordinary BTC destroys
+    // the bound asset. They remain visible via getRgbDetailedBalance(), not here.
+    const settled = vanilla.settled
+    const spendable = vanilla.spendable
+    const future = vanilla.future
     return { confirmed: settled, unconfirmed: Math.max(0, future - settled), total: spendable }
   }
 

@@ -93,6 +93,7 @@ export interface ICoreProtocolAdapter {
   refreshBalances(): Promise<void>
 
   // --- Transactions ---
+  /** Transactions ordered newest-first; filtering/pagination preserve that order. */
   listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]>
   /** @param assetId - Required for RGB protocol (transfers are per-asset) */
   getTransaction(txId: string, assetId?: string): Promise<UnifiedTransaction>
@@ -307,7 +308,26 @@ export function asSwapOperations(a: IProtocolAdapter): ISwapOperations | null {
   return a.supportsSwaps() && isFn(a.executeSwap) && isFn(a.getSwapQuote) ? (a as ISwapOperations) : null
 }
 export function asRgbOperations(a: IProtocolAdapter): IRgbOperations | null {
-  return isFn(a.createRgbInvoice) && isFn(a.sendAsset) ? (a as IRgbOperations) : null
+  // Preserve the historical null result for adapters that do not opt into the
+  // group at all. Once the two original markers are present, verify the complete
+  // non-optional interface before returning the promised type.
+  if (!isFn(a.createRgbInvoice) || !isFn(a.sendAsset)) return null
+  const methods: ReadonlyArray<keyof IRgbOperations> = [
+    'createRgbInvoice',
+    'decodeRgbInvoice',
+    'createRgbUtxos',
+    'listRgbUnspents',
+    'estimateRgbFee',
+    'getRgbDetailedBalance',
+    'getInvoiceStatus',
+    'sendAsset',
+  ]
+  for (const method of methods) {
+    if (!isFn(a[method])) {
+      throw new Error(`Adapter ${a.protocolName} is missing IRgbOperations method '${method}'`)
+    }
+  }
+  return a as IRgbOperations
 }
 export function asSigningOperations(a: IProtocolAdapter): ISigningOperations | null {
   return isFn(a.signPsbt) && isFn(a.signMessage) ? (a as ISigningOperations) : null

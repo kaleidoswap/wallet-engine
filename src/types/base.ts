@@ -165,6 +165,8 @@ export type TransactionStatus =
   | 'confirmed'
   | 'failed'
   | 'cancelled'
+  /** The status lookup itself failed; hosts should stop polling and surface it. */
+  | 'unknown'
 
 export interface InvoiceRequest {
   amount?: number

@@ -45,6 +45,7 @@ import {
   toStringValue,
 } from "../lib/arkade-helpers";
 import { convertArkTxToUnifiedAll } from "../lib/arkade-converters";
+import { applyTransactionFilter } from "../lib/transaction-filter";
 import {
   ProtocolType,
   Layer,
@@ -321,20 +322,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       );
       const validTxs: UnifiedTransaction[] = expanded.flat();
 
-      return validTxs
-        .filter((tx: UnifiedTransaction) => {
-          if (!filter) return true;
-          if (filter.asset && tx.asset?.id !== filter.asset) return false;
-          if (filter.type && tx.type !== filter.type) return false;
-          if (filter.status && tx.status !== filter.status) return false;
-          if (filter.fromTimestamp && tx.timestamp < filter.fromTimestamp) return false;
-          if (filter.toTimestamp && tx.timestamp > filter.toTimestamp) return false;
-          return true;
-        })
-        .slice(
-          filter?.offset ?? 0,
-          filter?.limit ? (filter.offset ?? 0) + filter.limit : undefined,
-        );
+      return applyTransactionFilter(validTxs, filter);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ProtocolError(
@@ -591,7 +579,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       };
     } catch (error: unknown) {
       log.warn("[ArkadeAdapter] getPaymentStatus history lookup failed:", error);
-      return { paymentHash, status: "pending" as TransactionStatus };
+      return { paymentHash, status: "unknown" as TransactionStatus };
     }
   }
 

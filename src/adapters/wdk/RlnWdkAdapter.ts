@@ -394,7 +394,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       const p = list.find((x) => (x?.payment_hash ?? x?.paymentHash) === paymentHash)
       if (p) return { paymentHash, status: mapRgbStatus(p?.status), error: p?.error }
     } catch {
-      /* fall through — treat as still pending */
+      return { paymentHash, status: 'unknown' }
     }
     return { paymentHash, status: 'pending' }
   }

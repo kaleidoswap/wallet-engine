@@ -50,14 +50,14 @@ describe('RgbLibWasmAdapter', () => {
     expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 2500, unconfirmed: 200, total: 2500 })
   })
 
-  it('adds colored BTC sats to the spendable on-chain total', async () => {
+  it('excludes colored sats from spendable BTC', async () => {
     const adapter = connected({
       getBtcBalance: () => ({
         vanilla: { settled: 2500, spendable: 2400, future: 2700 },
         colored: { settled: 800, spendable: 700, future: 900 },
       }),
     })
-    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 3300, unconfirmed: 300, total: 3100 })
+    expect(await adapter.getBtcBalance()).toMatchObject({ confirmed: 2500, unconfirmed: 200, total: 2400 })
   })
 
   it('reads flat BTC balance aliases from rgb-lib', async () => {
@@ -221,8 +221,8 @@ describe('RgbLibWasmAdapter', () => {
       ],
     })
     const txs = await adapter.listTransactions()
-    expect(txs[0]).toMatchObject({ id: 'dep', type: 'receive', amount: 12000, timestamp: 101000 })
-    expect(txs[1]).toMatchObject({ id: 'wd', type: 'send', amount: 7000, timestamp: 102000 })
+    expect(txs[0]).toMatchObject({ id: 'wd', type: 'send', amount: 7000, timestamp: 102000 })
+    expect(txs[1]).toMatchObject({ id: 'dep', type: 'receive', amount: 12000, timestamp: 101000 })
   })
 
   it('sends BTC on-chain via sendBtcBegin → signPsbt → sendBtcEnd', async () => {

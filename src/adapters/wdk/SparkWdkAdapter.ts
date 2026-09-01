@@ -515,7 +515,12 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     this.assertConnected()
     // Spark may return entity ids like "SparkLightningSendRequest:uuid"; getTransactionReceipt wants the uuid.
     const id = paymentId.includes(':') ? paymentId.split(':').pop()! : paymentId
-    const t: any = await this.account.getTransactionReceipt(id).catch(() => null)
+    let t: any
+    try {
+      t = await this.account.getTransactionReceipt(id)
+    } catch {
+      return { paymentHash: paymentId, status: 'unknown' }
+    }
     if (!t) return { paymentHash: paymentId, status: 'pending' }
     return {
       paymentHash: paymentId,
