@@ -46,6 +46,7 @@ import {
 } from "../lib/arkade-helpers";
 import { convertArkTxToUnifiedAll } from "../lib/arkade-converters";
 import { applyTransactionFilter } from "../lib/transaction-filter";
+import { decodeBolt11Invoice } from "../lib/bolt11";
 import {
   ProtocolType,
   Layer,
@@ -86,7 +87,7 @@ function stripLightningPrefix(value: string): string {
 }
 
 function isArkadeAddress(value: string): boolean {
-  return /^(ark1|tark1)/i.test(value.trim());
+  return /^(ark|tark)1[0-9a-z]{6,}$/i.test(value.trim());
 }
 
 export class ArkadeAdapter implements IProtocolAdapter {
@@ -421,12 +422,34 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    // Arkade uses addresses, not bolt11 invoices
-    return {
-      paymentHash: "",
-      expiresAt: 0,
-      destination: invoice,
-    };
+    const destination = invoice.trim();
+    if (isArkadeAddress(destination)) {
+      return { paymentHash: "", expiresAt: 0, destination };
+    }
+    if (isLightningInvoice(destination)) {
+      try {
+        const decoded = decodeBolt11Invoice(stripLightningPrefix(destination));
+        return {
+          paymentHash: decoded.paymentHash,
+          amount: decoded.amountSat == null ? undefined : Number(decoded.amountSat),
+          amountMsat: decoded.amountMsat == null ? undefined : Number(decoded.amountMsat),
+          expiresAt: decoded.expiresAtUnixSeconds * 1000,
+          destination,
+        };
+      } catch (error: unknown) {
+        throw new ProtocolError(
+          "Invalid Arkade Lightning invoice",
+          "ARKADE",
+          "INVALID_INVOICE",
+          error,
+        );
+      }
+    }
+    throw new ProtocolError(
+      "Input is neither an Arkade address nor a valid Lightning invoice",
+      "ARKADE",
+      "INVALID_INVOICE",
+    );
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
