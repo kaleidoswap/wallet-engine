@@ -34,6 +34,7 @@ export interface KaleidoswapSwapRecord {
 
 const STORAGE_PREFIX = 'wallet-engine:kaleidoswap:v1:'
 const memoryStore = new Map<string, string>()
+const inFlightQuotes = new Set<string>()
 let warnedNoStorage = false
 let warnedNoWalletIdentity = false
 let anonymousSession = 0
@@ -67,6 +68,18 @@ export class KaleidoswapSwapStore {
 
   private key(quoteId: string): string {
     return `${this.prefix}${digest(quoteId)}`
+  }
+
+  /** Synchronous process-wide claim; call before the first async storage read. */
+  tryClaim(quoteId: string): boolean {
+    const key = this.key(quoteId)
+    if (inFlightQuotes.has(key)) return false
+    inFlightQuotes.add(key)
+    return true
+  }
+
+  releaseClaim(quoteId: string): void {
+    inFlightQuotes.delete(this.key(quoteId))
   }
 
   private async keys(): Promise<string[]> {

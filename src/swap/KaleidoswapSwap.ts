@@ -164,51 +164,72 @@ export class KaleidoswapSwap {
     if (quote.expiresAt > 0 && Date.now() > quote.expiresAt) {
       throw new ProtocolError('Approved quote has expired — request a fresh quote', 'RGB_LN', 'QUOTE_EXPIRED')
     }
-    const proto = await this.ensure()
-    const createdAt = kaleidoswapNow()
-    await this.store.save({
-      quoteId: quote.id,
-      fromAsset: quote.fromAsset,
-      fromAmount: quote.fromAmount,
-      toAsset: quote.toAsset,
-      toAmount: quote.toAmount,
-      expiresAt: quote.expiresAt,
-      createdAt,
-      updatedAt: createdAt,
-      state: 'approved',
-    })
-    await this.store.update(quote.id, { state: 'executing', updatedAt: kaleidoswapNow() })
-    let r: RawSwap
-    try {
-      r = await proto.swap({
-        rfqId: quote.id,
-        fromAssetId: quote.fromAsset,
-        toAssetId: quote.toAsset,
-        tokenInAmount: quote.fromAmount,
-        tokenOutAmount: quote.toAmount,
-      })
-    } catch (error) {
-      await this.store.update(quote.id, { state: 'execution_unknown', updatedAt: kaleidoswapNow() })
-      throw error
+    if (!this.store.tryClaim(quote.id)) {
+      throw new ProtocolError(
+        `Swap quote ${quote.id} is already executing`,
+        'RGB_LN',
+        'SWAP_IN_FLIGHT',
+        { quoteId: quote.id },
+      )
     }
-    await this.store.update(quote.id, {
-      paymentHash: r.paymentHash,
-      accessToken: r.accessToken ?? undefined,
-      state: mapAtomicStatus(r.status),
-      updatedAt: kaleidoswapNow(),
-    })
-    if (r.paymentHash && r.accessToken) this.accessTokenCache.set(r.paymentHash, r.accessToken)
-    return {
-      swapId: r.paymentHash,
-      paymentHash: r.paymentHash,
-      accessToken: r.accessToken ?? undefined,
-      status: mapAtomicStatus(r.status),
-      quote: {
-        ...quote,
-        fromAmount: toAmount(r.tokenInAmount, 'tokenInAmount'),
-        toAmount: toAmount(r.tokenOutAmount, 'tokenOutAmount'),
-      },
-      timestamp: kaleidoswapNow(),
+    try {
+      const previous = await this.store.getByQuoteId(quote.id)
+      if (previous) {
+        throw new ProtocolError(
+          `Swap quote ${quote.id} was already used`,
+          'RGB_LN',
+          'SWAP_ALREADY_EXECUTED',
+          { quoteId: quote.id, state: previous.state, paymentHash: previous.paymentHash },
+        )
+      }
+      const proto = await this.ensure()
+      const createdAt = kaleidoswapNow()
+      await this.store.save({
+        quoteId: quote.id,
+        fromAsset: quote.fromAsset,
+        fromAmount: quote.fromAmount,
+        toAsset: quote.toAsset,
+        toAmount: quote.toAmount,
+        expiresAt: quote.expiresAt,
+        createdAt,
+        updatedAt: createdAt,
+        state: 'approved',
+      })
+      await this.store.update(quote.id, { state: 'executing', updatedAt: kaleidoswapNow() })
+      let r: RawSwap
+      try {
+        r = await proto.swap({
+          rfqId: quote.id,
+          fromAssetId: quote.fromAsset,
+          toAssetId: quote.toAsset,
+          tokenInAmount: quote.fromAmount,
+          tokenOutAmount: quote.toAmount,
+        })
+      } catch (error) {
+        await this.store.update(quote.id, { state: 'execution_unknown', updatedAt: kaleidoswapNow() })
+        throw error
+      }
+      await this.store.update(quote.id, {
+        paymentHash: r.paymentHash,
+        accessToken: r.accessToken ?? undefined,
+        state: mapAtomicStatus(r.status),
+        updatedAt: kaleidoswapNow(),
+      })
+      if (r.paymentHash && r.accessToken) this.accessTokenCache.set(r.paymentHash, r.accessToken)
+      return {
+        swapId: r.paymentHash,
+        paymentHash: r.paymentHash,
+        accessToken: r.accessToken ?? undefined,
+        status: mapAtomicStatus(r.status),
+        quote: {
+          ...quote,
+          fromAmount: toAmount(r.tokenInAmount, 'tokenInAmount'),
+          toAmount: toAmount(r.tokenOutAmount, 'tokenOutAmount'),
+        },
+        timestamp: kaleidoswapNow(),
+      }
+    } finally {
+      this.store.releaseClaim(quote.id)
     }
   }
 

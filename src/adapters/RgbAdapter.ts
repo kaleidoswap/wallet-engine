@@ -1214,6 +1214,7 @@ export class RgbAdapter implements IProtocolAdapter {
     let recordStore: KaleidoswapSwapStore | null = null;
     let recordId: string | null = null;
     let executionAttempted = false;
+    let quoteClaimed = false;
     try {
       const client = kaleidoClientManager.getClient();
       const rln = client.rln as unknown as {
@@ -1222,6 +1223,24 @@ export class RgbAdapter implements IProtocolAdapter {
       };
       const takerPubkey = await rln.getTakerPubkey();
       recordStore = this.recordStore(takerPubkey);
+      if (!recordStore.tryClaim(rfqId)) {
+        throw new ProtocolError(
+          `Swap quote ${rfqId} is already executing`,
+          "RGB_LN",
+          "SWAP_IN_FLIGHT",
+          { quoteId: rfqId },
+        );
+      }
+      quoteClaimed = true;
+      const previous = await recordStore.getByQuoteId(rfqId);
+      if (previous) {
+        throw new ProtocolError(
+          `Swap quote ${rfqId} was already used`,
+          "RGB_LN",
+          "SWAP_ALREADY_EXECUTED",
+          { quoteId: rfqId, state: previous.state, paymentHash: previous.paymentHash },
+        );
+      }
       // The maker binds the swap to the rfq_id and these exact raw amounts —
       // there is no server-side re-quote, so the fill can never diverge from
       // the approved quote on either leg.
@@ -1288,6 +1307,8 @@ export class RgbAdapter implements IProtocolAdapter {
         }
       }
       throw this.handleSdkError(error, "Failed to execute swap");
+    } finally {
+      if (quoteClaimed && recordStore) recordStore.releaseClaim(rfqId);
     }
   }
 

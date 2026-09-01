@@ -6,19 +6,13 @@
  *
  *  N6 (LOW, fixed) — concurrent first calls share one module construction.
  *
- *  HELD — the per-swap `accessTokens` map is keyed by payment hash, so two
- *      concurrent swaps never overwrite each other's status token.
+ *  B-F3 (fixed) — the same approved RFQ cannot execute concurrently.
  *
  *  HELD — a shared `Quote` object is not mutated by execution: `executeSwap`
  *      spreads it into the result (`quote: { ...quote, … }`), so one swap cannot
  *      corrupt the other's approved amounts.
  *
- *  BY DESIGN (not a finding) — two concurrent `executeSwap` calls on one approved
- *      quote each pass the spend cap independently, so N concurrent swaps can move
- *      N × cap. `SigningPolicy.maxAmountSat` is documented as a "Global
- *      per-transaction spend cap" (src/policy/index.ts), so this is the documented
- *      semantics, not a bypass. The absence of a replay/in-flight guard on
- *      `executeSwap` is run 1's B-F3 and remains open.
+ *  HELD — the approved quote object is not mutated by its single execution.
  */
 import { beforeAll, describe, expect, it } from 'vitest'
 import { registerWdkModule } from '../../src/adapters/wdk/moduleLoader'
@@ -94,21 +88,16 @@ describe('N6: concurrent getQuote() single-flights the swap protocol module', ()
 })
 
 describe('concurrency invariants that HOLD on the swap path', () => {
-  it('two concurrent swaps do not overwrite each other`s status access token', async () => {
+  it('a second concurrent execution of the same RFQ is rejected', async () => {
     const swap = new KaleidoswapSwap({}, { baseUrl: 'https://maker.example' })
     const quote = await swap.getQuote(REQ)
 
-    const [r1, r2] = await Promise.all([
+    const results = await Promise.allSettled([
       swap.executeSwap({ ...quote, fromAmount: 100_000 }),
       swap.executeSwap({ ...quote, fromAmount: 200_000 }),
     ])
-    expect(r1.paymentHash).not.toBe(r2.paymentHash)
-
-    // Each hash resolves through its own token — the map did not collide.
-    const s1 = await swap.getSwapStatus(r1.paymentHash)
-    const s2 = await swap.getSwapStatus(r2.paymentHash)
-    expect(s1.status).not.toBe('failed')
-    expect(s2.status).not.toBe('failed')
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
   })
 
   it('executing a shared quote object does not mutate it', async () => {
@@ -116,7 +105,7 @@ describe('concurrency invariants that HOLD on the swap path', () => {
     const quote = await swap.getQuote(REQ)
     const snapshot = { ...quote }
 
-    await Promise.all([swap.executeSwap(quote), swap.executeSwap(quote)])
+    await swap.executeSwap(quote)
 
     expect(quote).toEqual(snapshot)
   })

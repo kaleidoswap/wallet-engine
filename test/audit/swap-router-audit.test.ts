@@ -209,16 +209,18 @@ describe('F2: native RgbAdapter quote coercion fails open (C1/L1 partial)', () =
 // F3 — no replay / double-execution guard
 // ---------------------------------------------------------------------------
 
-describe('F3: executeSwap has no in-flight / idempotency guard', () => {
-  it('two concurrent executeSwap calls with the same quote both reach the maker', async () => {
+describe('F3 [FIXED]: executeSwap rejects concurrent reuse of one RFQ', () => {
+  it('two concurrent calls with the same quote produce one maker execution', async () => {
     let calls = 0
     const swap = swapWithProto({
       swap: async () => (calls++, { paymentHash: `ph${calls}`, status: 'Waiting', tokenInAmount: 1, tokenOutAmount: 1 }),
     })
-    await Promise.all([swap.executeSwap(APPROVED as any), swap.executeSwap(APPROVED as any)])
-    // VULNERABILITY: same rfq id executed twice. Maker OpenAPI: "Treat this as
-    // non-idempotent: creating a second swap requires a new request."
-    expect(calls).toBe(2)
+    const results = await Promise.allSettled([
+      swap.executeSwap(APPROVED as any),
+      swap.executeSwap(APPROVED as any),
+    ])
+    expect(calls).toBe(1)
+    expect(results.filter((result) => result.status === 'rejected')).toHaveLength(1)
   })
 })
 
