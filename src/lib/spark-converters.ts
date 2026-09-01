@@ -201,6 +201,9 @@ export function convertTokenTransactionToUnified(
     }
   }
 
+  if (totalAmount > BigInt(Number.MAX_SAFE_INTEGER)) {
+    throw new Error('Spark token amount exceeds safe integer precision')
+  }
   const amount = Number(totalAmount)
 
   // Map token transaction status

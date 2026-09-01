@@ -226,7 +226,7 @@ describe('F4 [E-F4 FIXED]: RgbAdapter.getSwapQuote coerces maker money fields (R
 
 // ── F5: Spark token u128 -> Number without safe-integer check ──────────────
 describe('F5: convertTokenTransactionToUnified drops units past 2^53 (spark-converters.ts:214)', () => {
-  it('a receive of 2^53+1 base units records 9007199254740992', () => {
+  it('a receive of 2^53+1 base units is rejected instead of rounded', () => {
     const hashBytes = new Uint8Array(32).fill(3)
     const tokenIdBytes = new Uint8Array(32).fill(4)
     const amount = 2n ** 53n + 1n
@@ -249,7 +249,7 @@ describe('F5: convertTokenTransactionToUnified drops units past 2^53 (spark-conv
     const walletPub = u8aToHexLower(new Uint8Array(33).fill(1))
     const rawId = rawTokenIdFromBytes(tokenIdBytes)
     const rawMeta = new Map([[rawId, { id: 'btkn1x', meta: { name: 'Big', ticker: 'BIG', decimals: 0 } }]])
-    const out = convertTokenTransactionToUnified(
+    expect(() => convertTokenTransactionToUnified(
       tx,
       walletPub,
       new Map(),
@@ -258,10 +258,7 @@ describe('F5: convertTokenTransactionToUnified drops units past 2^53 (spark-conv
       new Map(),
       new Map(),
       'MAINNET',
-    )
-    console.log(`received ${amount} base units -> tx.amount = ${out!.amount}`)
-    expect(out!.amount).toBe(9007199254740992) // BUG: truth 9007199254740993
-    expect(BigInt(out!.amount)).not.toBe(amount)
+    )).toThrow(/safe integer/i)
   })
 })
 
