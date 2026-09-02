@@ -46,7 +46,7 @@ const ASSET_CHAIN_KIND: Record<BoltzChainAsset, 'bitcoin' | 'liquid'> = {
 
 /**
  * Coerce a wasm-boundary money field to a number, failing CLOSED on anything that
- * would corrupt downstream math: non-finite, negative, or past
+ * would corrupt downstream math: non-finite, fractional, negative, or past
  * `Number.MAX_SAFE_INTEGER`. Every field coerced is a non-negative sat amount.
  */
 function toSats(value: unknown, field: string): number {
@@ -56,6 +56,9 @@ function toSats(value: unknown, field: string): number {
   }
   if (n < 0) {
     throw new ProtocolError(`Chain swap field '${field}' is negative`, 'BTC', 'BAD_AMOUNT')
+  }
+  if (!Number.isInteger(n)) {
+    throw new ProtocolError(`Chain swap field '${field}' must contain whole satoshis`, 'BTC', 'BAD_AMOUNT')
   }
   if (n > Number.MAX_SAFE_INTEGER) {
     throw new ProtocolError(`Chain swap field '${field}' exceeds safe integer precision`, 'BTC', 'BAD_AMOUNT')
@@ -179,6 +182,13 @@ export class BoltzChainSwap {
       throw new ProtocolError('Chain swap requires two different chains', 'BTC', 'NOT_SUPPORTED')
     }
     const amount = req.fromAmount
+    if (!Number.isSafeInteger(amount) || amount <= 0) {
+      throw new ProtocolError(
+        'Chain swap quote requires a positive safe integer sat amount',
+        'BTC',
+        'BAD_AMOUNT'
+      )
+    }
     const client = boltzSwapClientManager.getClient()
     const pairs = (await client.chainPairs()) as Record<string, Record<string, RawChainPair>>
     const pair = pairs?.[from]?.[to]
@@ -200,17 +210,18 @@ export class BoltzChainSwap {
     if (!Number.isFinite(percentage) || percentage < 0) {
       throw new ProtocolError('Chain pair fee percentage is not a valid number', 'BTC', 'BAD_AMOUNT')
     }
-    const serviceFee = Math.ceil((percentage / 100) * amount)
+    const serviceFee = toSats(Math.ceil((percentage / 100) * amount), 'fees.percentage')
     const claimFee = toSats(pair.fees?.minerFees?.user?.claim, 'minerFees.user.claim')
     const lockupFee = toSats(pair.fees?.minerFees?.user?.lockup, 'minerFees.user.lockup')
     const serverFee = toSats(pair.fees?.minerFees?.server, 'minerFees.server')
-    const fee = serviceFee + claimFee + lockupFee + serverFee
+    const fee = toSats(serviceFee + claimFee + lockupFee + serverFee, 'fees.total')
 
     const rate = Number(pair.rate)
     if (!Number.isFinite(rate) || rate <= 0) {
       throw new ProtocolError('Chain pair rate is not a valid number', 'BTC', 'BAD_AMOUNT')
     }
-    const toAmount = Math.floor(amount * rate) - fee
+    const grossToAmount = toSats(Math.floor(amount * rate), 'toAmount.gross')
+    const toAmount = grossToAmount - fee
     if (toAmount <= 0) {
       throw new ProtocolError(
         `Fees (${fee} sat) exceed the swap amount (${amount} sat)`,
@@ -220,7 +231,7 @@ export class BoltzChainSwap {
     }
 
     return {
-      id: pair.hash,
+      id: requireString(pair.hash, 'pair.hash'),
       fromAsset: from,
       fromAmount: amount,
       toAsset: to,
@@ -278,13 +289,22 @@ export class BoltzChainSwap {
     // `lockupDetails` is our side (paid with the refund key), `claimDetails` is the
     // maker's side (spent with the claim key) — the pairing the SDK validates the
     // response against before it hands it back.
+    const swapId = requireString(response?.id, 'id')
+    const userLockAmount = toSats(response?.lockupDetails?.amount, 'lockupDetails.amount')
+    if (userLockAmount !== params.amountSat) {
+      throw new ProtocolError(
+        `Maker funding amount ${userLockAmount} sat does not match requested ${params.amountSat} sat`,
+        'BTC',
+        'AMOUNT_MISMATCH'
+      )
+    }
     const now = Date.now()
     const record: BoltzChainSwapRecord = {
-      swapId: requireString(response?.id, 'id'),
+      swapId,
       index,
       from,
       to,
-      userLockAmount: toSats(response?.lockupDetails?.amount, 'lockupDetails.amount'),
+      userLockAmount,
       serverLockAmount: toSats(response?.claimDetails?.amount, 'claimDetails.amount'),
       claimTimeoutBlockHeight: toSats(
         response?.claimDetails?.timeoutBlockHeight,
