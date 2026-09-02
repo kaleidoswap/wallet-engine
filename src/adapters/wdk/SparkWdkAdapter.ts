@@ -455,13 +455,16 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         }
 
         // Plain Spark address — zero-fee direct transfer.
-        const transfer: any = await this.account.sendTransaction({ to: destination, value: request.amount ?? 0 })
+        const transfer = await this.account.sendTransaction({ to: destination, value: request.amount ?? 0 }) as {
+          hash?: string
+          fee?: bigint
+        }
         // A resolved SDK call is not proof the transfer exists. Without an id
         // there is nothing to reconcile or retry against, so fail loud rather
         // than hand the caller a success-shaped result with an empty
         // paymentHash — the Spark *invoice* branch above already does exactly
         // this ("returned no result"), and sendBtcOnchain does it too.
-        const transferId = transfer?.id ?? transfer?.transferId ?? ''
+        const transferId = transfer?.hash ?? ''
         if (!transferId) {
           throw new ProtocolError(
             'Spark transfer returned no transaction id',
@@ -471,13 +474,12 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         }
         return {
           paymentHash: transferId,
-          amount: Number(transfer?.totalValue ?? request.amount ?? 0),
+          amount: request.amount ?? 0,
           fee: 0, // Spark transfers are zero-fee (capability flag)
-          // An absent status means the SDK told us nothing about settlement —
-          // that is 'pending', not 'confirmed'. Defaulting to confirmed reported
-          // funds as moved on no evidence.
-          status: transfer?.status ? mapTransferStatus(transfer.status) : 'pending',
-          timestamp: transfer?.createdTime?.getTime?.() ?? timestamp,
+          // TransactionResult has no settlement metadata. Dispatch is pending
+          // until a later history/status lookup observes the transfer.
+          status: 'pending',
+          timestamp,
         }
       }
 

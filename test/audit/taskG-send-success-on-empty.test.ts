@@ -39,11 +39,13 @@ describe('G-F1 [FIXED]: SparkWdkAdapter.sendPayment plain Spark transfer with a 
     ).rejects.toThrow()
   })
 
-  it('must not default a missing status field to confirmed', async () => {
+  it('accepts the WDK TransactionResult shape without inventing settlement metadata', async () => {
     const a = new SparkWdkAdapter()
     Object.assign(a as any, {
       connected: true,
-      account: { sendTransaction: async () => ({ id: 'tx-1' }) }, // id, but no status
+      // WalletAccountSpark.sendTransaction returns TransactionResult:
+      // { hash: string; fee: bigint }.
+      account: { sendTransaction: async () => ({ hash: 'tx-1', fee: 0n }) },
       sdk: {
         isValidSparkAddress: () => true,
         getNetworkFromSparkAddress: () => 'MAINNET',
@@ -51,7 +53,12 @@ describe('G-F1 [FIXED]: SparkWdkAdapter.sendPayment plain Spark transfer with a 
       },
     })
     const r = await a.sendPayment({ invoice: 'spark1qrecipient', amount: 1000 } as any)
-    expect(r.status, 'unknown settlement state must not be reported as confirmed').not.toBe('confirmed')
+    expect(r).toMatchObject({
+      paymentHash: 'tx-1',
+      amount: 1000,
+      fee: 0,
+      status: 'pending',
+    })
   })
 })
 
