@@ -1,7 +1,4 @@
-/**
- * RGB Protocol Types
- * Ported from rate-extension/src/protocols/types/rgb.ts
- */
+/** RGB protocol configuration types. */
 
 import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
 
@@ -15,10 +12,11 @@ export interface RgbConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
   makerUrl: string // Kaleidoswap maker URL
   /**
-   * Master mnemonic, required by the WDK RLN adapter, which derives the signing seed
-   * on-device. Never transmitted to the node. Optional so legacy call sites still
-   * type-check.
+   * Maximum maker quote from-leg divergence in basis points. Defaults to 100
+   * (1%); set 0 to require the returned amount to match exactly.
    */
+  maxQuoteSlippageBps?: number
+  /** On-device signing mnemonic for WDK RLN; never sent to the node. */
   mnemonic?: string
   /** Node transport. Defaults to "http" when omitted. */
   transport?: RgbTransport

@@ -122,7 +122,9 @@ export function rgbAssetBalance(raw?: RgbBalanceLike, precision = 0): AssetBalan
   const settled = toFiniteNumber(b.settled ?? b.total ?? 0)
   const future = toFiniteNumber(b.future ?? b.pending ?? settled)
   const spendable = toFiniteNumber(b.spendable ?? b.available ?? settled)
-  const owned = future || settled || spendable || 0
+  const owned = toFiniteNumber(
+    b.future ?? b.pending ?? b.settled ?? b.total ?? b.spendable ?? b.available ?? 0,
+  )
   return {
     total: owned,
     available: spendable,

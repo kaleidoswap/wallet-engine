@@ -1,13 +1,4 @@
-/**
- * CrossProtocolRouter
- * -------------------
- * Sits ON TOP of the adapters and chooses BETWEEN protocols: given a destination
- * or receive intent, returns the protocol(s) that can fulfil it, filtered to what
- * is registered and connected. This is what makes lite mode possible.
- *
- * Reads the capability manifest and the destination classifier — never adapter
- * internals.
- */
+/** Route destinations through connected adapters using capability data. */
 
 import { ProtocolAdapterRegistry, IProtocolAdapter } from '../adapters/IProtocolAdapter'
 import { ProtocolType, Layer } from '../types/base'
@@ -22,19 +13,16 @@ import {
   railOfKind,
 } from './preference'
 
-/**
- * Whether `protocol` can pay `dest` DIRECTLY (no swap), per the capability
- * manifest. Reads capability flags rather than exact layer strings, so a protocol
- * reaching a surface by another path (Spark paying on-chain via a deposit/exit) is
- * still recognised.
- */
+/** Capability-based direct settlement, including alternate protocol paths. */
 function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination): boolean {
   const caps = getCapabilities(protocol)
   switch (dest.kind) {
     case 'BOLT11':
-    case 'BOLT12':
     case 'LN_ADDRESS':
       return caps.supportsLightning
+    case 'BOLT12':
+      // BOLT12 payment is distinct from generic Lightning support.
+      return caps.supportsLightning && caps.supportsBolt12
     case 'BTC_ONCHAIN':
     case 'BIP21':
       return caps.supportsOnchain
@@ -53,6 +41,7 @@ function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination):
 
 export interface SendRoute {
   protocol: ProtocolType
+  /** @deprecated Direct calls bypass `ProtocolManager` policy gates. */
   adapter: IProtocolAdapter
   layer: Layer | null
   /** True when this protocol can pay the destination directly (no swap). */
@@ -69,6 +58,7 @@ export interface SendResolution {
 
 export interface ReceiveRoute {
   protocol: ProtocolType
+  /** @deprecated Use policy-checked manager methods for signing or funds. */
   adapter: IProtocolAdapter
   layer: Layer
 }
@@ -86,7 +76,7 @@ export interface UnifiedSendResolution {
   source: UnifiedReceiveParams | null
   /** Every payable rail×protocol route, ranked by preference (best first). */
   routes: UnifiedSendRoute[]
-  /** The auto-selected route (highest-priority direct route) for lite mode, or null. */
+  /** Highest-ranked direct route; a ranking hint, not payment authorization. */
   best: UnifiedSendRoute | null
 }
 
@@ -159,7 +149,7 @@ export class CrossProtocolRouter {
     if (parsed.btcAddress) railValues.push({ rail: 'onchain', value: parsed.btcAddress })
 
     const routes: UnifiedSendRoute[] = []
-    for (const { rail, value } of railValues) {
+    for (const { value } of railValues) {
       // Classify each rail's value through the same single source of truth.
       const classified = classifyDestination(value)
       for (const protocol of classified.candidates) {
@@ -170,7 +160,9 @@ export class CrossProtocolRouter {
           adapter,
           layer: classified.layer,
           direct: canSettleDirectly(protocol, classified),
-          rail,
+          // The parameter name is only a hint; a mismatched value must be
+          // labelled by what the selected adapter will actually pay.
+          rail: railOfKind(classified.kind),
           value,
         })
       }

@@ -1,14 +1,4 @@
-/**
- * RlnWdkAdapter
- * -------------
- * Wraps the WDK RGB-Lightning module (@kaleidorg/wdk-wallet-rln, over kaleido-sdk)
- * onto the `IProtocolAdapter` contract: BTC on-chain and Lightning, RGB assets
- * on-chain and over Lightning, plus channels and atomic swaps. The RLN account
- * talks to a remote RGB-Lightning node over HTTP (nodeUrl).
- *
- * No WDK/kaleido-sdk types cross the contract — node responses are read as `any`
- * and translated.
- */
+/** WDK RGB-Lightning adapter; SDK response types stay behind this boundary. */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
 import {
@@ -34,13 +24,18 @@ import {
 import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
-import { isBolt11 } from '../../lib/bolt11'
+import { decodeBolt11, decodeBolt11Invoice, isBolt11 } from '../../lib/bolt11'
 import { assertSafeToSign } from '../../lib/ln-message-sign'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { KaleidoswapSwap, type SwapQuoteRequest } from '../../swap/KaleidoswapSwap'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
-import { decodeBolt11 } from '../../lib/bolt11'
+import { defaultRgbFeeRate } from '../../lib/rgb-fee-policy'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
+import { roundedMsatToSat, toSafeAmountNumber } from '../../lightning/amounts'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex } from '@noble/hashes/utils.js'
+import type { KaleidoswapSwapRecord } from '../../swap/kaleidoswap-swap-store'
 
 export interface RlnAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_LN'
@@ -50,6 +45,8 @@ export interface RlnAdapterConfig extends BaseProtocolConfig {
   nodeUrl: string
   /** KaleidoSwap maker API base URL (for cross-asset RFQ swaps). */
   makerUrl?: string
+  /** Maximum maker quote from-leg divergence in bps. Defaults to 100 (1%). */
+  maxQuoteSlippageBps?: number
   /** BIP-44 account index (default 0). */
   accountIndex?: number
   /**
@@ -116,8 +113,15 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   /** KaleidoSwap maker base URL, for cross-asset RFQ swaps (Option C: swaps live in the adapter). */
   private makerUrl = ''
+  private maxQuoteSlippageBps: number | undefined
+
+  /** Swap capability also depends on a configured maker. */
+  supportsSwaps(): boolean {
+    return super.supportsSwaps() && !!this.makerUrl
+  }
   /** Lazily-built maker swap client, bound to this connected account. */
   private swap: KaleidoswapSwap | null = null
+  private swapWalletId = ''
   /** Host opt-in for fund-moving escape-hatch ops (see RLN_PRIVILEGED_OPS). */
   private allowPrivilegedOps = false
 
@@ -126,8 +130,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const cfg = config as RlnAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RlnWdkAdapter requires a mnemonic', 'RGB_LN', 'CONFIG')
     if (!cfg.nodeUrl) throw new ProtocolError('RlnWdkAdapter requires a nodeUrl', 'RGB_LN', 'CONFIG')
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     this.makerUrl = cfg.makerUrl ?? ''
+    this.maxQuoteSlippageBps = cfg.maxQuoteSlippageBps
     this.swap = null
     this.allowPrivilegedOps = cfg.allowPrivilegedOps === true
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
@@ -135,11 +141,14 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const RlnWalletManager = mod.default ?? mod
     // Resolve to seed bytes so nsec/hex-rooted wallets bypass the WDK base's
     // BIP-39 string validation (which throws "The seed phrase is invalid").
-    this.manager = new RlnWalletManager(resolveWalletSeed(cfg.mnemonic), {
+    const walletSeed = resolveWalletSeed(cfg.mnemonic)
+    const accountIndex = cfg.accountIndex ?? 0
+    this.swapWalletId = `${this.network}:${accountIndex}:${bytesToHex(sha256(walletSeed))}`
+    this.manager = new RlnWalletManager(walletSeed, {
       nodeUrl: cfg.nodeUrl,
       apiKey: cfg.jwt ?? cfg.apiKey,
     })
-    this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
+    this.account = await this.manager.getAccount(accountIndex)
     this.connected = true
   }
 
@@ -150,7 +159,9 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       // Base clears manager/account/mnemonic; this adapter also holds a
       // maker-bound swap client and its URL, which must not outlive disconnect.
       this.swap = null
+      this.swapWalletId = ''
       this.makerUrl = ''
+      this.maxQuoteSlippageBps = undefined
       this.allowPrivilegedOps = false
     }
   }
@@ -189,7 +200,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
-    await this.account.refreshTransfers?.({ skipSync: false }).catch(() => {})
+    await this.account.refreshTransfers?.({ skipSync: false })
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
@@ -244,9 +255,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
         asset_id: request.asset,
         ...(request.assetAmount != null ? { asset_amount: request.assetAmount } : {}),
       })
+      const invoice = String(inv?.invoice ?? '')
       return {
-        invoice: inv?.invoice ?? '',
-        paymentHash: inv?.payment_hash ?? '',
+        invoice,
+        paymentHash: decodeBolt11Invoice(invoice).paymentHash,
         amount: request.assetAmount,
         expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
         description: request.description,
@@ -274,9 +286,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       amt_msat: request.amount != null ? request.amount * 1000 : undefined,
       expiry_sec: request.expirySeconds ?? 3600,
     })
+    const invoice = String(inv?.invoice ?? '')
     return {
-      invoice: inv?.invoice ?? '',
-      paymentHash: inv?.payment_hash ?? '',
+      invoice,
+      paymentHash: decodeBolt11Invoice(invoice).paymentHash,
       amount: request.amount,
       expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
       description: request.description,
@@ -288,15 +301,30 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const d: any = isBolt11(invoice)
       ? await this.account.decodeLNInvoice(invoice)
       : await this.account.decodeRgbInvoice(invoice)
+    // RGB on-chain invoice amounts live in a typed fungible assignment.
+    const assignment = d?.assignment as { type?: string; value?: unknown } | undefined
+    const assignedAmount =
+      assignment && typeof assignment === 'object' && assignment.type === 'Fungible'
+        ? Number(assignment.value)
+        : undefined
     return {
       paymentHash: d?.payment_hash ?? d?.recipient_id ?? '',
-      amount: d?.amt_msat != null ? Math.floor(d.amt_msat / 1000) : d?.amount,
+      // Sats-denominated: never stuff RGB asset units in here.
+      amount: d?.amt_msat != null
+        ? toSafeAmountNumber(roundedMsatToSat(String(d.amt_msat)), 'sat')
+        : d?.amount,
       amountMsat: d?.amt_msat,
       description: d?.description,
-      expiresAt: d?.expiry_sec ? Date.now() + d.expiry_sec * 1000 : (d?.expiration_timestamp ?? 0) * 1000,
+      // `expiry_sec` is a duration from the invoice's creation timestamp.
+      expiresAt: d?.expiry_sec
+        ? (d?.timestamp != null
+            ? (Number(d.timestamp) + Number(d.expiry_sec)) * 1000
+            : Date.now() + d.expiry_sec * 1000)
+        : (d?.expiration_timestamp ?? 0) * 1000,
       destination: d?.payee_pubkey ?? d?.recipient_id ?? '',
       asset_id: d?.asset_id,
-      asset_amount: d?.asset_amount,
+      asset_amount:
+        d?.asset_amount ?? (Number.isFinite(assignedAmount) ? assignedAmount : undefined),
     }
   }
 
@@ -308,11 +336,12 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       asset_amount?: number
     }
     const invoice = request.invoice.trim()
+    const decoded = decodeBolt11(invoice)
     const body: any = { invoice }
     // Forward `amt_msat` only for amountless invoices — forwarding it for an
     // amount-bearing invoice silently re-amounts the payment to whatever the
     // caller passed (stale UI state, WebLN args) instead of the invoice amount.
-    if (request.amount != null && request.amount > 0 && decodeBolt11(invoice).amountMsat == null) {
+    if (request.amount != null && request.amount > 0 && decoded.amountMsat == null) {
       body.amt_msat = request.amount * 1000
     }
     if (req.asset_id) body.asset_id = req.asset_id
@@ -320,8 +349,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const r: any = await this.node.sendPayment(body)
     return {
       paymentHash: r?.payment_hash ?? '',
-      preimage: r?.payment_secret,
-      amount: Number(request.amount ?? 0),
+      // The invoice amount wins because amount-bearing invoices are not re-amounted.
+      amount: Number(decoded.amountSat ?? request.amount ?? 0),
+      // Still 0: nothing in the response reports the routing fee. A status
+      // lookup is the only source, so callers must not read this as "free".
       fee: 0,
       status: mapRgbStatus(r?.status),
       timestamp: Date.now(),
@@ -340,26 +371,34 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       const p = list.find((x) => (x?.payment_hash ?? x?.paymentHash) === paymentHash)
       if (p) return { paymentHash, status: mapRgbStatus(p?.status), error: p?.error }
     } catch {
-      /* fall through — treat as still pending */
+      return { paymentHash, status: 'unknown' }
     }
     return { paymentHash, status: 'pending' }
   }
 
   // --- Transactions / payments -------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const r: any = await this.account.listTransactions()
     const txs: any[] = r?.transactions ?? []
-    return txs.map((t) => ({
-      id: t.txid ?? t.transaction_id ?? '',
-      type: (t.transaction_type === 'User' || t.amount < 0 ? 'send' : 'receive') as UnifiedTransaction['type'],
-      status: (t.confirmation_time ? 'confirmed' : 'pending') as TransactionStatus,
-      timestamp: (t.confirmation_time?.timestamp ?? 0) * 1000,
-      amount: Number(t.received ?? t.sent ?? 0),
-      amountDisplay: '',
-      asset: undefined as unknown as UnifiedAsset,
-      protocolData: t,
-    }))
+    // The node expresses direction and amount as received/sent deltas.
+    const mapped = txs.map((t) => {
+      const received = Number(t.received ?? 0)
+      const sent = Number(t.sent ?? 0)
+      return {
+        id: t.txid ?? t.transaction_id ?? '',
+        type: (received >= sent ? 'receive' : 'send') as UnifiedTransaction['type'],
+        status: (t.confirmation_time ? 'confirmed' : 'pending') as TransactionStatus,
+        timestamp: (t.confirmation_time?.timestamp ?? 0) * 1000,
+        amount: Math.abs(received - sent) || received || sent,
+        amountDisplay: '',
+        asset: rgbBtcAsset(0, RLN_PROFILE),
+        protocolData: t,
+      }
+    })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
@@ -442,7 +481,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
           },
         ],
       },
-      feeRate: params.feeRate ?? params.fee_rate,
+      feeRate: params.feeRate ?? params.fee_rate ?? defaultRgbFeeRate(this.network),
       donation: params.donation ?? false,
       minConfirmations: params.minConfirmations ?? params.min_confirmations ?? 1,
     })
@@ -451,7 +490,12 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
     const r: any = await this.account.sendBtc(params)
-    return { ok: true, txid: r?.txid ?? '' }
+    const txid: string = r?.txid ?? ''
+    // A successful send must be traceable and reconcilable.
+    if (!txid) {
+      throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_LN', 'SEND_ERROR')
+    }
+    return { ok: true, txid }
   }
 
   // --- RGB on-chain UTXO management ----------------------------------------
@@ -474,7 +518,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       up_to: params.upTo ?? false,
       num: params.num ?? 3,
       size: params.size ?? 3000,
-      fee_rate: params.feeRate ?? (await this.estimateRgbFee(6)).fee_rate,
+      // Floor a cold-started node's 1 sat/vB estimate on mainnet — the estimate
+      // is the node's opinion, not a policy, and this adapter never consulted
+      // `resolveRgbFeeRatePolicy`.
+      fee_rate: params.feeRate ?? Math.max((await this.estimateRgbFee(6)).fee_rate, defaultRgbFeeRate(this.network)),
       skip_sync: false,
     })
     return { success: true }
@@ -503,7 +550,13 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     if (!this.makerUrl) {
       throw new ProtocolError('RLN swaps require a makerUrl in the adapter config', 'RGB_LN', 'CONFIG')
     }
-    if (!this.swap) this.swap = new KaleidoswapSwap(this.account, { baseUrl: this.makerUrl })
+    if (!this.swap) {
+      this.swap = new KaleidoswapSwap(this.account, {
+        baseUrl: this.makerUrl,
+        maxQuoteSlippageBps: this.maxQuoteSlippageBps,
+        walletId: this.swapWalletId || undefined,
+      })
+    }
     return this.swap
   }
 
@@ -533,6 +586,14 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   /** `swapId` is the atomic swap's payment hash. */
   async getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult> {
     return this.ensureSwap().getSwapStatus(swapId, accessToken)
+  }
+
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    return this.ensureSwap().listIncompleteSwaps()
+  }
+
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    return this.ensureSwap().resumeSwap(identifier, accessToken)
   }
 
   // --- Escape hatch -------------------------------------------------------

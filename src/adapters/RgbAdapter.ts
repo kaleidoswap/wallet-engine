@@ -4,6 +4,7 @@
 
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
+import { isBtcAssetId } from "../lib/asset-id";
 import { kaleidoClientManager } from "../lib/kaleido-client-manager";
 import {
   KaleidoError,
@@ -15,7 +16,6 @@ import {
   Layer as SdkLayer,
 } from "kaleido-sdk";
 import type {
-  CreateLNInvoiceResponse,
   DecodeLNInvoiceResponse,
   KeysendResponse,
   LNInvoiceRequest,
@@ -48,7 +48,10 @@ import {
 import { RgbConfig } from "../types/rgb";
 import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy";
+import { toSwapAmount, validateSwapQuoteTerms } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
+import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
+import { decodeBolt11, decodeBolt11Invoice } from "../lib/bolt11";
 import {
   convertBtcBalance,
   convertNodeAssetToUnified,
@@ -57,6 +60,11 @@ import {
   convertSwapToTransaction,
   convertTransferToTransaction,
 } from "../lib/rgb-converters";
+import {
+  KaleidoswapSwapStore,
+  kaleidoswapNow,
+  type KaleidoswapSwapRecord,
+} from "../swap/kaleidoswap-swap-store";
 
 /**
  * RGB Protocol Adapter Implementation using Kaleido SDK
@@ -69,10 +77,9 @@ export class RgbAdapter implements IProtocolAdapter {
 
   private connected = false;
   private config: RgbConfig | null = null;
-  /**
-   * In-memory fallback for per-swap status tokens (paymentHash → token). Hosts
-   * should persist `SwapResult.accessToken`; this map does not survive restarts.
-   */
+  private swapStore: KaleidoswapSwapStore | null = null;
+  private swapStoreIdentity: string | null = null;
+  /** Hot cache only; durable records are authoritative across restarts. */
   private swapAccessTokens = new Map<string, string>();
 
   // ========================================================================
@@ -104,7 +111,8 @@ export class RgbAdapter implements IProtocolAdapter {
       kaleidoClientManager.initialize({
         baseUrl: rgbConfig.makerUrl || "",
         nodeUrl: rgbConfig.nodeUrl,
-        apiKey: rgbConfig.apiKey,
+        // Prefer the documented node credential over the maker API key alias.
+        apiKey: rgbConfig.jwt ?? rgbConfig.apiKey,
         transport,
         nwcUri: rgbConfig.nwcUri,
       });
@@ -143,6 +151,10 @@ export class RgbAdapter implements IProtocolAdapter {
         log.info("[RgbAdapter] No maker URL provided (swaps disabled)");
       }
     } catch (error: unknown) {
+      // Revoke the initialized node client when its connection handshake fails.
+      this.connected = false;
+      this.config = null;
+      kaleidoClientManager.reset();
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`[RgbAdapter] connect() failed: ${msg}`);
       throw new ConnectionError(
@@ -157,11 +169,25 @@ export class RgbAdapter implements IProtocolAdapter {
     kaleidoClientManager.reset();
     this.connected = false;
     this.config = null;
+    this.swapStore = null;
+    this.swapStoreIdentity = null;
+    this.swapAccessTokens.clear();
     log.info("[RgbAdapter] Disconnected");
   }
 
   isConnected(): boolean {
     return this.connected && kaleidoClientManager.isInitialized();
+  }
+
+  private assertNodeConnected(): void {
+    // The shared manager can be initialized independently; require this adapter's
+    // own successful handshake before any node operation, especially money paths.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
+    if (!kaleidoClientManager.hasNode()) {
+      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
+    }
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -246,18 +272,24 @@ export class RgbAdapter implements IProtocolAdapter {
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
     const assets = await this.listAssets();
-    const asset = assets.find((a) => a.id === assetId || a.ticker === assetId);
-    if (!asset) {
-      throw new ProtocolError(`Asset not found: ${assetId}`, "RGB_LN", "ASSET_NOT_FOUND");
+    // Contract IDs are authoritative; issuer-controlled tickers cannot shadow one.
+    const byId = assets.find((a) => a.id === assetId);
+    if (byId) return byId;
+    // A ticker is usable only when it identifies exactly one asset.
+    const byTicker = assets.filter((a) => a.ticker === assetId);
+    if (byTicker.length === 1) return byTicker[0];
+    if (byTicker.length > 1) {
+      throw new ProtocolError(
+        `Ambiguous asset ticker '${assetId}' — ${byTicker.length} assets share it; look up by contract id`,
+        "RGB_LN",
+        "AMBIGUOUS_ASSET",
+      );
     }
-
-    return asset;
+    throw new ProtocolError(`Asset not found: ${assetId}`, "RGB_LN", "ASSET_NOT_FOUND");
   }
 
   async getAssetBalance(assetId: string): Promise<UnifiedAsset["balance"]> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     if (!assetId || !assetId.trim()) {
       throw new ProtocolError("Asset ID is required", "RGB_LN", "INVALID_ASSET_ID");
@@ -267,23 +299,24 @@ export class RgbAdapter implements IProtocolAdapter {
       const client = kaleidoClientManager.getClient();
 
       // Check if requesting BTC balance
-      if (assetId === "BTC" || assetId.toLowerCase() === "btc") {
+      if (isBtcAssetId(assetId)) {
         const btcBalance = await client.rln.getBtcBalance();
         return convertBtcBalance(btcBalance);
       }
 
-      // Get RGB asset balance
-      const balanceData = await client.rln.getAssetBalance({
-        asset_id: assetId,
-      });
-      return convertSdkBalance(balanceData);
+      // Resolve precision with the balance so non-BTC assets render in their units.
+      const [balanceData, metadata] = await Promise.all([
+        client.rln.getAssetBalance({ asset_id: assetId }),
+        client.rln.getAssetMetadata({ asset_id: assetId }),
+      ]);
+      return convertSdkBalance(balanceData, (metadata as { precision?: number })?.precision ?? 8);
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get asset balance");
     }
   }
 
   async refreshBalances(): Promise<void> {
-    if (!kaleidoClientManager.hasNode()) return;
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient() as unknown as {
@@ -300,6 +333,7 @@ export class RgbAdapter implements IProtocolAdapter {
       }
     } catch (error) {
       log.warn("[RgbAdapter] Could not refresh transfers:", error);
+      throw error;
     }
   }
 
@@ -308,9 +342,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -331,31 +363,43 @@ export class RgbAdapter implements IProtocolAdapter {
         client.rln.listTransfers({ asset_id: filter.asset }) as Promise<{
           transfers?: Record<string, unknown>[];
         }>,
-        client.rln.listPayments().catch(() => ({ payments: [] })) as Promise<{
+        // Without a partial-result marker, a failed rail must fail the whole view.
+        client.rln.listPayments() as Promise<{
           payments?: Record<string, unknown>[];
         }>,
-        client.rln.listSwaps().catch(() => ({ maker: [], taker: [] })) as Promise<{
+        client.rln.listSwaps() as Promise<{
           maker?: Record<string, unknown>[];
           taker?: Record<string, unknown>[];
         }>,
       ]);
 
+      // Resolve each row's asset once; swaps may render a counter-asset precision.
+      const precisionOf = await this.resolveAssetPrecisions(client, [
+        filter.asset,
+        ...(paymentsResponse.payments ?? []).map((p) => p.asset_id as string | null | undefined),
+        ...[...(swapsResponse.maker ?? []), ...(swapsResponse.taker ?? [])].map(
+          (s) => s.from_asset as string | null | undefined,
+        ),
+      ]);
+
       const transferTxs = (transfersResponse.transfers ?? []).map((transfer) =>
-        convertTransferToTransaction(transfer),
+        convertTransferToTransaction(transfer, precisionOf(filter.asset)),
       );
 
       const paymentTxs = (paymentsResponse.payments ?? [])
         .filter((payment) => {
           const paymentAssetId = payment.asset_id as string | null | undefined;
           // Match BTC payments to BTC, RGB payments to their asset_id.
-          if (filter.asset === "BTC" || filter.asset?.toLowerCase() === "btc") {
+          if (isBtcAssetId(filter.asset)) {
             return !paymentAssetId;
           }
           return paymentAssetId === filter.asset;
         })
-        .map((payment) => convertPaymentToTransaction(payment));
+        .map((payment) =>
+          convertPaymentToTransaction(payment, precisionOf(payment.asset_id as string | null)),
+        );
 
-      const isAssetBtc = filter.asset === "BTC" || filter.asset?.toLowerCase() === "btc";
+      const isAssetBtc = isBtcAssetId(filter.asset);
       const matchesSwapAsset = (swap: Record<string, unknown>): boolean => {
         const fromAsset = (swap.from_asset as string | null | undefined) ?? null;
         const toAsset = (swap.to_asset as string | null | undefined) ?? null;
@@ -363,13 +407,17 @@ export class RgbAdapter implements IProtocolAdapter {
         if (isAssetBtc) return fromAsset === null || toAsset === null;
         return fromAsset === filter.asset || toAsset === filter.asset;
       };
+      // `qty_from` is in the swap's FROM asset, which on a to-leg match is the
+      // counter-asset, not `filter.asset`.
+      const swapPrecision = (swap: Record<string, unknown>): number =>
+        precisionOf(swap.from_asset as string | null);
       const swapTxs = [
         ...(swapsResponse.maker ?? [])
           .filter(matchesSwapAsset)
-          .map((swap) => convertSwapToTransaction(swap, "maker")),
+          .map((swap) => convertSwapToTransaction(swap, "maker", swapPrecision(swap))),
         ...(swapsResponse.taker ?? [])
           .filter(matchesSwapAsset)
-          .map((swap) => convertSwapToTransaction(swap, "taker")),
+          .map((swap) => convertSwapToTransaction(swap, "taker", swapPrecision(swap))),
       ];
 
       const merged = [...transferTxs, ...paymentTxs, ...swapTxs];
@@ -387,6 +435,27 @@ export class RgbAdapter implements IProtocolAdapter {
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to list transactions");
     }
+  }
+
+  /** Resolve deduplicated row precisions; BTC and missing metadata default to 8. */
+  private async resolveAssetPrecisions(
+    client: ReturnType<typeof kaleidoClientManager.getClient>,
+    assetIds: (string | null | undefined)[],
+  ): Promise<(assetId: string | null | undefined) => number> {
+    const isBtc = (id: string | null | undefined): boolean => !id || isBtcAssetId(id);
+
+    const wanted = [...new Set(assetIds.filter((id) => !isBtc(id)) as string[])];
+    const entries = await Promise.all(
+      wanted.map(async (assetId) => {
+        const metadata = (await client.rln.getAssetMetadata({ asset_id: assetId })) as {
+          precision?: number;
+        };
+        return [assetId, metadata?.precision ?? 8] as const;
+      }),
+    );
+    const byId = new Map<string, number>(entries);
+
+    return (assetId) => (isBtc(assetId) ? 8 : (byId.get(assetId as string) ?? 8));
   }
 
   async getTransaction(txId: string, assetId?: string): Promise<UnifiedTransaction> {
@@ -412,9 +481,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -426,7 +493,7 @@ export class RgbAdapter implements IProtocolAdapter {
       };
 
       // Include asset fields if provided (for RGB Lightning invoices)
-      const isRgbInvoice = request.asset && request.asset !== "BTC" && request.asset !== "btc";
+      const isRgbInvoice = request.asset && !isBtcAssetId(request.asset);
 
       if (isRgbInvoice) {
         lnInvoiceParams.asset_id = request.asset;
@@ -445,13 +512,12 @@ export class RgbAdapter implements IProtocolAdapter {
         }
       }
 
-      const lnInvoice = (await client.rln.createLNInvoice(
-        lnInvoiceParams,
-      )) as CreateLNInvoiceResponse & { payment_hash?: string };
+      const lnInvoice = await client.rln.createLNInvoice(lnInvoiceParams);
+      const paymentHash = decodeBolt11Invoice(lnInvoice.invoice).paymentHash;
 
       return {
         invoice: lnInvoice.invoice ?? "",
-        paymentHash: lnInvoice.payment_hash ?? "",
+        paymentHash,
         amount: request.amount,
         expiresAt: Date.now() + (request.expirySeconds || 3600) * 1000,
         description: request.description,
@@ -462,9 +528,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -475,10 +539,14 @@ export class RgbAdapter implements IProtocolAdapter {
       const amtMsat = decoded.amt_msat;
       return {
         paymentHash: decoded.payment_hash ?? "",
-        amount: amtMsat != null ? amtMsat / 1000 : undefined,
+        amount: amtMsat != null
+          ? toSafeAmountNumber(roundedMsatToSat(String(amtMsat)), "sat")
+          : undefined,
         amountMsat: amtMsat ?? undefined,
         description: decoded.description,
-        expiresAt: decoded.expiry_sec ? Date.now() + decoded.expiry_sec * 1000 : 0,
+        expiresAt: decoded.expiry_sec
+          ? (Number(decoded.timestamp) + Number(decoded.expiry_sec)) * 1000
+          : 0,
         destination: decoded.payee_pubkey || "",
         asset_id: decoded.asset_id ?? undefined,
         asset_amount: decoded.asset_amount ?? undefined,
@@ -491,9 +559,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -518,17 +584,15 @@ export class RgbAdapter implements IProtocolAdapter {
       }
       const result = (await (
         client.rln.sendPayment as (body: Record<string, unknown>) => Promise<unknown>
-      )(sendParams)) as SendPaymentResponse & {
-        payment_preimage?: string;
-        amount_msat?: number;
-        fee_msat?: number;
-      };
+      )(sendParams)) as SendPaymentResponse;
+      const invoiceAmount = decodeBolt11(request.invoice).amountSat;
 
       return {
         paymentHash: result.payment_hash ?? "",
-        preimage: result.payment_preimage,
-        amount: result.amount_msat ? result.amount_msat / 1000 : 0,
-        fee: result.fee_msat ? result.fee_msat / 1000 : 0,
+        // SendPaymentResponse has no amount or fee. The BOLT11 amount is the
+        // authoritative source because amount-bearing invoices are not re-amounted.
+        amount: invoiceAmount ?? request.amount ?? 0,
+        fee: 0,
         status: mapPaymentStatus(result.status),
         timestamp: Date.now(),
       };
@@ -538,9 +602,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -565,29 +627,24 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
-      const response = (await client.rln.getPayment({
+      const response = await client.rln.getPayment({
         payment_hash: paymentHash,
-      })) as Record<string, unknown>;
-      // The response may be the payment directly or wrapped in a { payment } object
-      const payment = (response.payment ?? response) as {
-        status?: string;
-        amount_msat?: number;
-        fee_msat?: number;
-        created_at?: number;
-      };
+      });
+      const payment = response.payment;
 
       return {
         paymentHash,
         status: mapPaymentStatus(payment.status),
-        amount: payment.amount_msat ? payment.amount_msat / 1000 : undefined,
-        fee: payment.fee_msat ? payment.fee_msat / 1000 : undefined,
-        timestamp: payment.created_at,
+        amount: payment.amt_msat != null
+          ? toSafeAmountNumber(roundedMsatToSat(String(payment.amt_msat)), "sat")
+          : undefined,
+        // The declared Payment shape carries no routing-fee field.
+        fee: undefined,
+        timestamp: payment.created_at ? payment.created_at * 1000 : undefined,
       };
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get payment status");
@@ -599,9 +656,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
 
     try {
       const client = kaleidoClientManager.getClient();
@@ -622,9 +677,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async getNodeInfo(): Promise<NodeInfo> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.getNodeInfo();
@@ -634,24 +687,17 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const btcBalance = await client.rln.getBtcBalance();
       const vanilla = btcBalance?.vanilla || {};
-      const colored = btcBalance?.colored || {};
 
-      const spendableVanilla = vanilla.spendable || 0;
-      const spendableColored = colored.spendable || 0;
-      const futureVanilla = vanilla.future || 0;
-      const futureColored = colored.future || 0;
-
-      const confirmed = spendableVanilla + spendableColored;
+      // Colored sats carry RGB allocations and are not spendable as ordinary BTC.
+      const confirmed = vanilla.spendable || 0;
       // `future` is the expected balance after all pending txs settle.
       // Pending incoming = amount above spendable; pending outgoing reduces future below spendable.
-      const futureTotal = futureVanilla + futureColored;
+      const futureTotal = vanilla.future || 0;
       const unconfirmed = Math.max(futureTotal - confirmed, 0);
 
       return { confirmed, unconfirmed, total: futureTotal };
@@ -661,9 +707,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listChannels(): Promise<unknown[]> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const response = (await client.rln.listChannels()) as
@@ -681,9 +725,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listPayments(): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.listPayments();
@@ -693,9 +735,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       if (!options?.asset_id) {
@@ -712,9 +752,7 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async createRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const durationSeconds = ((params.durationSeconds as number) ||
@@ -743,9 +781,7 @@ export class RgbAdapter implements IProtocolAdapter {
       upTo?: boolean;
     } = {},
   ): Promise<{ success: boolean }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       await client.rln.createUtxos({
@@ -771,9 +807,7 @@ export class RgbAdapter implements IProtocolAdapter {
       }>;
     }>;
   }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const response = await client.rln.listUnspents();
@@ -783,14 +817,7 @@ export class RgbAdapter implements IProtocolAdapter {
     }
   }
 
-  /**
-   * Resolve a sat/vB fee rate for an RGB on-chain operation. Thin wrapper around
-   * {@link resolveRgbFeeRatePolicy}, supplying `estimateFn` and `network` from live
-   * adapter state; the pure policy lives outside the class so it is unit-testable.
-   *
-   * Closes [GL #26]: RGB on-chain spends previously used a hardcoded regtest-era
-   * `1`/`5`, which on a busy mainnet mempool means "never confirms".
-   */
+  /** Apply the shared RGB fee policy to this adapter's estimator and network. */
   private async resolveFeeRate(
     provided: number | undefined,
     urgency: FeeUrgency = "normal",
@@ -798,7 +825,8 @@ export class RgbAdapter implements IProtocolAdapter {
     return resolveRgbFeeRatePolicy({
       provided,
       urgency,
-      network: this.config?.network ?? null,
+      // Unknown network fails toward the mainnet floor; overpaying test sats is safe.
+      network: this.config?.network ?? 'mainnet',
       estimateFn: async (blocks) => {
         try {
           const { fee_rate } = await this.estimateRgbFee(blocks);
@@ -815,9 +843,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const response = await client.rln.estimateFee({ blocks });
@@ -831,9 +857,7 @@ export class RgbAdapter implements IProtocolAdapter {
     vanilla: { settled: number; future: number; spendable: number };
     colored: { settled: number; future: number; spendable: number };
   }> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const balance = await client.rln.getBtcBalance();
@@ -848,9 +872,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async decodeRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.decodeRgbInvoice({
@@ -862,9 +884,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.getInvoiceStatus(params);
@@ -874,9 +894,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async sendAsset(params: Record<string, unknown>): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       const assetId = ((params.assetId as string) || (params.asset_id as string)) as string;
@@ -918,9 +936,7 @@ export class RgbAdapter implements IProtocolAdapter {
     amount: number;
     feeRate?: number;
   }): Promise<unknown> {
-    if (!kaleidoClientManager.hasNode()) {
-      throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
-    }
+    this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
       return await client.rln.sendBtc({
@@ -941,6 +957,15 @@ export class RgbAdapter implements IProtocolAdapter {
     // Swaps via Kaleidoswap require a configured maker URL — without one
     // every quote request errors. The UI must reflect that.
     return !!this.config?.makerUrl;
+  }
+
+  private recordStore(takerPubkey: string): KaleidoswapSwapStore {
+    const identity = `${this.config?.network ?? "mainnet"}:${takerPubkey}`;
+    if (!this.swapStore || this.swapStoreIdentity !== identity) {
+      this.swapStore = new KaleidoswapSwapStore(identity);
+      this.swapStoreIdentity = identity;
+    }
+    return this.swapStore;
   }
 
   async getSwapQuote(request: QuoteRequest): Promise<Quote> {
@@ -979,24 +1004,37 @@ export class RgbAdapter implements IProtocolAdapter {
         expires_at: number;
       };
 
+      const terms = validateSwapQuoteTerms(
+        request,
+        {
+          fromAsset: quoteResponse.from_asset.asset_id,
+          toAsset: quoteResponse.to_asset.asset_id,
+          fromAmount: quoteResponse.from_asset.amount,
+          toAmount: quoteResponse.to_asset.amount,
+        },
+        this.config.maxQuoteSlippageBps,
+      );
+
+      // Money coercion and request authority are shared with the WDK path. The
+      // request's asset ids are emitted even after the maker echoes them.
       return {
         id: quoteResponse.rfq_id,
-        fromAsset: quoteResponse.from_asset.asset_id,
-        fromAmount: Number(quoteResponse.from_asset.amount || 0),
-        toAsset: quoteResponse.to_asset.asset_id,
-        toAmount: Number(quoteResponse.to_asset.amount || 0),
-        price: quoteResponse.price,
+        fromAsset: terms.fromAsset,
+        fromAmount: terms.fromAmount,
+        toAsset: terms.toAsset,
+        toAmount: terms.toAmount,
+        price: toSwapAmount(quoteResponse.price, "price"),
         fee: {
-          amount: quoteResponse.fee.final_fee,
-          asset: quoteResponse.fee.fee_asset,
+          amount: toSwapAmount(quoteResponse.fee?.final_fee, "fee.final_fee"),
+          asset: quoteResponse.fee?.fee_asset,
           breakdown: {
-            baseFee: quoteResponse.fee.base_fee,
-            variableFee: quoteResponse.fee.variable_fee,
+            baseFee: toSwapAmount(quoteResponse.fee?.base_fee, "fee.base_fee"),
+            variableFee: toSwapAmount(quoteResponse.fee?.variable_fee, "fee.variable_fee"),
             networkFee: 0,
           },
         },
         // Maker reports seconds since epoch; the engine convention is ms.
-        expiresAt: quoteResponse.expires_at * 1000,
+        expiresAt: toSwapAmount(quoteResponse.expires_at, "expires_at") * 1000,
         provider: "Kaleidoswap",
       };
     } catch (error: unknown) {
@@ -1033,7 +1071,15 @@ export class RgbAdapter implements IProtocolAdapter {
         "NO_AMOUNT",
       );
     }
-    if (quote.expiresAt > 0 && Date.now() > quote.expiresAt) {
+    // Missing or non-finite maker expiry cannot disable the client-side check.
+    if (!Number.isFinite(quote.expiresAt) || quote.expiresAt <= 0) {
+      throw new ProtocolError(
+        "Approved quote has no usable expiry — request a fresh quote",
+        "RGB_LN",
+        "QUOTE_EXPIRED",
+      );
+    }
+    if (Date.now() > quote.expiresAt) {
       throw new ProtocolError(
         "Approved quote has expired — request a fresh quote",
         "RGB_LN",
@@ -1041,8 +1087,36 @@ export class RgbAdapter implements IProtocolAdapter {
       );
     }
 
+    let recordStore: KaleidoswapSwapStore | null = null;
+    let recordId: string | null = null;
+    let executionAttempted = false;
+    let quoteClaimed = false;
     try {
       const client = kaleidoClientManager.getClient();
+      const rln = client.rln as unknown as {
+        whitelistSwap(body: { swapstring: string }): Promise<void>;
+        getTakerPubkey(): Promise<string>;
+      };
+      const takerPubkey = await rln.getTakerPubkey();
+      recordStore = this.recordStore(takerPubkey);
+      if (!recordStore.tryClaim(rfqId)) {
+        throw new ProtocolError(
+          `Swap quote ${rfqId} is already executing`,
+          "RGB_LN",
+          "SWAP_IN_FLIGHT",
+          { quoteId: rfqId },
+        );
+      }
+      quoteClaimed = true;
+      const previous = await recordStore.getByQuoteId(rfqId);
+      if (previous) {
+        throw new ProtocolError(
+          `Swap quote ${rfqId} was already used`,
+          "RGB_LN",
+          "SWAP_ALREADY_EXECUTED",
+          { quoteId: rfqId, state: previous.state, paymentHash: previous.paymentHash },
+        );
+      }
       // The maker binds the swap to the rfq_id and these exact raw amounts —
       // there is no server-side re-quote, so the fill can never diverge from
       // the approved quote on either leg.
@@ -1054,18 +1128,32 @@ export class RgbAdapter implements IProtocolAdapter {
         to_amount: quote.toAmount,
       });
 
+      const createdAt = kaleidoswapNow();
+      recordId = rfqId;
+      await recordStore.save({
+        quoteId: rfqId,
+        paymentHash: init.payment_hash,
+        accessToken: init.access_token ?? undefined,
+        fromAsset: quote.fromAsset,
+        fromAmount: quote.fromAmount,
+        toAsset: quote.toAsset,
+        toAmount: quote.toAmount,
+        expiresAt: quote.expiresAt,
+        createdAt,
+        updatedAt: createdAt,
+        state: "initialized",
+      });
+
       // Whitelist BEFORE confirming execution: once the maker starts the
       // swap it routes the HTLC immediately, and an un-whitelisted node
       // rejects it. (rln is the NWC client shape in NWC mode, hence `any`.)
-      const rln = client.rln as unknown as {
-        whitelistSwap(body: { swapstring: string }): Promise<void>;
-        getTakerPubkey(): Promise<string>;
-      };
       await rln.whitelistSwap({ swapstring: init.swapstring });
-      const takerPubkey = await rln.getTakerPubkey();
+      await recordStore.update(rfqId, { state: "whitelisted", updatedAt: kaleidoswapNow() });
 
       // /swaps/execute responds with an HTTP-style {status: 200, message} —
       // the swap itself starts in 'Waiting'; poll getSwapStatus for truth.
+      await recordStore.update(rfqId, { state: "executing", updatedAt: kaleidoswapNow() });
+      executionAttempted = true;
       await client.maker.executeSwap({
         swapstring: init.swapstring,
         taker_pubkey: takerPubkey,
@@ -1073,6 +1161,7 @@ export class RgbAdapter implements IProtocolAdapter {
       });
 
       const accessToken = init.access_token ?? undefined;
+      await recordStore.update(rfqId, { state: "pending", updatedAt: kaleidoswapNow() });
       if (accessToken) this.swapAccessTokens.set(init.payment_hash, accessToken);
       return {
         swapId: init.payment_hash,
@@ -1080,10 +1169,22 @@ export class RgbAdapter implements IProtocolAdapter {
         accessToken,
         status: "pending",
         quote,
-        timestamp: Date.now(),
+        timestamp: kaleidoswapNow(),
       };
     } catch (error: unknown) {
+      if (executionAttempted && recordStore && recordId) {
+        try {
+          await recordStore.update(recordId, {
+            state: "execution_unknown",
+            updatedAt: kaleidoswapNow(),
+          });
+        } catch (storeError) {
+          log.error("[RgbAdapter] Failed to mark an uncertain swap execution:", storeError);
+        }
+      }
       throw this.handleSdkError(error, "Failed to execute swap");
+    } finally {
+      if (quoteClaimed && recordStore) recordStore.releaseClaim(rfqId);
     }
   }
 
@@ -1095,9 +1196,20 @@ export class RgbAdapter implements IProtocolAdapter {
 
     try {
       const client = kaleidoClientManager.getClient();
+      let recordStore = this.swapStore;
+      if (!recordStore) {
+        try {
+          const takerPubkey = await (client.rln as any).getTakerPubkey();
+          if (takerPubkey) recordStore = this.recordStore(takerPubkey);
+        } catch {
+          // Preserve legacy status lookup when an older node cannot expose a
+          // public taker identity; caller-supplied tokens still work.
+        }
+      }
+      const record = recordStore ? await recordStore.find(swapId) : null;
       const status = await client.maker.getAtomicSwapStatus({
         payment_hash: swapId,
-        access_token: accessToken ?? this.swapAccessTokens.get(swapId) ?? "",
+        access_token: accessToken ?? record?.accessToken ?? this.swapAccessTokens.get(swapId) ?? "",
       });
       const swap = (status.swap ?? status) as {
         status?: string;
@@ -1107,26 +1219,69 @@ export class RgbAdapter implements IProtocolAdapter {
         to_asset?: string | null;
       };
 
+      const mappedStatus = mapSwapStatus(swap?.status);
+      if (recordStore && record) {
+        await recordStore.update(record.quoteId, {
+          state: mappedStatus,
+          updatedAt: kaleidoswapNow(),
+        });
+      }
       return {
         swapId,
         paymentHash: swapId,
-        status: mapSwapStatus(swap?.status),
+        accessToken: accessToken ?? record?.accessToken,
+        status: mappedStatus,
         quote: {
           id: swapId,
           fromAsset: swap?.from_asset ?? "",
-          fromAmount: Number(swap?.qty_from ?? 0),
+          // Same coercion as KaleidoswapSwap.getSwapStatus, `?? 0` and all: a
+          // status lookup legitimately predates a fill, so an absent quantity is
+          // 0 here rather than an error — but a present, corrupt one still fails.
+          fromAmount: toSwapAmount(swap?.qty_from ?? 0, "qty_from"),
           toAsset: swap?.to_asset ?? "",
-          toAmount: Number(swap?.qty_to ?? 0),
+          toAmount: toSwapAmount(swap?.qty_to ?? 0, "qty_to"),
           price: 0,
           fee: { amount: 0, asset: swap?.from_asset ?? "" },
           expiresAt: 0,
           provider: "Kaleidoswap",
         },
-        timestamp: Date.now(),
+        timestamp: kaleidoswapNow(),
       };
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get swap status");
     }
+  }
+
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    }
+    const client = kaleidoClientManager.getClient();
+    const takerPubkey = await (client.rln as any).getTakerPubkey();
+    if (!takerPubkey) {
+      throw new ProtocolError(
+        "Node did not provide a wallet identity for swap recovery",
+        "RGB_LN",
+        "SWAP_RECOVERY_UNAVAILABLE",
+      );
+    }
+    return this.recordStore(takerPubkey).listIncomplete();
+  }
+
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    const records = await this.listIncompleteSwaps();
+    const record = records.find(
+      (candidate) => candidate.quoteId === identifier || candidate.paymentHash === identifier,
+    );
+    if (!record?.paymentHash) {
+      throw new ProtocolError(
+        `Swap ${identifier} has no payment hash and can only be inspected`,
+        "RGB_LN",
+        "SWAP_RECOVERY_UNAVAILABLE",
+        { quoteId: record?.quoteId ?? identifier },
+      );
+    }
+    return this.getSwapStatus(record.paymentHash, accessToken);
   }
 
   // SDK ↔ unified-shape converters live in ./converters.ts (this-free).
@@ -1139,7 +1294,9 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   private handleSdkError(error: unknown, context: string): never {
-    if (error instanceof NodeNotConfiguredError) {
+    if (error instanceof ProtocolError) {
+      throw error;
+    } else if (error instanceof NodeNotConfiguredError) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     } else if (error instanceof QuoteExpiredError) {
       throw new ProtocolError("Quote expired", "RGB_LN", "QUOTE_EXPIRED");

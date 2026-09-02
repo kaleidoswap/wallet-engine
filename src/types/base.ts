@@ -51,13 +51,20 @@ export interface UnifiedAsset {
   metadata?: Record<string, any>
 }
 
+/** Asset base units; `pending` overlaps `total` and must not be added to it. */
 export interface AssetBalance {
+  /** Projected owned balance after pending transactions settle. */
   total: number
+  /** Currently spendable balance; always `<= total`. */
   available: number
+  /** Unsettled component already included in `total`. */
   pending: number
+  /** Owned but unavailable for a reason other than confirmation. */
   locked?: number
 
+  /** `total` rendered at the asset's precision. */
   totalDisplay: string
+  /** `available` rendered the same way as `totalDisplay`. */
   availableDisplay: string
 }
 
@@ -120,6 +127,8 @@ export type TransactionStatus =
   | 'confirmed'
   | 'failed'
   | 'cancelled'
+  /** The status lookup itself failed; hosts should stop polling and surface it. */
+  | 'unknown'
 
 export interface InvoiceRequest {
   amount?: number

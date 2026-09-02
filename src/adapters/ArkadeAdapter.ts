@@ -7,7 +7,7 @@
  */
 
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
-import { mnemonicToSeedSync } from "@scure/bip39";
+import { resolveWalletSeed } from "../lib/wallet-seed";
 import { HDKey } from "@scure/bip32";
 import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 import { log } from "../lib/log";
@@ -45,6 +45,8 @@ import {
   toStringValue,
 } from "../lib/arkade-helpers";
 import { convertArkTxToUnifiedAll } from "../lib/arkade-converters";
+import { applyTransactionFilter } from "../lib/transaction-filter";
+import { decodeBolt11Invoice } from "../lib/bolt11";
 import {
   ProtocolType,
   Layer,
@@ -85,7 +87,7 @@ function stripLightningPrefix(value: string): string {
 }
 
 function isArkadeAddress(value: string): boolean {
-  return /^(ark1|tark1)/i.test(value.trim());
+  return /^(ark|tark)1[0-9a-z]{6,}$/i.test(value.trim());
 }
 
 export class ArkadeAdapter implements IProtocolAdapter {
@@ -285,8 +287,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
     return asset.balance;
   }
 
+  /** Drop the shared snapshot so the next balance/VTXO read reaches Ark. */
   async refreshBalances(): Promise<void> {
-    // Balances are fetched live on each call
+    invalidateArkadeSnapshotCache();
   }
 
   // =========================================================================
@@ -309,20 +312,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       );
       const validTxs: UnifiedTransaction[] = expanded.flat();
 
-      return validTxs
-        .filter((tx: UnifiedTransaction) => {
-          if (!filter) return true;
-          if (filter.asset && tx.asset?.id !== filter.asset) return false;
-          if (filter.type && tx.type !== filter.type) return false;
-          if (filter.status && tx.status !== filter.status) return false;
-          if (filter.fromTimestamp && tx.timestamp < filter.fromTimestamp) return false;
-          if (filter.toTimestamp && tx.timestamp > filter.toTimestamp) return false;
-          return true;
-        })
-        .slice(
-          filter?.offset ?? 0,
-          filter?.limit ? (filter.offset ?? 0) + filter.limit : undefined,
-        );
+      return applyTransactionFilter(validTxs, filter);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ProtocolError(
@@ -346,10 +336,12 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // Payment Operations
   // =========================================================================
 
+  /** Honor an explicit Lightning layer instead of returning an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
+    if (request.layer === "BTC_LN") return this.createArkadeLightningInvoice(request);
     try {
       const wallet = arkadeClientManager.getWallet();
       const address: string = await wallet.getAddress();
@@ -413,12 +405,34 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    // Arkade uses addresses, not bolt11 invoices
-    return {
-      paymentHash: "",
-      expiresAt: 0,
-      destination: invoice,
-    };
+    const destination = invoice.trim();
+    if (isArkadeAddress(destination)) {
+      return { paymentHash: "", expiresAt: 0, destination };
+    }
+    if (isLightningInvoice(destination)) {
+      try {
+        const decoded = decodeBolt11Invoice(stripLightningPrefix(destination));
+        return {
+          paymentHash: decoded.paymentHash,
+          amount: decoded.amountSat == null ? undefined : Number(decoded.amountSat),
+          amountMsat: decoded.amountMsat == null ? undefined : Number(decoded.amountMsat),
+          expiresAt: decoded.expiresAtUnixSeconds * 1000,
+          destination,
+        };
+      } catch (error: unknown) {
+        throw new ProtocolError(
+          "Invalid Arkade Lightning invoice",
+          "ARKADE",
+          "INVALID_INVOICE",
+          error,
+        );
+      }
+    }
+    throw new ProtocolError(
+      "Input is neither an Arkade address nor a valid Lightning invoice",
+      "ARKADE",
+      "INVALID_INVOICE",
+    );
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
@@ -442,8 +456,19 @@ export class ArkadeAdapter implements IProtocolAdapter {
       try {
         const swaps = arkadeSwapsClientManager.getClient();
         const result = await swaps.sendLightningPayment({ invoice: invoiceBody });
+        // Neither a txid nor a preimage means nothing came back that evidences the
+        // payment — that is a send failure, not a pending payment with an empty id.
+        if (!result?.txid && !result?.preimage) {
+          throw new ProtocolError(
+            "Arkade Lightning send returned no transaction id and no preimage",
+            "ARKADE",
+            "SEND_ERROR",
+          );
+        }
         return {
-          paymentHash: result.preimage ?? result.txid ?? "",
+          // Keep the settlement secret separate from the public lookup identifier.
+          paymentHash: result.txid ?? "",
+          preimage: result.preimage,
           amount: result.amount ?? request.amount ?? 0,
           fee: 0,
           // Boltz submarine swap; the swap can still fail in the HODL/claim
@@ -505,14 +530,13 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
   }
 
-  /**
-   * Resolve a payment's terminal state from the SDK's transaction history.
-   * `paymentHash` is the txid from `sendBitcoin`/`sendLightningPayment`; Boltz may
-   * return a preimage instead, in which case there is no history row yet and the
-   * payment stays pending.
-   */
+  /** Resolve public payment IDs against transaction history. */
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
-    if (!this.isConnected() || !paymentHash) {
+    // Disconnection is a lookup failure, not evidence that payment is pending.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
+    }
+    if (!paymentHash) {
       return { paymentHash, status: "pending" as TransactionStatus };
     }
     try {
@@ -542,7 +566,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       };
     } catch (error: unknown) {
       log.warn("[ArkadeAdapter] getPaymentStatus history lookup failed:", error);
-      return { paymentHash, status: "pending" as TransactionStatus };
+      return { paymentHash, status: "unknown" as TransactionStatus };
     }
   }
 
@@ -845,7 +869,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "ARKADE", "NOT_CONNECTED");
     }
-    const seed = mnemonicToSeedSync(this.config.mnemonic);
+    const seed = resolveWalletSeed(this.config.mnemonic);
     const node = HDKey.fromMasterSeed(seed).derive("m/138'/1");
     if (!node.privateKey) {
       throw new ProtocolError(

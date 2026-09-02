@@ -42,7 +42,7 @@ describe('RlnWdkAdapter.getPaymentStatus (outbound via list_payments)', () => {
     expect(r.error).toBe('no route')
   })
 
-  it('returns pending (never throws) when the payment is unknown or the call fails', async () => {
+  it('distinguishes an unknown payment from a failed status lookup', async () => {
     const unknown = connectedRln({ listPayments: async () => ({ payments: [] }) })
     expect(await unknown.getPaymentStatus('missing')).toEqual({ paymentHash: 'missing', status: 'pending' })
 
@@ -51,6 +51,6 @@ describe('RlnWdkAdapter.getPaymentStatus (outbound via list_payments)', () => {
         throw new Error('node down')
       },
     })
-    expect(await throws.getPaymentStatus('x')).toEqual({ paymentHash: 'x', status: 'pending' })
+    expect(await throws.getPaymentStatus('x')).toEqual({ paymentHash: 'x', status: 'unknown' })
   })
 })

@@ -49,6 +49,7 @@ import type {
   SimplicityCompileRequest,
   SimplicityCompileResult,
 } from '../../types/simplicity'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface LiquidSyncWarning {
   code: 'LIQUID_WATERFALLS_FALLBACK'
@@ -213,6 +214,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     if (!cfg.mnemonic) {
       throw new ProtocolError('LiquidWdkAdapter requires a mnemonic', 'LIQUID', 'CONFIG')
     }
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
     const mod = await loadWdkModule('@kaleidorg/wdk-wallet-liquid', () => import('@kaleidorg/wdk-wallet-liquid'))
@@ -275,7 +277,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // One lock acquisition for the whole read — the account calls inside must be
     // RAW (not the locked getBtcBalance/getPolicyAsset) to avoid self-deadlock.
     return this.withLock(async () => {
-      const policy = await this.getPolicyAsset()
+      const policy = await this.requirePolicyAsset()
       const out: UnifiedAsset[] = []
 
       // L-BTC (policy asset)
@@ -332,8 +334,13 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const r: any = await this.withLock(() =>
       this.account.transfer({ recipient: request.invoice.trim(), amount: request.amount })
     )
+    const hash: string = r?.hash ?? ''
+    // A successful send must be traceable and reconcilable.
+    if (!hash) {
+      throw new ProtocolError('Liquid send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
+    }
     return {
-      paymentHash: r?.hash ?? '',
+      paymentHash: hash,
       amount: request.amount,
       fee: Number(r?.fee ?? 0),
       status: 'pending', // on-chain — confirms later
@@ -352,7 +359,11 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         feeRate: params.feeRate,
       })
     )
-    return { paymentHash: r?.hash ?? '', fee: Number(r?.fee ?? 0), amount: params.amount, status: 'pending' as TransactionStatus }
+    const assetHash: string = r?.hash ?? ''
+    if (!assetHash) {
+      throw new ProtocolError('Liquid asset send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
+    }
+    return { paymentHash: assetHash, fee: Number(r?.fee ?? 0), amount: params.amount, status: 'pending' as TransactionStatus }
   }
 
   /** L-BTC on-chain send (alias of sendPayment's transfer). */
@@ -361,14 +372,18 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const r: any = await this.withLock(() =>
       this.account.transfer({ recipient: params.address, amount: params.amount, feeRate: params.feeRate })
     )
-    return { txid: r?.hash ?? '', fee: Number(r?.fee ?? 0) }
+    const btcTxid: string = r?.hash ?? ''
+    if (!btcTxid) {
+      throw new ProtocolError('Liquid send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
+    }
+    return { txid: btcTxid, fee: Number(r?.fee ?? 0) }
   }
 
   // --- Transactions -------------------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     // Resolve the policy (L-BTC) asset id outside the lock (cached after first).
-    const policy = await this.getPolicyAsset()
+    let policy = await this.getPolicyAsset()
     const txs: Array<{
       txid: string
       type: string
@@ -377,7 +392,8 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       timestamp: number | null
       balance?: Array<{ asset_id: string; value: string }>
     }> = await this.withLock(() => this.account.listTransactions())
-    return txs.map((t) => {
+    if (!policy) policy = this.inferPolicyAsset(txs)
+    const mapped = txs.map((t) => {
       const isSend = t.type === 'outgoing'
       const fee = Number(t.fee ?? 0)
       const { assetId, amount } = this.primaryMovement(t.balance ?? [], policy, fee, isSend)
@@ -390,10 +406,15 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         amount,
         amountDisplay: formatAmount(amount, precision),
         fee,
-        asset: assetId ? this.txAsset(assetId, policy) : (undefined as unknown as UnifiedAsset),
+        asset: assetId
+          ? this.txAsset(assetId, policy)
+          : this.txAsset(policy || 'BTC', policy || 'BTC'),
         protocolData: { height: t.height, assetId, balance: t.balance },
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   /**
@@ -420,6 +441,38 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     if (!policyDelta) return { amount: 0 }
     const magnitude = Math.abs(policyDelta.value)
     return { assetId: policy, amount: isSend ? Math.max(0, magnitude - fee) : magnitude }
+  }
+
+  /** Infer L-BTC only when outgoing fee deltas make one asset unambiguous. */
+  private inferPolicyAsset(
+    txs: Array<{
+      type: string
+      fee: string
+      balance?: Array<{ asset_id: string; value: string }>
+    }>,
+  ): string {
+    const outgoing = txs.filter((tx) => tx.type === 'outgoing')
+    const exactFeeAssets = new Set<string>()
+    const negativeSets: Array<Set<string>> = []
+    for (const tx of outgoing) {
+      const fee = Number(tx.fee ?? 0)
+      const negatives = (tx.balance ?? [])
+        .map((delta) => ({ assetId: delta.asset_id, value: Number(delta.value) }))
+        .filter((delta) => Number.isFinite(delta.value) && delta.value < 0)
+      if (negatives.length === 0) continue
+      negativeSets.push(new Set(negatives.map((delta) => delta.assetId)))
+      if (Number.isFinite(fee) && fee > 0) {
+        for (const delta of negatives) {
+          if (Math.abs(delta.value) === fee) exactFeeAssets.add(delta.assetId)
+        }
+      }
+    }
+    if (exactFeeAssets.size === 1) return [...exactFeeAssets][0]
+    if (negativeSets.length === 0) return ''
+    const common = [...negativeSets[0]].filter((assetId) =>
+      negativeSets.every((assets) => assets.has(assetId)),
+    )
+    return common.length === 1 ? common[0] : ''
   }
 
   /** Builds a metadata-only UnifiedAsset (balance 0) for a tx's asset id. */
@@ -539,16 +592,32 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     throw new ProtocolError('Liquid has no invoices', 'LIQUID', 'NOT_SUPPORTED')
   }
   async listChannels(): Promise<any[]> {
+    // Distinguish an unsupported channel model from an unavailable wallet.
+    this.assertConnected()
     return [] // no Lightning
   }
   async listPayments(): Promise<any> {
     return this.listTransactions()
   }
   async listTransfers(): Promise<any> {
+    this.assertConnected()
     return this.withLock(() => this.account.listTransactions())
   }
 
   // --- helpers ------------------------------------------------------------
+  /** Require policy identity where ambiguity could double-count L-BTC. */
+  private async requirePolicyAsset(): Promise<string> {
+    const policy = await this.getPolicyAsset()
+    if (!policy) {
+      throw new ProtocolError(
+        'Liquid network info unavailable — cannot identify the policy asset (L-BTC)',
+        'LIQUID',
+        'NETWORK_INFO_UNAVAILABLE',
+      )
+    }
+    return policy
+  }
+
   private async getPolicyAsset(): Promise<string> {
     if (this.policyAsset) return this.policyAsset
     let policy = ''

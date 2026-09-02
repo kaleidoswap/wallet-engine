@@ -255,7 +255,11 @@ leak across the boundary.
 ```ts
 import { KaleidoswapSwap } from '@kaleidorg/wallet-engine'
 
-const swap = new KaleidoswapSwap(rlnAccount, { baseUrl: 'https://api.kaleidoswap.com' })
+const swap = new KaleidoswapSwap(rlnAccount, {
+  baseUrl: 'https://api.kaleidoswap.com',
+  // Optional: defaults to 100 bps (1%); use 0 for exact from-leg matching.
+  maxQuoteSlippageBps: 100,
+})
 
 const quote = await swap.getQuote({
   fromAsset: 'rgb:USDT…', toAsset: 'BTC',

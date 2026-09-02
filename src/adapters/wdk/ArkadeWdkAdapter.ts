@@ -39,11 +39,36 @@ import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(value.trim())
 const isLightningInvoice = (value: string): boolean => {
   const body = value.trim().toLowerCase().replace(/^lightning:/, '')
   return /^ln(bc|tb|bcrt|sb)/.test(body)
+}
+
+const ARKADE_TRANSACTION_BTC: UnifiedAsset = {
+  id: 'BTC',
+  name: 'Bitcoin (Arkade)',
+  ticker: 'BTC',
+  precision: 8,
+  protocol: 'ARKADE',
+  layer: 'BTC_ARKADE',
+  balance: {
+    total: 0,
+    available: 0,
+    pending: 0,
+    locked: 0,
+    totalDisplay: formatSats(0),
+    availableDisplay: formatSats(0),
+  },
+  capabilities: {
+    canSend: true,
+    canReceive: true,
+    canSwap: false,
+    supportsLightning: false,
+    supportsOnchain: true,
+  },
 }
 
 export interface ArkadeAdapterConfig extends BaseProtocolConfig {
@@ -94,6 +119,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       swapProviderUrl?: string
     }
     if (!cfg.mnemonic) throw new ProtocolError('ArkadeWdkAdapter requires a mnemonic', 'ARKADE', 'CONFIG')
+    await this.releasePreviousConnection()
     this.mnemonic = cfg.mnemonic
     this.network = cfg.network ?? 'mainnet'
     // Accept an explicit `arkadeConfig` passthrough OR the native adapter's flat
@@ -242,9 +268,10 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Invoices -----------------------------------------------------------
-  /** Arkade on-chain receive is an address, not a bolt11 invoice (mirrors the native adapter). */
+  /** Honor the requested layer so Lightning callers never receive an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
+    if (request.layer === 'BTC_LN') return this.createArkadeLightningInvoice(request)
     const address: string = await this.account.getAddress()
     return {
       invoice: address,
@@ -299,8 +326,17 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       const invoiceBody = dest.toLowerCase().startsWith('lightning:') ? dest.slice('lightning:'.length) : dest
       try {
         const result: any = await swaps.sendLightningPayment({ invoice: invoiceBody })
+        // A preimage is settlement proof, not the public history identifier.
+        if (!result?.txid && !result?.preimage) {
+          throw new ProtocolError(
+            'Arkade Lightning send returned no transaction id and no preimage',
+            'ARKADE',
+            'SEND_ERROR',
+          )
+        }
         return {
-          paymentHash: result?.preimage ?? result?.txid ?? '',
+          paymentHash: result?.txid ?? '',
+          preimage: result?.preimage,
           amount: Number(result?.amount ?? request.amount ?? 0),
           fee: 0,
           status: 'pending',
@@ -330,6 +366,10 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // Off-chain Ark transfer to an Ark address (settles immediately, zero-conf UX).
     const r: any = await this.account.sendTransaction({ to: dest, value: request.amount })
     const hash = r?.hash ?? ''
+    // A successful send must be traceable and reconcilable.
+    if (!hash) {
+      throw new ProtocolError('Arkade send did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
+    }
     return {
       paymentHash: hash,
       txid: hash,
@@ -366,19 +406,31 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     this.assertConnected()
-    const r: any = await this.account.getTransactionReceipt?.(paymentHash).catch(() => null)
-    const status = (r?.confirmedAt || r?.settled ? 'confirmed' : 'pending') as TransactionStatus
-    return { paymentHash, status }
+    try {
+      // Arkade WDK's receipt is raw transaction hex (`string`), with no
+      // confirmation fields. Transaction history is the declared source for
+      // `settled`, amount and timestamp.
+      const transaction = (await this.listTransactions()).find((tx) => tx.id === paymentHash)
+      return {
+        paymentHash,
+        status: transaction?.status ?? 'pending',
+        amount: transaction?.amount,
+        timestamp: transaction?.timestamp,
+      }
+    } catch {
+      return { paymentHash, status: 'unknown' }
+    }
   }
 
   // --- Transactions -------------------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const history: any[] = await this.account.getTransactionHistory()
-    return (history ?? []).map((t) => {
+    const mapped: UnifiedTransaction[] = (history ?? []).map((t) => {
       // ArkTransaction: { key:{arkTxid,commitmentTxid,boardingTxid}, type, amount,
       // settled, createdAt }. The txid lives on `key` — unused fields are empty
       // strings, so pick the first NON-EMPTY one (`??` would stop at `''`).
+      // Direction is the explicit `type`.
       const key = t?.key ?? {}
       const id = t?.txid || key.arkTxid || key.commitmentTxid || key.boardingTxid || ''
       const isSend = String(t?.type ?? '').toUpperCase() === 'SENT'
@@ -390,10 +442,13 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         timestamp: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : 0,
         amount: Math.abs(Number(t?.amount ?? 0)),
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: ARKADE_TRANSACTION_BTC,
         protocolData: t,
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
@@ -421,6 +476,8 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async listChannels(): Promise<any[]> {
+    // Distinguish an unsupported channel model from an unavailable wallet.
+    this.assertConnected()
     return [] // Arkade has no LN channels (LN via Boltz swaps)
   }
 
@@ -430,6 +487,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async listTransfers(): Promise<any> {
+    this.assertConnected()
     return { transfers: [] }
   }
 
@@ -491,9 +549,8 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async signMessage(message: string): Promise<string> {
     this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'ARKADE', 'NOT_CONNECTED')
-    const { mnemonicToSeedSync } = await import('@scure/bip39')
     const { HDKey } = await import('@scure/bip32')
-    const seed = mnemonicToSeedSync(this.mnemonic)
+    const seed = resolveWalletSeed(this.mnemonic)
     const node = HDKey.fromMasterSeed(seed).derive("m/138'/1")
     if (!node.privateKey) {
       throw new ProtocolError('Failed to derive message-signing key', 'ARKADE', 'KEY_DERIVATION_ERROR')

@@ -46,7 +46,7 @@ import {
   ProtocolError,
   ConnectionError,
 } from "../types/base";
-import { mnemonicToSeedSync } from "@scure/bip39";
+import { resolveWalletSeed } from "../lib/wallet-seed";
 import { HDKey } from "@scure/bip32";
 import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 
@@ -110,6 +110,8 @@ export class SparkAdapter implements IProtocolAdapter {
       this.config = sparkConfig;
       log.info("[SparkAdapter] Connected to Spark successfully");
     } catch (error: unknown) {
+      // Drop stale key material when a wallet-switch connection fails.
+      this.config = null;
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Spark: ${msg}`, "SPARK", error);
     }
@@ -267,8 +269,9 @@ export class SparkAdapter implements IProtocolAdapter {
 
     try {
       const wallet = sparkClientManager.getWallet();
-      const limit = filter?.limit ?? 20;
-      const offset = filter?.offset ?? 0;
+      const limit = Math.max(0, filter?.limit ?? 20);
+      const offset = Math.max(0, filter?.offset ?? 0);
+      const fetchLimit = offset + limit;
       const requestedAsset = filter?.asset?.trim();
       const createdAfter = filter?.fromTimestamp ? new Date(filter.fromTimestamp) : undefined;
       const createdBefore =
@@ -292,8 +295,8 @@ export class SparkAdapter implements IProtocolAdapter {
             const sparkAddress = (await wallet.getSparkAddress()) as string;
             const readonlyResult = await readonlyClient.getTransfers({
               sparkAddress,
-              limit,
-              offset,
+              limit: fetchLimit,
+              offset: 0,
               createdAfter,
               createdBefore,
             });
@@ -306,7 +309,7 @@ export class SparkAdapter implements IProtocolAdapter {
               (transfer): transfer is NonNullable<typeof transfer> => !!transfer,
             ) as SparkTransfer[];
           } else {
-            btcTransfers = (await wallet.getTransfers(limit, offset)).transfers as SparkTransfer[];
+            btcTransfers = (await wallet.getTransfers(fetchLimit, 0)).transfers as SparkTransfer[];
           }
           return btcTransfers.map((t) => convertTransferToTransaction(t));
         } catch (err) {
@@ -404,7 +407,7 @@ export class SparkAdapter implements IProtocolAdapter {
                 ownerPublicKeys: [identityPubKey],
                 tokenIdentifiers:
                   requestedAsset && requestedAsset !== "BTC" ? [requestedAsset] : undefined,
-                pageSize: limit,
+                pageSize: fetchLimit,
               })
               .catch((err: unknown) => {
                 log.warn("[SparkAdapter] Failed to query token transactions:", err);
@@ -491,7 +494,7 @@ export class SparkAdapter implements IProtocolAdapter {
       const [btcTxs, tokenTxs] = await Promise.all([btcTxsPromise, tokenTxsPromise]);
       const allTxs = [...btcTxs, ...tokenTxs].sort((a, b) => b.timestamp - a.timestamp);
 
-      return allTxs.filter((tx) => {
+      const matched = allTxs.filter((tx) => {
         if (!filter) return true;
         if (
           filter.asset &&
@@ -506,6 +509,10 @@ export class SparkAdapter implements IProtocolAdapter {
         if (filter.toTimestamp && tx.timestamp > filter.toTimestamp) return false;
         return true;
       });
+
+      // Each leg over-fetches the prefix needed for this page. Offset belongs to
+      // the sorted union, not to one leg, or interleaved token rows shift pages.
+      return matched.slice(offset, offset + limit);
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ProtocolError(
@@ -566,13 +573,7 @@ export class SparkAdapter implements IProtocolAdapter {
         this.invoiceRequestIds.set(encodedInvoice, result.id);
       }
 
-      const expiresAt = parseSdkExpiryMs(
-        "expiryTime" in inv
-          ? (inv as { expiryTime?: unknown }).expiryTime
-          : "expiresAt" in inv
-            ? (inv as { expiresAt?: unknown }).expiresAt
-            : undefined,
-      );
+      const expiresAt = parseSdkExpiryMs(inv.expiresAt);
       return {
         invoice: encodedInvoice,
         paymentHash: inv.paymentHash ?? "",
@@ -629,9 +630,12 @@ export class SparkAdapter implements IProtocolAdapter {
     const lower = input.trim().toLowerCase();
 
     if (lower.startsWith("ln")) {
-      // bolt11 invoice: decode fields heuristically
+      // The lightweight parser proves the amount but not the payment hash.
+      const { amountSat, amountMsat } = decodeBolt11(input.trim());
       return {
         paymentHash: "",
+        amount: amountSat,
+        amountMsat,
         expiresAt: 0,
         destination: input,
       };
@@ -664,7 +668,8 @@ export class SparkAdapter implements IProtocolAdapter {
         // Amountless ("0-sat") BOLT-11 invoices require `amountSatsToSend`
         // explicitly, and it is rejected on amount-bearing ones — so gate on the
         // invoice, not on whether the caller supplied an amount.
-        const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null;
+        const decodedInvoice = decodeBolt11(destination);
+        const invoiceIsAmountless = decodedInvoice.amountMsat == null;
         const result = await wallet.payLightningInvoice({
           invoice: destination,
           maxFeeSats: extReq.maxFee ?? DEFAULT_MAX_FEE_SATS,
@@ -674,12 +679,9 @@ export class SparkAdapter implements IProtocolAdapter {
         } as Parameters<typeof wallet.payLightningInvoice>[0]);
         const lnResult = result as unknown as Record<string, unknown>;
 
-        const id = String(lnResult.id ?? "");
-        const amountSats = Number(
-          lnResult.amountSats ?? lnResult.totalValue ?? request.amount ?? 0,
-        );
-        const timestamp =
-          lnResult.createdTime instanceof Date ? lnResult.createdTime.getTime() : Date.now();
+        const id = result.id;
+        const amountSats = Number(decodedInvoice.amountSat ?? request.amount ?? 0);
+        const timestamp = parseSdkExpiryMs(result.createdAt) ?? Date.now();
 
         const settlement = await waitForLightningSendSettlement(wallet, id, lnResult);
         if (settlement.status === "failed") {
@@ -1092,6 +1094,10 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
+    // Retained mnemonic state never authorizes signing after disconnect.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
+    }
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }
@@ -1105,10 +1111,14 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async signMessage(message: string): Promise<string> {
+    // Same invariant as signPsbt: never sign for a wallet the host has locked.
+    if (!this.isConnected()) {
+      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
+    }
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }
-    const seed = mnemonicToSeedSync(this.config.mnemonic);
+    const seed = resolveWalletSeed(this.config.mnemonic);
     const root = HDKey.fromMasterSeed(seed);
     // m/138'/1 — wallet-identity message-signing key, distinct from the
     // LNURL-auth hashing key at m/138'/0.
@@ -1186,9 +1196,15 @@ export class SparkAdapter implements IProtocolAdapter {
       // INVOICE_CREATED, TRANSFER_CREATED, etc.
       return { status: "Pending" };
     } catch (error: unknown) {
+      // A failed lookup is not evidence that the invoice remains pending.
       const msg = error instanceof Error ? error.message : String(error);
       log.warn("[SparkAdapter] Invoice status check failed:", msg);
-      return { status: "Pending" };
+      throw new ProtocolError(
+        `Failed to check invoice status: ${msg}`,
+        "SPARK",
+        "INVOICE_STATUS_ERROR",
+        error instanceof Error ? error : undefined,
+      );
     }
   }
 
@@ -1269,13 +1285,12 @@ export class SparkAdapter implements IProtocolAdapter {
             return { txId: success.txid };
           }
 
-          // Fallback: maybe it was a sats invoice bundled with token
-          const satsSuccess = response.satsTransactionSuccess[0];
-          if (satsSuccess) {
-            return { txId: satsSuccess.transferResponse.id };
-          }
-
-          throw new Error("Spark invoice payment returned no result");
+          // A sats-leg ID cannot prove the token send requested by this method.
+          throw new ProtocolError(
+            "Spark invoice payment returned no token transfer result",
+            "SPARK",
+            "SEND_ASSET_ERROR",
+          );
         }
       }
 

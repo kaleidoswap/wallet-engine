@@ -138,6 +138,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     if (!cfg.mnemonic) {
       throw new ProtocolError('SparkWdkAdapter requires a mnemonic', 'SPARK', 'CONFIG')
     }
+    await this.releasePreviousConnection()
     this.mnemonic = cfg.mnemonic
     this.network = cfg.network ?? 'mainnet'
     // Injectable loader (RN injects a static require; Node/Vite use the import fallback).
@@ -170,6 +171,20 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       /* flashnet/bridge glue is optional — never block connect on it */
     }
     this.connected = true
+  }
+
+  /** Release the externally adopted signing wallet during teardown. */
+  async disconnect(): Promise<void> {
+    const adopted = (this.account as any)?._wallet
+    try {
+      if (adopted) {
+        const { sparkClientManager } = await import('../../lib/spark-client-manager')
+        sparkClientManager.releaseExternalWallet(adopted)
+      }
+    } catch {
+      /* the glue is optional on connect; releasing it must not block teardown */
+    }
+    await super.disconnect()
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -211,9 +226,9 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
     // Drop the short-TTL coalescing cache so the next read hits the gateway,
-    // then reconcile server-side state (best-effort).
+    // then reconcile server-side state.
     invalidateSparkBalanceCache()
-    await this.account.syncWalletBalance?.().catch(() => {})
+    await this.account.syncWalletBalance?.()
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
@@ -300,20 +315,23 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
 
     // 1) Lightning receive (BOLT11) — when the caller targets the LN layer.
     if (request.layer === 'BTC_LN') {
-      const r: any = await this.account.createLightningInvoice({
+      const r = await this.account.createLightningInvoice({
         amountSats: request.amount ?? 0,
         memo: request.description,
         expirySeconds: request.expirySeconds,
-      })
-      const inv: any = r?.invoice ?? {}
-      const encoded = inv?.encodedInvoice ?? r?.encodedInvoice ?? r?.invoice ?? ''
+      }) as {
+        id?: string
+        invoice?: { encodedInvoice?: string; paymentHash?: string; expiresAt?: string }
+      }
+      const inv = r?.invoice
+      const encoded = inv?.encodedInvoice ?? ''
       // Track the receive-request id so getInvoiceStatus can poll it later.
       if (r?.id && encoded) this.invoiceRequestIds.set(encoded, r.id)
       return {
         invoice: encoded,
-        paymentHash: inv?.paymentHash ?? r?.id ?? '',
+        paymentHash: inv?.paymentHash ?? '',
         amount: request.amount,
-        expiresAt: parseSdkExpiryMs(inv?.expiryTime ?? inv?.expiresAt) ?? expiresAt,
+        expiresAt: parseSdkExpiryMs(inv?.expiresAt) ?? expiresAt,
         description: request.description,
       }
     }
@@ -378,7 +396,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         // Amountless (0-sat) invoices require an explicit amount; the SDK
         // rejects amountSatsToSend on amount-bearing ones, so gate on the
         // invoice itself, not on whether the caller supplied an amount.
-        const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null
+        const decodedInvoice = decodeBolt11(destination)
+        const invoiceIsAmountless = decodedInvoice.amountMsat == null
         const result: any = await this.account.payLightningInvoice({
           invoice: destination,
           maxFeeSats: maxFee,
@@ -386,7 +405,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
             ? { amountSatsToSend: request.amount }
             : {}),
         })
-        const id = String(result?.id ?? result?.paymentHash ?? '')
+        const id = String(result?.id ?? '')
         // Raw wallet access is best-effort: without it the poller degrades to
         // 'pending' rather than failing a payment that was already dispatched.
         const rawWallet = (this.account as any)?._wallet ?? {}
@@ -399,12 +418,12 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
           )
         }
         return {
-          paymentHash: String(result?.paymentHash ?? result?.id ?? ''),
+          paymentHash: id,
           preimage: settlement.preimage,
-          amount: Number(result?.amountSats ?? result?.totalValue ?? request.amount ?? 0),
-          fee: settlement.feeSats || Number(result?.feeSats ?? 0),
+          amount: Number(decodedInvoice.amountSat ?? request.amount ?? 0),
+          fee: settlement.feeSats,
           status: settlement.status,
-          timestamp: result?.createdTime instanceof Date ? result.createdTime.getTime() : timestamp,
+          timestamp: parseSdkExpiryMs(result?.createdAt) ?? timestamp,
         }
       }
 
@@ -433,13 +452,27 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         }
 
         // Plain Spark address — zero-fee direct transfer.
-        const transfer: any = await this.account.sendTransaction({ to: destination, value: request.amount ?? 0 })
+        const transfer = await this.account.sendTransaction({ to: destination, value: request.amount ?? 0 }) as {
+          hash?: string
+          fee?: bigint
+        }
+        // A successful send must be traceable and reconcilable.
+        const transferId = transfer?.hash ?? ''
+        if (!transferId) {
+          throw new ProtocolError(
+            'Spark transfer returned no transaction id',
+            'SPARK',
+            'NO_TX_ID',
+          )
+        }
         return {
-          paymentHash: transfer?.id ?? transfer?.transferId ?? '',
-          amount: Number(transfer?.totalValue ?? request.amount ?? 0),
+          paymentHash: transferId,
+          amount: request.amount ?? 0,
           fee: 0, // Spark transfers are zero-fee (capability flag)
-          status: transfer?.status ? mapTransferStatus(transfer.status) : 'confirmed',
-          timestamp: transfer?.createdTime?.getTime?.() ?? timestamp,
+          // TransactionResult has no settlement metadata. Dispatch is pending
+          // until a later history/status lookup observes the transfer.
+          status: 'pending',
+          timestamp,
         }
       }
 
@@ -477,7 +510,12 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     this.assertConnected()
     // Spark may return entity ids like "SparkLightningSendRequest:uuid"; getTransactionReceipt wants the uuid.
     const id = paymentId.includes(':') ? paymentId.split(':').pop()! : paymentId
-    const t: any = await this.account.getTransactionReceipt(id).catch(() => null)
+    let t: any
+    try {
+      t = await this.account.getTransactionReceipt(id)
+    } catch {
+      return { paymentHash: paymentId, status: 'unknown' }
+    }
     if (!t) return { paymentHash: paymentId, status: 'pending' }
     return {
       paymentHash: paymentId,
@@ -490,8 +528,9 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   // --- Transactions -------------------------------------------------------
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
-    const limit = filter?.limit ?? 20
-    const offset = filter?.offset ?? 0
+    const limit = Math.max(0, filter?.limit ?? 20)
+    const offset = Math.max(0, filter?.offset ?? 0)
+    const fetchLimit = offset + limit
     const requestedAsset = filter?.asset?.trim()
     const shouldFetchBtc = !requestedAsset || requestedAsset === 'BTC'
     const shouldFetchTokens = !requestedAsset || requestedAsset !== 'BTC'
@@ -501,7 +540,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     let btcTxs: UnifiedTransaction[] = []
     if (shouldFetchBtc) {
       try {
-        const transfers: any[] = await this.account.getTransfers({ limit, skip: offset })
+        const transfers: any[] = await this.account.getTransfers({ limit: fetchLimit, skip: 0 })
         btcTxs = (transfers ?? []).map((t) => this.toUnifiedTx(t))
       } catch {
         /* isolated */
@@ -576,7 +615,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
           const result = await wallet.queryTokenTransactions({
             ownerPublicKeys: [identityPubKey],
             tokenIdentifiers: requestedAsset && requestedAsset !== 'BTC' ? [requestedAsset] : undefined,
-            pageSize: limit,
+            pageSize: fetchLimit,
           })
           txsWithStatus.push(...(result.tokenTransactionsWithStatus ?? []))
         } catch {
@@ -633,7 +672,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     }
 
     const allTxs = [...btcTxs, ...tokenTxs].sort((a, b) => b.timestamp - a.timestamp)
-    return allTxs.filter((tx) => {
+    const matched = allTxs.filter((tx) => {
       if (!filter) return true
       if (
         filter.asset &&
@@ -648,6 +687,10 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       if (filter.toTimestamp && tx.timestamp > filter.toTimestamp) return false
       return true
     })
+
+    // Each leg over-fetches the prefix needed for this page. Offset belongs to
+    // the sorted union, not to one leg, or interleaved token rows shift pages.
+    return matched.slice(offset, offset + limit)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
@@ -712,6 +755,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   }
 
   async listChannels(): Promise<any[]> {
+    // Distinguish an unsupported channel model from an unavailable wallet.
+    this.assertConnected()
     return [] // Spark has no LN channels
   }
 
@@ -722,6 +767,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   }
 
   async listTransfers(): Promise<any> {
+    this.assertConnected()
     // Spark has no RGB-style per-asset transfers.
     return { transfers: [] }
   }
@@ -886,9 +932,12 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
             invalidateSparkBalanceCache()
             return { txId: success.txid }
           }
-          const satsSuccess = response.satsTransactionSuccess?.[0]
-          if (satsSuccess) return { txId: satsSuccess.transferResponse.id }
-          throw new Error('Spark invoice payment returned no result')
+          // Never report a sats-leg ID as proof that the token leg succeeded.
+          throw new ProtocolError(
+            'Spark invoice payment returned no token transfer result',
+            'SPARK',
+            'SEND_ASSET_ERROR',
+          )
         }
       }
 
@@ -964,9 +1013,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   async signMessage(message: string): Promise<string> {
     this.assertConnected()
     if (!this.mnemonic) throw new ProtocolError('Wallet mnemonic not available', 'SPARK', 'NOT_CONNECTED')
-    const { mnemonicToSeedSync } = await import('@scure/bip39')
     const { HDKey } = await import('@scure/bip32')
-    const seed = mnemonicToSeedSync(this.mnemonic)
+    const seed = resolveWalletSeed(this.mnemonic)
     const root = HDKey.fromMasterSeed(seed)
     // m/138'/1 — wallet-identity message-signing key (distinct from LNURL-auth's m/138'/0).
     const node = root.derive("m/138'/1")

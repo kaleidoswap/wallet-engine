@@ -1,16 +1,4 @@
-/**
- * Unified Receive URI (BIP321)
- * ----------------------------
- * Builds ONE QR payload any wallet can pay, while Kaleido-aware wallets get the
- * richer multi-protocol options. The base is a BIP321 `bitcoin:` URI — an optional
- * on-chain address in the path plus payment methods as query params (`lightning=`,
- * `lno=`), with unknown params ignored by other wallets, so it stays
- * backward-compatible with BIP21.
- *
- * Per BIP321 the address MAY be omitted, so a lite wallet with no on-chain address
- * can still publish one QR. Ark / Spark / Liquid / RGB ride as extra params only
- * Kaleido wallets read. Pure + dependency-free.
- */
+/** Build and parse BIP321 receive URIs with optional Kaleido-specific rails. */
 
 export interface UnifiedReceiveParams {
   /** On-chain BTC address. OPTIONAL under BIP321 — omit for a LN/asset-only QR. */
@@ -49,14 +37,7 @@ const K = {
   assetAmount: 'assetamount',
 } as const
 
-/**
- * Build a single BIP321 `bitcoin:` URI carrying every available receive method. The
- * address is optional; at least one of (address | lightning | lno | spark | ark |
- * liquid | rgb) must be present.
- *
- * e.g. `bitcoin:bc1q...?amount=0.001&lightning=lnbc...&spark=spark1...`
- *      `bitcoin:?lightning=lnbc...&liquid=lq1...`  (address omitted)
- */
+/** Build one BIP321 URI; the address is optional but some receive rail is required. */
 export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   const hasMethod =
     !!p.btcAddress ||
@@ -92,8 +73,8 @@ export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   }
 
   const qs = params.toString()
-  // BIP321: `bitcoin:` + optional address + optional `?params`.
-  return `bitcoin:${p.btcAddress ?? ''}${qs ? `?${qs}` : ''}`
+  // Encode the path so reserved characters cannot inject payment rails.
+  return `bitcoin:${encodeURIComponent(p.btcAddress ?? '')}${qs ? `?${qs}` : ''}`
 }
 
 /** Parse a BIP321 unified URI back into its parts (Kaleido wallets use this on scan). */
@@ -101,14 +82,12 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
   // Address is optional under BIP321 → allow an empty path.
   const m = (uri ?? '').trim().match(/^bitcoin:([^?]*)(?:\?(.*))?$/i)
   if (!m) return null
-  const btcAddress = m[1] || undefined
+  const btcAddress = decodePath(m[1]) || undefined
   const params = new URLSearchParams(m[2] ?? '')
   return {
     btcAddress,
-    // Amounts are coerced through a finite/non-negative guard: a junk, negative,
-    // or non-finite `amount=` must surface as `undefined`, never as NaN/-1/Infinity
-    // flowing into a send.
-    amountBtc: toNonNegativeFinite(params.get('amount')),
+    // Invalid BTC amounts stay undefined rather than flowing into a send.
+    amountBtc: toDecimalAmount(params.get('amount'), { maxDecimals: 8, max: MAX_BTC }),
     label: params.get('label') ?? undefined,
     lightningInvoice: params.get(K.lightning) ?? undefined,
     lightningOffer: params.get(K.lno) ?? undefined,
@@ -117,16 +96,35 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
     liquidAddress: params.get(K.liquid) ?? undefined,
     rgbInvoice: params.get(K.rgb) ?? undefined,
     assetId: params.get(K.assetId) ?? undefined,
-    assetAmount: toNonNegativeFinite(params.get(K.assetAmount)),
+    // Asset amounts are in the asset's own display units, so no 8-decimal cap.
+    assetAmount: toDecimalAmount(params.get(K.assetAmount)),
   }
 }
 
-/** Parse a query value as a finite, non-negative number, else `undefined`. */
-function toNonNegativeFinite(v: string | null): number | undefined {
-  if (v == null || v.trim() === '') return undefined
+/** Match the BIP21 decimal grammar instead of `Number()`'s hex/exponent forms. */
+const DECIMAL_AMOUNT = /^\d+(?:\.\d+)?$/
+
+function toDecimalAmount(v: string | null, opts: { maxDecimals?: number; max?: number } = {}): number | undefined {
+  if (v == null || !DECIMAL_AMOUNT.test(v)) return undefined
+  const [, frac = ''] = v.split('.')
+  if (opts.maxDecimals != null && frac.length > opts.maxDecimals) return undefined
   const n = Number(v)
-  return Number.isFinite(n) && n >= 0 ? n : undefined
+  if (!Number.isFinite(n) || n < 0) return undefined
+  if (opts.max != null && n > opts.max) return undefined
+  return n
 }
+
+/** Malformed path encoding falls back to raw text instead of aborting a scan. */
+function decodePath(raw: string): string {
+  try {
+    return decodeURIComponent(raw)
+  } catch {
+    return raw
+  }
+}
+
+/** Largest amount BIP21 can meaningfully carry: the whole BTC supply. */
+const MAX_BTC = 21_000_000
 
 /** BIP21/BIP321 amounts are in BTC with up to 8 decimals, no trailing zeros / exponent. */
 function formatBtc(amountBtc: number): string {
@@ -134,12 +132,8 @@ function formatBtc(amountBtc: number): string {
 }
 
 /**
- * The distinct payment methods present in a parsed unified URI.
- *
- * A unified URI may carry several independent methods, and they are NOT
- * cryptographically bound to each other — a scanned QR could pair an address with
- * an unrelated invoice. Consumers MUST present the methods and let the user/router
- * choose explicitly, never silently auto-paying a different method than intended.
+ * List independent, unbound payment rails so callers can authorize the selected
+ * one instead of silently auto-paying another.
  */
 export function receiveMethodsOf(p: UnifiedReceiveParams): Array<keyof UnifiedReceiveParams> {
   const keys: Array<keyof UnifiedReceiveParams> = [

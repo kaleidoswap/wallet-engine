@@ -1,12 +1,4 @@
-/**
- * Protocol Capability Manifest
- * ----------------------------
- * The backbone of the plugin architecture: protocol *differences* are DATA here,
- * never new methods on `IProtocolAdapter`. The router and the lite/advanced UI read
- * this manifest, so adding or changing one protocol never edits another's code.
- *
- * When tempted to add a contract method for a single protocol, add a flag here.
- */
+/** Protocol differences are data consumed by routing and disclosure. */
 
 import { ProtocolType, Layer } from '../types/base'
 
@@ -18,6 +10,8 @@ export interface ProtocolCapabilities {
   // --- Receive / send surface ---
   supportsOnchain: boolean
   supportsLightning: boolean
+  /** BOLT12 offer support, distinct from BOLT11 Lightning support. */
+  supportsBolt12: boolean
   /** Can hold/transfer non-BTC assets (RGB assets, Liquid assets, Spark tokens). */
   supportsAssets: boolean
   /** Native swap capability exposed by the protocol/module. */
@@ -52,6 +46,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     layers: ['BTC_L1'],
     supportsOnchain: true,
     supportsLightning: false,
+    supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: false,
     supportsSwaps: false,
     zeroFee: false,
@@ -67,6 +62,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     layers: ['BTC_SPARK', 'SPARK_SPARK', 'BTC_LN'],
     supportsOnchain: true, // via static/single-use deposit addresses
     supportsLightning: true,
+    supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true, // Spark tokens
     supportsSwaps: false, // swaps handled by the cross-protocol router / Flashnet
     zeroFee: true,
@@ -82,6 +78,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     layers: ['BTC_ARKADE', 'ARKADE_ARKADE', 'BTC_LN'],
     supportsOnchain: true, // boarding
     supportsLightning: true, // via boltz-swap
+    supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true,
     supportsSwaps: false,
     zeroFee: false,
@@ -97,6 +94,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     layers: ['BTC_L1', 'BTC_LN', 'RGB_L1', 'RGB_LN'],
     supportsOnchain: true,
     supportsLightning: true,
+    supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true, // RGB assets (USDT, XAUT)
     supportsSwaps: true, // RGB-LN atomic swaps via the maker
     zeroFee: false,
@@ -112,6 +110,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     layers: ['BTC_L1', 'RGB_L1'],
     supportsOnchain: true,
     supportsLightning: false, // rgb-lib is on-chain only — no channels
+    supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true, // RGB assets (USDT, XAUT) on L1
     supportsSwaps: false, // RGB-LN atomic swaps need the node-backed RGB path
     zeroFee: false,
@@ -127,6 +126,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     layers: ['BTC_LIQUID', 'LIQUID_ASSET'],
     supportsOnchain: true, // Liquid is its own L1
     supportsLightning: false, // (Boltz could add this later → flag, not new method)
+    supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true, // USDt on Liquid = lite-mode "USD"
     supportsSwaps: false,
     zeroFee: false,

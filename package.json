@@ -74,6 +74,7 @@
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
     "example:tour": "tsx examples/tour/tour.ts",
     "clean": "rm -rf dist",
+    "prepare": "node scripts/prepare.mjs",
     "prepublishOnly": "npm run build"
   },
   "files": [

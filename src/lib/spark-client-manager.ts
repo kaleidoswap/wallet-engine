@@ -1,20 +1,13 @@
-/**
- * Spark Client Manager
- *
- * Lifecycle of a SparkWallet from `@buildonspark/spark-sdk`. The SDK inlines WASM
- * as a binary buffer and uses gRPC over fetch, both fine in an MV3 service worker
- * and in Node, so it is imported statically by default.
- *
- * Platform seam: consumers may inject a `SparkSdkFactory` via `setSdkFactory()` to
- * avoid that static import (React Native / Metro mis-bundles it).
- */
+/** Spark wallet lifecycle with an injectable SDK factory. */
 
 import type { SparkConfig } from '../types/spark'
 import { log } from './log'
 import { SparkWallet, SparkReadonlyClient } from '@buildonspark/spark-sdk'
 import { saveSentTokenRecord } from './spark-sent-token-records'
 import { bech32 } from '@scure/base'
-import { bytesToHex } from '@noble/hashes/utils.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { WalletSessionGuard, type SessionAttempt } from './wallet-session'
 
 /** Matches the SDK's internal NetworkType (keyof typeof Network). Not exported by the SDK. */
 type SparkNetworkType = 'MAINNET' | 'TESTNET' | 'SIGNET' | 'REGTEST' | 'LOCAL'
@@ -59,9 +52,7 @@ export function resolveSparkMnemonicOrSeed(walletSecret: string): string {
   return walletSecret
 }
 
-/**
- * SDK factory injected by consumers to avoid the static import path. Optional.
- */
+/** SDK factory for hosts that cannot bundle the static import path. */
 export interface SparkSdkFactory {
   initializeWallet: (config: {
     mnemonicOrSeed: string
@@ -71,16 +62,23 @@ export interface SparkSdkFactory {
 
 // ---------------------------------------------------------------------------
 // SparkClientManager
+/** Hashed session identity that avoids retaining another comparable secret. */
+function walletKey(config: SparkConfig): string {
+  return `${config.network ?? 'mainnet'}:${bytesToHex(sha256(utf8ToBytes(config.mnemonic ?? '')))}`
+}
+
 // ---------------------------------------------------------------------------
+
+/** The guard's two slots: the wallet handshake, and the readonly-client build. */
+const WALLET_SLOT = 'wallet'
+const READONLY_SLOT = 'readonly'
 
 class SparkClientManager {
   private wallet: any = null
   private readonlyClient: SparkReadonlyClient | null = null
   private config: SparkConfig | null = null
-  /** Serializes concurrent initialize() calls to prevent races during SW restart. */
-  private _initPromise: Promise<void> | null = null
-  /** Serializes concurrent readonly client initialization. */
-  private _readonlyInitPromise: Promise<SparkReadonlyClient> | null = null
+  /** One generation invalidates both wallet and readonly-client construction. */
+  private readonly session = new WalletSessionGuard({ name: 'SparkClientManager' })
   /** Optional SDK factory escape hatch (React Native / Metro). */
   private sdkFactory: SparkSdkFactory | null = null
 
@@ -94,20 +92,19 @@ class SparkClientManager {
 
   /** Initialize the SparkWallet. Concurrent calls share the in-flight promise. */
   initialize(config: SparkConfig): Promise<void> {
-    if (this._initPromise) return this._initPromise
-
-    this._initPromise = this._doInitialize(config).finally(() => {
-      this._initPromise = null
-    })
-    return this._initPromise
+    return this.session.begin(WALLET_SLOT, walletKey(config), (attempt) =>
+      this._doInitialize(config, attempt),
+    )
   }
 
-  private async _doInitialize(config: SparkConfig): Promise<void> {
+  private async _doInitialize(config: SparkConfig, attempt: SessionAttempt): Promise<void> {
     if (this.wallet) {
       log.warn('[SparkClientManager] Wallet already initialized, re-initializing...')
       await this.disconnect()
     }
 
+    // Marked AFTER the re-init disconnect above, which invalidates the session itself.
+    attempt.mark()
     const network: SparkNetworkType = NETWORK_MAP[config.network ?? 'mainnet'] ?? 'MAINNET'
     const mnemonicOrSeed = resolveSparkMnemonicOrSeed(config.mnemonic)
 
@@ -125,6 +122,9 @@ class SparkClientManager {
         })
       }
 
+      // Never revive a signing wallet after its session was torn down.
+      if (!(await attempt.claim(() => result.wallet?.cleanupConnections?.()))) return
+
       this.wallet = result.wallet
       this.config = config
       this.installTokenSendRecorder(this.wallet)
@@ -139,18 +139,15 @@ class SparkClientManager {
         log.warn('[SparkClientManager] Failed to enable privacy mode:', privMsg)
       }
     } catch (error: unknown) {
-      this.wallet = null
+      // Only clear the wallet if this init still owns the session; a failure here
+      // must not tear down a newer, successful one.
+      if (attempt.isCurrent) this.wallet = null
       const msg = error instanceof Error ? error.message : String(error)
       throw Object.assign(new Error(`Failed to initialize SparkWallet: ${msg}`), { cause: error })
     }
   }
 
-  /**
-   * Adopt an externally-owned SparkWallet (e.g. the WDK Spark adapter's) WITHOUT
-   * initializing a second one, so hosts driving Spark through WDK keep the
-   * flashnet/bridge glue that reads `getWallet()`/`getConfig()`. Idempotent per
-   * instance. `mnemonic` is empty — adopted wallets never re-derive.
-   */
+  /** Adopt a WDK-owned wallet without deriving or initializing another one. */
   adoptExternalWallet(wallet: any, network: string): void {
     if (!wallet || this.wallet === wallet) return
     this.wallet = wallet
@@ -158,18 +155,15 @@ class SparkClientManager {
     this.installTokenSendRecorder(this.wallet)
   }
 
-  /**
-   * Wrap `transferTokens` so every outgoing token transfer is persisted to the
-   * sent-token outbox, whatever the caller.
-   *
-   * The Spark SDK reports no direction for token transactions, so without a local
-   * record an outgoing transfer is indistinguishable from a receive (and a send
-   * with no change output is not returned by the server at all). Recording at this
-   * one choke point guarantees no send is missed.
-   *
-   * Metadata is minimal; SparkAdapter.sendAsset re-saves the same hash with full
-   * metadata and supersedes this entry (records are keyed by hash).
-   */
+  /** Release only the exact adopted wallet so a newer owner stays live. */
+  releaseExternalWallet(wallet: any): void {
+    if (!this.session.releaseIf(this.wallet, wallet)) return
+    this.wallet = null
+    this.readonlyClient = null
+    this.config = null
+  }
+
+  /** Record every token send because the SDK history does not expose direction. */
   private installTokenSendRecorder(wallet: any): void {
     if (typeof wallet?.transferTokens !== 'function') return
     const original = wallet.transferTokens.bind(wallet)
@@ -216,23 +210,24 @@ class SparkClientManager {
 
   async getReadonlyClient(): Promise<SparkReadonlyClient> {
     if (this.readonlyClient) return this.readonlyClient
-    if (this._readonlyInitPromise) return this._readonlyInitPromise
     if (!this.config?.mnemonic) {
       throw new Error('SparkReadonlyClient cannot be created without mnemonic config.')
     }
 
-    const network: SparkNetworkType = NETWORK_MAP[this.config.network ?? 'mainnet'] ?? 'MAINNET'
+    const config = this.config
+    const network: SparkNetworkType = NETWORK_MAP[config.network ?? 'mainnet'] ?? 'MAINNET'
 
-    this._readonlyInitPromise = (async () => {
-      const mnemonicOrSeed = resolveSparkMnemonicOrSeed(this.config!.mnemonic)
+    // Read capability follows the same wallet generation as signing capability.
+    return this.session.begin(READONLY_SLOT, walletKey(config), async (attempt) => {
+      const mnemonicOrSeed = resolveSparkMnemonicOrSeed(config.mnemonic)
       const client = await SparkReadonlyClient.createWithMasterKey({ network }, mnemonicOrSeed)
+      // Never cache a read client after its wallet session was torn down.
+      if (!(await attempt.claim())) {
+        throw new Error('SparkReadonlyClient init superseded by teardown')
+      }
       this.readonlyClient = client
       return client
-    })().finally(() => {
-      this._readonlyInitPromise = null
     })
-
-    return this._readonlyInitPromise
   }
 
   /**
@@ -261,14 +256,14 @@ class SparkClientManager {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
+    this.session.invalidate()
   }
 
   reset(): void {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
-    this._initPromise = null
-    this._readonlyInitPromise = null
+    this.session.invalidate()
     log.info('[SparkClientManager] Complete reset performed')
   }
 }

@@ -11,6 +11,9 @@
  */
 
 import { log } from './log'
+import { getPlatform } from '../ports'
+import { sha256 } from '@noble/hashes/sha2.js'
+import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 
 const BASE_URL = 'https://orchestration.flashnet.xyz'
 
@@ -55,6 +58,14 @@ export class OrchestraAuthError extends Error {
     )
     this.name = 'OrchestraAuthError'
     this.status = status
+  }
+}
+
+export class OrchestraOrderNotFoundError extends Error {
+  readonly code = 'ORCHESTRA_ORDER_NOT_FOUND'
+  constructor() {
+    super('ORCHESTRA_ORDER_NOT_FOUND: Orchestra returned no order for this lookup')
+    this.name = 'OrchestraOrderNotFoundError'
   }
 }
 
@@ -146,6 +157,8 @@ export interface CreateQuoteParams {
   amount: string
   recipientAddress: string
   slippageBps?: number
+  /** Stable for retries of one quote attempt; use createOrchestraQuoteAttemptId(). */
+  attemptId: string
 }
 
 export interface SubmitOrderParams {
@@ -175,14 +188,32 @@ function authHeaders(): Record<string, string> {
   return { Authorization: `Bearer ${apiKey}` }
 }
 
-function idempotencyHeader(prefix: string): Record<string, string> {
-  return { 'X-Idempotency-Key': `${prefix}:${crypto.randomUUID()}` }
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function idempotencyHeader(prefix: string, payload: unknown): Record<string, string> {
+  const digest = bytesToHex(sha256(utf8ToBytes(canonicalJson(payload))))
+  return { 'X-Idempotency-Key': `${prefix}:${digest}` }
 }
 
 async function request<T>(
   method: 'GET' | 'POST',
   path: string,
-  opts?: { params?: Record<string, string>; body?: unknown; auth?: boolean; idempotency?: string },
+  opts?: {
+    params?: Record<string, string>
+    body?: unknown
+    auth?: boolean
+    idempotency?: string
+    idempotencyPayload?: unknown
+  },
 ): Promise<T> {
   const url = new URL(path, BASE_URL)
   if (opts?.params) {
@@ -193,7 +224,12 @@ async function request<T>(
 
   const headers: Record<string, string> = { 'Content-Type': 'application/json' }
   if (opts?.auth) Object.assign(headers, authHeaders())
-  if (opts?.idempotency) Object.assign(headers, idempotencyHeader(opts.idempotency))
+  if (opts?.idempotency) {
+    Object.assign(
+      headers,
+      idempotencyHeader(opts.idempotency, opts.idempotencyPayload ?? opts.body),
+    )
+  }
 
   const res = await fetch(url.toString(), {
     method,
@@ -244,19 +280,37 @@ export async function getEstimate(params: EstimateParams): Promise<OrchestraEsti
 
 /** Create a durable quote with deposit address. Auth required. TTL ~30 min. */
 export async function createQuote(params: CreateQuoteParams): Promise<OrchestraQuote> {
+  if (!params.attemptId?.trim()) {
+    throw new Error('Orchestra quote creation requires an attemptId')
+  }
+  const body = {
+    sourceChain: params.sourceChain,
+    sourceAsset: params.sourceAsset,
+    destinationChain: params.destinationChain,
+    destinationAsset: params.destinationAsset,
+    amount: params.amount,
+    recipientAddress: params.recipientAddress,
+    slippageBps: params.slippageBps ?? 100,
+  }
   return request<OrchestraQuote>('POST', '/v1/orchestration/quote', {
-    body: {
-      sourceChain: params.sourceChain,
-      sourceAsset: params.sourceAsset,
-      destinationChain: params.destinationChain,
-      destinationAsset: params.destinationAsset,
-      amount: params.amount,
-      recipientAddress: params.recipientAddress,
-      slippageBps: params.slippageBps ?? 100,
-    },
+    body,
     auth: true,
     idempotency: 'quote:create',
+    idempotencyPayload: { ...body, attemptId: params.attemptId },
   })
+}
+
+/** Create a fresh quote-attempt identifier through the injected runtime CSPRNG. */
+export function createOrchestraQuoteAttemptId(): string {
+  const runtime = getPlatform()?.runtime
+  if (!runtime) {
+    throw new Error('Orchestra quote attempt IDs require platform runtime injection')
+  }
+  const bytes = runtime.randomBytes(16)
+  if (bytes.length !== 16) {
+    throw new Error('IRuntimeProvider.randomBytes returned an invalid Orchestra attempt ID')
+  }
+  return bytesToHex(bytes)
 }
 
 /** Look up a quote and its associated order (if any). Auth required. */
@@ -302,9 +356,10 @@ export async function getStatus(query: {
   )
   // Wrapped shape: pull the order, attach stages so callers can use them
   // for finer-grained progress UI without a second request.
-  if (raw && typeof raw === 'object' && 'order' in raw && raw.order) {
+  if (raw && typeof raw === 'object' && 'order' in raw) {
     const wrapped = raw as OrchestraOrderLookup
-    return wrapped.stages ? { ...wrapped.order!, stages: wrapped.stages } : wrapped.order!
+    if (!wrapped.order) throw new OrchestraOrderNotFoundError()
+    return wrapped.stages ? { ...wrapped.order, stages: wrapped.stages } : wrapped.order
   }
   return raw as OrchestraOrder
 }

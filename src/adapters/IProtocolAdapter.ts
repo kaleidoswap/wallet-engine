@@ -34,6 +34,7 @@ import {
   SwapResult,
 } from '../types/base'
 import type { ProtocolCapability } from '../capabilities/operations'
+import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { RgbConfig } from '../types/rgb'
 import type { SparkConfig } from '../types/spark'
 import type { ArkadeConfig } from '../types/arkade'
@@ -93,6 +94,7 @@ export interface ICoreProtocolAdapter {
   refreshBalances(): Promise<void>
 
   // --- Transactions ---
+  /** Transactions ordered newest-first; filtering/pagination preserve that order. */
   listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]>
   /** @param assetId - Required for RGB protocol (transfers are per-asset) */
   getTransaction(txId: string, assetId?: string): Promise<UnifiedTransaction>
@@ -277,6 +279,13 @@ export interface ISwapOperations {
   getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult>
 }
 
+/** Additive recovery surface for adapters with durable swap records. */
+export interface ISwapRecoveryOperations {
+  listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]>
+  /** Resume maker status inspection by RFQ id or payment hash. */
+  resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult>
+}
+
 /** Generic escape hatch used by some WDK adapters (allowlisted internally). */
 export interface IExtensibleAdapter {
   executeProtocolOperation(operation: string, params: unknown): Promise<unknown>
@@ -296,6 +305,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &
   Partial<ISwapOperations> &
+  Partial<ISwapRecoveryOperations> &
   Partial<IExtensibleAdapter>
 
 // --- Capability narrowing helpers: reach a group's methods without
@@ -306,8 +316,30 @@ const isFn = (v: unknown): v is (...args: never[]) => unknown => typeof v === 'f
 export function asSwapOperations(a: IProtocolAdapter): ISwapOperations | null {
   return a.supportsSwaps() && isFn(a.executeSwap) && isFn(a.getSwapQuote) ? (a as ISwapOperations) : null
 }
+export function asSwapRecoveryOperations(a: IProtocolAdapter): ISwapRecoveryOperations | null {
+  return isFn(a.listIncompleteSwaps) && isFn(a.resumeSwap) ? (a as ISwapRecoveryOperations) : null
+}
 export function asRgbOperations(a: IProtocolAdapter): IRgbOperations | null {
-  return isFn(a.createRgbInvoice) && isFn(a.sendAsset) ? (a as IRgbOperations) : null
+  // Preserve the historical null result for adapters that do not opt into the
+  // group at all. Once the two original markers are present, verify the complete
+  // non-optional interface before returning the promised type.
+  if (!isFn(a.createRgbInvoice) || !isFn(a.sendAsset)) return null
+  const methods: ReadonlyArray<keyof IRgbOperations> = [
+    'createRgbInvoice',
+    'decodeRgbInvoice',
+    'createRgbUtxos',
+    'listRgbUnspents',
+    'estimateRgbFee',
+    'getRgbDetailedBalance',
+    'getInvoiceStatus',
+    'sendAsset',
+  ]
+  for (const method of methods) {
+    if (!isFn(a[method])) {
+      throw new Error(`Adapter ${a.protocolName} is missing IRgbOperations method '${method}'`)
+    }
+  }
+  return a as IRgbOperations
 }
 export function asSigningOperations(a: IProtocolAdapter): ISigningOperations | null {
   return isFn(a.signPsbt) && isFn(a.signMessage) ? (a as ISigningOperations) : null

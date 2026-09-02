@@ -37,6 +37,8 @@ import { loadWdkModule } from './moduleLoader'
 import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './RgbCore'
 import type { RgbBalanceLike } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
+import { defaultRgbFeeRate } from '../../lib/rgb-fee-policy'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_L1'
@@ -73,7 +75,12 @@ function toRgbNetwork(network: string): string {
     case 'regtest':
       return 'Regtest'
     default:
-      return 'Mainnet'
+      // Never guess a chain for key and address derivation.
+      throw new ProtocolError(
+        `Unsupported RGB network '${network}' (expected mainnet, testnet, signet, or regtest)`,
+        'RGB_L1',
+        'CONFIG',
+      )
   }
 }
 
@@ -114,6 +121,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const cfg = config as RgbLibWasmAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RgbLibWasmAdapter requires a mnemonic', 'RGB_L1', 'CONFIG')
     if (!cfg.indexerUrl) throw new ProtocolError('RgbLibWasmAdapter requires an indexerUrl', 'RGB_L1', 'CONFIG')
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     this.transportEndpoints = cfg.transportEndpoints ?? []
     const rgbNetwork = toRgbNetwork(this.network)
@@ -213,10 +221,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
-    const { vanilla, colored } = await this.detailedBtcBalance()
-    const settled = vanilla.settled + colored.settled
-    const spendable = vanilla.spendable + colored.spendable
-    const future = vanilla.future + colored.future
+    const { vanilla } = await this.detailedBtcBalance()
+    // Colored sats carry RGB allocations; spending them as ordinary BTC destroys
+    // the bound asset. They remain visible via getRgbDetailedBalance(), not here.
+    const settled = vanilla.settled
+    const spendable = vanilla.spendable
+    const future = vanilla.future
     return { confirmed: settled, unconfirmed: Math.max(0, future - settled), total: spendable }
   }
 
@@ -230,20 +240,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async refreshBalances(): Promise<void> {
     this.assertConnected()
-    try {
-      // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
-      // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
-      // synced again — two full indexer round-trips, ~2× the cold-sync wait.
-      await this.account.sync(this.online)
-      await this.account.refresh(this.online, null, [], true)
-      // Flush or the settled-transfer promotion lives only in memory and is lost
-      // on the next MV3 cold start, resurfacing as stale balances on the next send.
-      await this.flushState()
-    } catch (e) {
-      // best-effort, but surface the cause — a silent failure leaves the wallet
-      // showing 0 balance / no history.
-      console.error('[RGB-L1] refresh/sync failed:', e)
-    }
+    // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
+    // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
+    // synced again — two full indexer round-trips, ~2× the cold-sync wait.
+    await this.account.sync?.(this.online)
+    await this.account.refresh?.(this.online, null, [], true)
+    // Flush or the settled-transfer promotion lives only in memory and is lost
+    // on the next MV3 cold start, resurfacing as stale balances on the next send.
+    await this.flushState()
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
@@ -312,11 +316,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   // --- Transactions -------------------------------------------------------
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const raw: any = await this.account.listTransactions()
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
-    return txs.map((t) => {
+    const mapped = txs.map((t) => {
       const { received, sent, type } = normalizeRgbLibTransactionAmounts(t)
       const confTime = t.confirmationTime ?? t.confirmation_time
       const timestampSeconds = normalizeRgbLibTimestamp(confTime)
@@ -327,13 +331,16 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         timestamp: timestampSeconds * 1000,
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: rgbBtcAsset(0, RGB_L1_PROFILE),
         protocolData: {
           ...t,
           transactionType: normalizeRgbLibTxType(t.transactionType ?? t.transaction_type),
         },
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
@@ -347,10 +354,13 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   async listChannels(): Promise<unknown[]> {
+    // Distinguish an unsupported channel model from an unavailable wallet.
+    this.assertConnected()
     return []
   }
 
   async listPayments(): Promise<unknown> {
+    this.assertConnected()
     return []
   }
 
@@ -432,7 +442,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // Same rationale as sendAsset: createUtxosBegin selects from vanilla UTXOs
     // tracked in the local DB; sync first so the indexer's current view is used.
     await this.refreshBalances()
-    const feeRate = BigInt(Math.round(params.feeRate ?? 1))
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.createUtxosBegin(
       this.online,
       params.upTo ?? false,
@@ -511,7 +521,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // without a fresh sync+refresh sendBegin fails with "Insufficient total
     // assignments" despite a non-zero UI balance.
     await this.refreshBalances()
-    const feeRate = BigInt(Math.round(params.feeRate ?? 1))
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.sendBegin(
       this.online,
       recipientMap,
@@ -530,7 +540,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
-    const feeRate = BigInt(Math.round(params.feeRate ?? 1))
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.sendBtcBegin(
       this.online,
       params.address,
@@ -541,6 +551,10 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const signed = await this.account.signPsbt(unsigned)
     const txid: string = await this.account.sendBtcEnd(this.online, signed, false)
     await this.flushState()
+    // A successful send must be traceable and reconcilable.
+    if (!txid) {
+      throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
+    }
     return { ok: true, txid }
   }
 
