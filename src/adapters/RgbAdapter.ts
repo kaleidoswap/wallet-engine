@@ -703,23 +703,20 @@ export class RgbAdapter implements IProtocolAdapter {
 
     try {
       const client = kaleidoClientManager.getClient();
-      const response = (await client.rln.getPayment({
+      const response = await client.rln.getPayment({
         payment_hash: paymentHash,
-      })) as Record<string, unknown>;
-      // The response may be the payment directly or wrapped in a { payment } object
-      const payment = (response.payment ?? response) as {
-        status?: string;
-        amount_msat?: number;
-        fee_msat?: number;
-        created_at?: number;
-      };
+      });
+      const payment = response.payment;
 
       return {
         paymentHash,
         status: mapPaymentStatus(payment.status),
-        amount: payment.amount_msat ? payment.amount_msat / 1000 : undefined,
-        fee: payment.fee_msat ? payment.fee_msat / 1000 : undefined,
-        timestamp: payment.created_at,
+        amount: payment.amt_msat != null
+          ? toSafeAmountNumber(roundedMsatToSat(String(payment.amt_msat)), "sat")
+          : undefined,
+        // The declared Payment shape carries no routing-fee field.
+        fee: undefined,
+        timestamp: payment.created_at ? payment.created_at * 1000 : undefined,
       };
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get payment status");
