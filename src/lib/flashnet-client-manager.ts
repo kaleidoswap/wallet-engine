@@ -41,14 +41,7 @@ const CLIENT_SLOT = 'client'
 
 class FlashnetClientManager {
   private client: FlashnetClient | null = null
-  /**
-   * Wallet identity + generation guard, shared with the other client managers.
-   * The wallet key is the `SparkWallet` instance itself, recorded from the
-   * moment the attempt starts: returning wallet A's in-flight promise to wallet
-   * B's caller would silently drop B's init and leave the Flashnet client bound
-   * to A's SparkWallet (and A's keys) inside B's session (findings A-F8/N5).
-   * See src/lib/wallet-session.ts.
-   */
+  /** Guard fund-moving client construction by wallet identity and generation. */
   private readonly session = new WalletSessionGuard({ name: 'FlashnetClientManager' })
   private poolId: string | null = null
   private network: FlashnetNetwork | null = null
@@ -82,9 +75,7 @@ class FlashnetClientManager {
       const client = new FlashnetClient(wallet as never)
       await client.initialize()
 
-      // A disconnect()/wallet switch landed while the SDK init was pending. This
-      // client is bound to the previous wallet; installing it now would undo the
-      // teardown and put the next session on the previous wallet's keys.
+      // Never install a client after its wallet session was torn down.
       if (!(await attempt.claim(() => client.cleanup()))) return
 
       this.client = client

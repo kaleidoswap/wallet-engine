@@ -1,23 +1,8 @@
-/**
- * KaleidoswapSwap
- * ---------------
- * Wraps the WDK Kaleidoswap swap module behind domain `Quote`/`SwapResult` types:
- * the cross-asset path (RFQ via the maker, settled as an atomic HTLC swap over
- * Lightning), distinct from the cross-L2 VHTLC/Boltz layer in types/cross-l2.
- *
- * The module is bound to the taker's RLN account (which whitelists the HTLC) plus a
- * baseUrl. No WDK/kaleido-sdk types cross this boundary.
- *
- * UNITS: RAW base units throughout. The module rejects fractional inputs, so a
- * display-unit caller fails loudly instead of creating an order scaled by
- * 10^precision. Execution passes the approved quote's rfqId and exact raw amounts,
- * so a fill can never diverge from what the user approved.
- */
+/** Cross-asset maker swaps in raw base units, exposed through domain types. */
 
 import { Quote, QuoteRequest, SwapResult, ProtocolError } from '../types/base'
 import { loadWdkModule } from '../adapters/wdk/moduleLoader'
-// Fail-closed money coercion, shared with RgbAdapter's native maker path — which
-// consumes the same maker responses and used to take them raw (finding E-F4).
+// Share fail-closed money coercion with the native maker path.
 import {
   toSwapAmount as toAmount,
   validateSwapQuoteTerms,
@@ -31,10 +16,7 @@ import {
 export interface KaleidoswapSwapConfig {
   /** KaleidoSwap maker API base URL. */
   baseUrl: string
-  /**
-   * Maximum from-leg divergence accepted from a maker quote, in basis points.
-   * Defaults to 100 (1%); 0 requires an exact amount match.
-   */
+  /** Maximum maker from-leg divergence in bps; defaults to 100. */
   maxQuoteSlippageBps?: number
   /** Stable, non-secret wallet identity used to namespace durable recovery records. */
   walletId?: string

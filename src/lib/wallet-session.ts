@@ -1,8 +1,4 @@
-/**
- * Identity/generation guard for signing-capable singleton clients. Wallet keys
- * are recorded before awaits, and teardown invalidates pending installs, so
- * callers cannot share another wallet's client or resurrect a stale session.
- */
+/** Prevent singleton clients from crossing wallet identities or teardown generations. */
 
 import { log } from './log'
 

@@ -1,17 +1,4 @@
-/**
- * Arkade Client Manager
- *
- * Lifecycle of an Arkade wallet (`@arkade-os/sdk` v0.4.x). Pure TypeScript — no
- * WASM — so it runs directly inside an MV3 service worker.
- *
- * Platform-agnostic: storage repositories and network providers are injected via
- * `setPlatformProviders()` (extension: the SDK's IndexedDB repos; React Native:
- * AsyncStorage-backed). No `chrome.*` globals here.
- *
- * Secrets: nsec root by default; 64-char hex and BIP39 mnemonics (BIP86 Taproot)
- * are accepted too. nsec-rooted keys are derived directly rather than through
- * `mnemonicToSeedSync`, which otherwise fails with "Invalid mnemonic".
- */
+/** Arkade wallet lifecycle with injected platform providers. */
 
 import type { ArkadeConfig } from "../types/arkade";
 import { WalletSessionGuard, type SessionAttempt } from "./wallet-session";
@@ -124,11 +111,7 @@ function isBip39Secret(walletSecret: string): boolean {
 /** The guard's single slot: the Arkade wallet handshake. */
 const WALLET_SLOT = "wallet";
 
-/**
- * The config fields that decide WHICH wallet, on which network, with which
- * server endpoints, an `initialize()` call is for. Two configs agreeing on all
- * of them denote the same session and may share one in-flight handshake.
- */
+/** Compare every field that identifies an Arkade wallet session. */
 function sameArkadeConfig(a: unknown, b: unknown): boolean {
   const x = a as ArkadeConfig | null;
   const y = b as ArkadeConfig | null;
@@ -147,14 +130,7 @@ class ArkadeClientManager {
   private wallet: Wallet | null = null;
   private _vtxoManager: VtxoManager | null = null;
   private config: ArkadeConfig | null = null;
-  /**
-   * Wallet identity + generation guard, shared with the other client managers.
-   * `onConflict: "reject"` keeps this manager's historical, more conservative
-   * answer to a wallet switch that races an in-flight handshake: refuse the new
-   * caller rather than supersede the pending one. Less available than the other
-   * managers' `supersede`, equally safe, and preserved deliberately so adopting
-   * the guard does not loosen it. See src/lib/wallet-session.ts.
-   */
+  /** Reject a wallet switch that races an in-flight handshake. */
   private readonly session = new WalletSessionGuard({
     name: "ArkadeClientManager",
     sameWallet: sameArkadeConfig,
@@ -245,10 +221,7 @@ class ArkadeClientManager {
 
       const created = await Wallet.create(walletConfig);
 
-      // A disconnect()/reset() that landed while Wallet.create() was pending has
-      // already torn this session down. Installing now would undo it: the locked
-      // wallet would come back live and signing-capable, and `this.config` (which
-      // carries the mnemonic) would be restored with it. Drop the orphan instead.
+      // Never revive a signing wallet after its session was torn down.
       const claimed = await attempt.claim(() =>
         (created as unknown as { dispose?: () => Promise<void> | void })?.dispose?.(),
       );
@@ -256,9 +229,7 @@ class ArkadeClientManager {
 
       this.wallet = created;
 
-      // HD funds live across rotated `…/0/N` addresses that a fresh client knows
-      // nothing about until the gap-limit scan, so it would show 0 balance.
-      // Best-effort: a scan failure must not block the wallet coming up.
+      // HD balances need a gap scan; failure does not make the wallet unusable.
       if (hdMode) {
         try {
           await (this.wallet as Wallet & { restore?: () => Promise<void> }).restore?.();
@@ -400,22 +371,15 @@ class ArkadeClientManager {
     // Stop any existing subscription first
     this.stopIncomingFundsListener();
 
-    // Claim the slot SYNCHRONOUSLY. Setting it in the .then() below let two
-    // calls made before the subscribe resolved both pass the duplicate guard —
-    // two live subscriptions, with `_stopIncomingFunds` retaining only the last
-    // stop function, so the earlier one could never be stopped and repeated
-    // connect cycles grew them without bound.
+    // Claim synchronously so concurrent calls cannot create orphan subscriptions.
     this._listenerStarted = true;
-    // The session this listener belongs to. A disconnect()/reset() invalidates
-    // it, so both the late-landing subscription and the callback itself can tell
-    // that the wallet they belong to is gone.
+    // Generation binds the listener and its callbacks to this wallet session.
     const generation = this.session.generation;
     const wallet = this.wallet;
 
     wallet
       .notifyIncomingFunds((notification) => {
-        // Never deliver a notification for a wallet the host has torn down —
-        // that is a stale listener firing into the next wallet's session.
+        // Never deliver a stale wallet's notification into the next session.
         if (generation !== this.session.generation) return;
         try {
           onIncoming(notification);
@@ -425,9 +389,7 @@ class ArkadeClientManager {
       })
       .then((stop) => {
         if (generation !== this.session.generation) {
-          // Teardown landed while the subscribe was pending. Installing now
-          // would leave a live listener on a torn-down wallet that no
-          // stopIncomingFundsListener() call can reach.
+          // Stop a late subscription that teardown can no longer reach.
           try {
             stop();
           } catch {

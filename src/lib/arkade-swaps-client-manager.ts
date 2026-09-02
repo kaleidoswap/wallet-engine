@@ -1,15 +1,4 @@
-/**
- * Arkade Swaps Client Manager
- *
- * Singleton owning an `ArkadeSwaps` from `@arkade-os/boltz-swap`: Boltz-based swaps
- * between Arkade VTXOs and Lightning / on-chain BTC. Init is non-blocking, so
- * callers use `getClient()` and fall back when `isInitialized()` is false.
- * Lifecycle: `initialize(wallet)` on adapter connect, `dispose()` on disconnect.
- *
- * The default repository is IndexedDB-backed so pending swaps survive a
- * service-worker restart and are auto-claimed by the embedded `SwapManager`.
- * Non-browser hosts must inject a platform-appropriate `swapRepository`.
- */
+/** Wallet-bound Boltz swaps client with injectable persistence. */
 
 import { ArkadeSwaps, IndexedDbSwapRepository } from "@arkade-os/boltz-swap";
 import type { IWallet } from "@arkade-os/sdk";
@@ -32,35 +21,15 @@ const CLIENT_SLOT = "client";
 
 class ArkadeSwapsClientManager {
   private client: SwapsClient | null = null;
-  /**
-   * The wallet `client` was built for. A swaps client signs with the wallet it
-   * was created from, so serving it to a different wallet's session spends the
-   * previous wallet's VTXOs. Kept so `initialize()` can tell a genuine re-init
-   * from a wallet switch.
-   */
+  /** Wallet whose signing capability the current client holds. */
   private clientWallet: IWallet | null = null;
-  /**
-   * Wallet identity + generation guard, shared with the other client managers.
-   * The wallet key is the `IWallet` instance itself, recorded from the moment
-   * the attempt starts — which is what stops an in-flight `ArkadeSwaps.create()`
-   * for wallet A being handed to wallet B's caller while `this.client` is still
-   * null (finding N1). See src/lib/wallet-session.ts.
-   */
+  /** Guard in-flight construction by wallet identity and generation. */
   private readonly session = new WalletSessionGuard({ name: "ArkadeSwapsClientManager" });
 
-  /**
-   * Initialize the swaps client with a connected Arkade wallet. Concurrent calls
-   * for the SAME wallet share the in-flight handshake; a call for a different
-   * wallet, or one arriving after a dispose(), supersedes the pending attempt and
-   * builds its own — the superseded client is disposed (findings A7, N1).
-   */
+  /** Share same-wallet initialization; supersede and dispose stale attempts. */
   initialize(wallet: IWallet, opts?: ArkadeSwapsInitOptions): Promise<void> {
-    // Same wallet, client already built → nothing to do.
     if (this.client && this.clientWallet === wallet) return Promise.resolve();
-    // A client bound to a DIFFERENT wallet must not be reused: `ProtocolManager
-    // .connect()` re-connects an adapter without calling `disconnect()` first, so
-    // a wallet switch reaches here with a live client still holding the previous
-    // wallet's keys. Tear it down and build one for the wallet we were given.
+    // A fund-moving client must never cross wallet identities.
     if (this.client) {
       const stale = this.client;
       this.client = null;
@@ -72,14 +41,6 @@ class ArkadeSwapsClientManager {
           log.warn('[ArkadeSwapsClientManager] Error disposing superseded client:', error),
         );
     }
-    // The in-flight case — the seam the teardown branch above cannot cover,
-    // because it only fires once a client EXISTS. While ArkadeSwaps.create() is
-    // pending `this.client` is null, so a wallet switch that races it would
-    // otherwise return wallet A's promise to wallet B's caller, and A's client
-    // would install and sign with A's keys for the rest of B's session
-    // (finding N1). The guard keys the in-flight slot on the wallet itself, so
-    // B's caller supersedes A's attempt and gets its own. ArkadeAdapter.connect()
-    // does not await this init, so the window is the normal case, not an edge one.
     return this.session.begin(CLIENT_SLOT, wallet, (attempt) =>
       this._doInitialize(wallet, attempt, opts),
     );

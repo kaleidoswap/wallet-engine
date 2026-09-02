@@ -1,13 +1,4 @@
-/**
- * Spark Client Manager
- *
- * Lifecycle of a SparkWallet from `@buildonspark/spark-sdk`. The SDK inlines WASM
- * as a binary buffer and uses gRPC over fetch, both fine in an MV3 service worker
- * and in Node, so it is imported statically by default.
- *
- * Platform seam: consumers may inject a `SparkSdkFactory` via `setSdkFactory()` to
- * avoid that static import (React Native / Metro mis-bundles it).
- */
+/** Spark wallet lifecycle with an injectable SDK factory. */
 
 import type { SparkConfig } from '../types/spark'
 import { log } from './log'
@@ -61,9 +52,7 @@ export function resolveSparkMnemonicOrSeed(walletSecret: string): string {
   return walletSecret
 }
 
-/**
- * SDK factory injected by consumers to avoid the static import path. Optional.
- */
+/** SDK factory for hosts that cannot bundle the static import path. */
 export interface SparkSdkFactory {
   initializeWallet: (config: {
     mnemonicOrSeed: string
@@ -73,11 +62,7 @@ export interface SparkSdkFactory {
 
 // ---------------------------------------------------------------------------
 // SparkClientManager
-/**
- * Stable identity for the wallet a config denotes, used only to decide whether
- * two `initialize()` calls are for the same wallet. Hashed so the manager never
- * holds a second comparable copy of the secret.
- */
+/** Hashed session identity that avoids retaining another comparable secret. */
 function walletKey(config: SparkConfig): string {
   return `${config.network ?? 'mainnet'}:${bytesToHex(sha256(utf8ToBytes(config.mnemonic ?? '')))}`
 }
@@ -92,13 +77,7 @@ class SparkClientManager {
   private wallet: any = null
   private readonlyClient: SparkReadonlyClient | null = null
   private config: SparkConfig | null = null
-  /**
-   * Wallet identity + generation guard, shared with the other client managers.
-   * Both slots hang off one generation, so any teardown invalidates the wallet
-   * handshake and the readonly-client build together. `walletKey` hashes the
-   * secret, so the guard never holds a second comparable copy of key material.
-   * See src/lib/wallet-session.ts.
-   */
+  /** One generation invalidates both wallet and readonly-client construction. */
   private readonly session = new WalletSessionGuard({ name: 'SparkClientManager' })
   /** Optional SDK factory escape hatch (React Native / Metro). */
   private sdkFactory: SparkSdkFactory | null = null
@@ -143,10 +122,7 @@ class SparkClientManager {
         })
       }
 
-      // A disconnect()/reset()/wallet-switch that landed while the handshake was
-      // pending has already torn this session down. Installing now would undo it:
-      // the locked wallet would come back live and signing-capable, and
-      // `this.config` would restore the mnemonic. Drop the orphan instead.
+      // Never revive a signing wallet after its session was torn down.
       if (!(await attempt.claim(() => result.wallet?.cleanupConnections?.()))) return
 
       this.wallet = result.wallet
@@ -171,12 +147,7 @@ class SparkClientManager {
     }
   }
 
-  /**
-   * Adopt an externally-owned SparkWallet (e.g. the WDK Spark adapter's) WITHOUT
-   * initializing a second one, so hosts driving Spark through WDK keep the
-   * flashnet/bridge glue that reads `getWallet()`/`getConfig()`. Idempotent per
-   * instance. `mnemonic` is empty — adopted wallets never re-derive.
-   */
+  /** Adopt a WDK-owned wallet without deriving or initializing another one. */
   adoptExternalWallet(wallet: any, network: string): void {
     if (!wallet || this.wallet === wallet) return
     this.wallet = wallet
@@ -184,14 +155,7 @@ class SparkClientManager {
     this.installTokenSendRecorder(this.wallet)
   }
 
-  /**
-   * Release a wallet handed over by `adoptExternalWallet` (finding A5), so tearing
-   * down the adapter that owns it also revokes this singleton's signing capability.
-   *
-   * No-op unless the singleton still holds exactly that wallet — another owner may
-   * have adopted since, and dropping a live wallet that is not ours would be a
-   * worse bug than the one this closes.
-   */
+  /** Release only the exact adopted wallet so a newer owner stays live. */
   releaseExternalWallet(wallet: any): void {
     if (!this.session.releaseIf(this.wallet, wallet)) return
     this.wallet = null
@@ -199,18 +163,7 @@ class SparkClientManager {
     this.config = null
   }
 
-  /**
-   * Wrap `transferTokens` so every outgoing token transfer is persisted to the
-   * sent-token outbox, whatever the caller.
-   *
-   * The Spark SDK reports no direction for token transactions, so without a local
-   * record an outgoing transfer is indistinguishable from a receive (and a send
-   * with no change output is not returned by the server at all). Recording at this
-   * one choke point guarantees no send is missed.
-   *
-   * Metadata is minimal; SparkAdapter.sendAsset re-saves the same hash with full
-   * metadata and supersedes this entry (records are keyed by hash).
-   */
+  /** Record every token send because the SDK history does not expose direction. */
   private installTokenSendRecorder(wallet: any): void {
     if (typeof wallet?.transferTokens !== 'function') return
     const original = wallet.transferTokens.bind(wallet)
@@ -264,18 +217,11 @@ class SparkClientManager {
     const config = this.config
     const network: SparkNetworkType = NETWORK_MAP[config.network ?? 'mainnet'] ?? 'MAINNET'
 
-    // Guarded by the same session as the wallet handshake, on its own slot: a
-    // build started before a disconnect()/wallet switch is keyed to the PREVIOUS
-    // wallet's master key, so it must neither be shared with the next session's
-    // reader nor cached once it lands.
+    // Read capability follows the same wallet generation as signing capability.
     return this.session.begin(READONLY_SLOT, walletKey(config), async (attempt) => {
       const mnemonicOrSeed = resolveSparkMnemonicOrSeed(config.mnemonic)
       const client = await SparkReadonlyClient.createWithMasterKey({ network }, mnemonicOrSeed)
-      // A disconnect()/reset()/wallet switch landed while the client was being
-      // built. Caching it would keep a live read capability on a wallet the host
-      // has already wiped — and the `if (this.readonlyClient) return` fast path
-      // above would then serve it past the mnemonic gate, to the next wallet's
-      // session. Discard the orphan.
+      // Never cache a read client after its wallet session was torn down.
       if (!(await attempt.claim())) {
         throw new Error('SparkReadonlyClient init superseded by teardown')
       }

@@ -1,21 +1,4 @@
-/**
- * Arkade Intents Client Manager
- *
- * Singleton owning an `ArkadeIntentsVenue` from `@kaleidorg/swap-sdk/arkade` — the
- * Arkade Intents RFQ routes plus the intra-Arkade asset-swap covenant. Mirrors
- * `arkadeSwapsClientManager`: non-blocking init, generation-counted dispose.
- *
- * Deliberate differences from the Boltz manager:
- *  - The venue resolves through the WDK module loader with a non-literal dynamic
- *    import fallback: the subpath ships in swap-sdk >= 0.3.0 while the peer range
- *    still admits older versions, so a literal specifier would break `tsc`.
- *  - The RFQ `transport` is host-supplied and opaque — building one needs the
- *    solver's card and a Nostr stack, product decisions the engine doesn't own.
- *  - The venue owns no timers: the host drives `getVenue().reconcile()`.
- *
- * The venue requires `@arkade-os/sdk` >= 0.4.60 (the `VHTLC.ScriptV2` era); the
- * engine only passes the wallet through, so the pin is the host's to own.
- */
+/** Wallet-bound Arkade Intents venue with host-supplied RFQ transport. */
 
 import type { IWallet } from "@arkade-os/sdk";
 import { loadWdkModule } from "../adapters/wdk/moduleLoader";
@@ -74,18 +57,10 @@ class ArkadeIntentsClientManager {
   /** The wallet whose signing capability the live venue holds. */
   private venueWallet: IWallet | null = null;
   private transport: unknown = null;
-  /**
-   * Records wallet identity before the async module load starts. A venue can
-   * fund, claim and refund with its `IWallet`, so sharing wallet A's pending
-   * load with wallet B would put B's session on A's keys.
-   */
+  /** Bind fund-moving venue operations to the wallet that initialized them. */
   private readonly session = new WalletSessionGuard({ name: "ArkadeIntentsClientManager" });
 
-  /**
-   * Initialize the venue with a connected Arkade wallet. Concurrent calls of the
-   * same generation share the in-flight promise; a dispose() bumps the generation so
-   * a stale init is discarded.
-   */
+  /** Share same-wallet initialization and discard stale attempts after disposal. */
   async initialize(wallet: IWallet, options: ArkadeIntentsInitOptions): Promise<void> {
     if (this.venue && this.venueWallet === wallet) return;
     if (this.venue) {

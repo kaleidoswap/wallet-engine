@@ -1,12 +1,4 @@
-/**
- * Protocol Capability Manifest
- * ----------------------------
- * The backbone of the plugin architecture: protocol *differences* are DATA here,
- * never new methods on `IProtocolAdapter`. The router and the lite/advanced UI read
- * this manifest, so adding or changing one protocol never edits another's code.
- *
- * When tempted to add a contract method for a single protocol, add a flag here.
- */
+/** Protocol differences are data consumed by routing and disclosure. */
 
 import { ProtocolType, Layer } from '../types/base'
 
@@ -18,20 +10,7 @@ export interface ProtocolCapabilities {
   // --- Receive / send surface ---
   supportsOnchain: boolean
   supportsLightning: boolean
-  /**
-   * Can pay a BOLT12 OFFER (`lno1…`), not merely a BOLT11 invoice.
-   *
-   * Separate from `supportsLightning` because no adapter here can: the RLN node's
-   * `SendPaymentRequest` has one bolt11-shaped `invoice` field, Spark's
-   * `payLightningInvoice` is documented BOLT11-only (and its `startsWith("ln")`
-   * gate happily forwards an offer to it), and both Arkade paths' invoice
-   * matchers exclude `lno1…` so the string falls through to an on-chain send.
-   * Certifying `direct: true` off `supportsLightning` therefore auto-selected, in
-   * lite mode, a route guaranteed to fail or to pay the wrong rail (finding B-F5).
-   *
-   * Flip this to `true` in the same commit that gives an adapter a real offer
-   * flow — never before.
-   */
+  /** BOLT12 offer support, distinct from BOLT11 Lightning support. */
   supportsBolt12: boolean
   /** Can hold/transfer non-BTC assets (RGB assets, Liquid assets, Spark tokens). */
   supportsAssets: boolean

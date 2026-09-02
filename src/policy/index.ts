@@ -1,18 +1,4 @@
-/**
- * Signing / spend policy
- * ----------------------
- * A pure, portable gate for fund-moving and signing operations, centralizing checks
- * that would otherwise scatter across adapters and hosts: per-transaction spend
- * limits, destination allowlists, and per-app capability grants.
- *
- * `evaluatePolicy` is pure (no I/O, no globals), so it is trivially testable and
- * ports cleanly to Rust/Kotlin/Swift. Hosts wire it in via `ProtocolManager`
- * (opt-in) or call it at their own boundary.
- *
- * DEFAULT-ALLOW: a policy only ever tightens behaviour, so with none set the engine
- * behaves as before. `mode: 'deny'` flips to default-deny, requiring an explicit
- * matching grant.
- */
+/** Pure signing and spend policy for engine and host boundaries. */
 
 import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
@@ -73,11 +59,7 @@ export interface SigningPolicy {
   mode?: 'allow' | 'deny'
   /** Global per-transaction spend cap (sats), applied on top of any grant cap. */
   maxAmountSat?: number
-  /**
-   * Per-asset swap caps in each asset's own base units. Decimal strings are
-   * parsed with BigInt; no price conversion or floating-point coercion occurs.
-   * When a cap policy is active, an unlisted non-BTC asset remains denied.
-   */
+  /** Per-asset raw-unit swap caps; active policies deny unlisted non-BTC assets. */
   maxAmountByAsset?: Record<string, string>
   /** Per-app capability grants, resolved by `PolicyRequest.grantId`. */
   grants?: CapabilityGrant[]
@@ -100,13 +82,7 @@ export class PolicyError extends Error {
 
 const AMOUNT_OPS: ReadonlySet<PolicyOperation> = new Set(['send', 'keysend', 'swap'])
 
-/**
- * Every destination kind a request could actually be paid through: the outer
- * string, plus each payment rail embedded in it when it is a unified BIP321 URI.
- * Fails CLOSED — a rail whose value does not classify contributes 'UNKNOWN',
- * which no sane grant allowlists, so an unparseable rail denies rather than
- * silently disappearing.
- */
+/** Include every unified payment rail; unknown embedded rails fail closed. */
 function destinationKindsOf(destination: string): DestinationKind[] {
   const kinds: DestinationKind[] = [classifyDestination(destination).kind]
   const parsed = parseUnifiedReceiveURI(destination)

@@ -44,18 +44,8 @@ export interface PsbtSignResult {
 }
 
 /**
- * Parse and attempt to sign a PSBT with keys derived from the wallet secret.
- *
- * The secret is resolved through `resolveWalletSeed`, not `mnemonicToSeedSync`
- * (finding A-F4): hosts root wallets on an `nsec1…` key or a raw 64-hex private
- * key as well as on a BIP-39 phrase — an nsec root is the *default* Arkade
- * wallet — and the connect paths seed their wallet managers from exactly that
- * resolution, so the HD tree a PSBT's BIP32 derivations name is rooted there.
- * `resolveWalletSeed` also throws on a secret of none of the three shapes rather
- * than PBKDF2-ing a typo into a valid-but-different, empty wallet.
- *
- * @param psbtHex Hex-encoded PSBT bytes (no 0x prefix).
- * @param secret  Wallet secret: `nsec1…`, 64-char hex key, or BIP-39 mnemonic.
+ * Sign a PSBT from its BIP32 paths using an nsec, raw key, or mnemonic root.
+ * Invalid secret shapes fail rather than deriving a different wallet.
  */
 export function signPsbt(psbtHex: string, secret: string): PsbtSignResult {
   const bytes = hexToBytes(psbtHex)
