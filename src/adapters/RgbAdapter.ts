@@ -50,7 +50,7 @@ import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy"
 import { toSwapAmount, validateSwapQuoteTerms } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
 import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
-import { decodeBolt11Invoice } from "../lib/bolt11";
+import { decodeBolt11, decodeBolt11Invoice } from "../lib/bolt11";
 import {
   convertBtcBalance,
   convertNodeAssetToUnified,
@@ -643,17 +643,15 @@ export class RgbAdapter implements IProtocolAdapter {
       }
       const result = (await (
         client.rln.sendPayment as (body: Record<string, unknown>) => Promise<unknown>
-      )(sendParams)) as SendPaymentResponse & {
-        payment_preimage?: string;
-        amount_msat?: number;
-        fee_msat?: number;
-      };
+      )(sendParams)) as SendPaymentResponse;
+      const invoiceAmount = decodeBolt11(request.invoice).amountSat;
 
       return {
         paymentHash: result.payment_hash ?? "",
-        preimage: result.payment_preimage,
-        amount: result.amount_msat ? result.amount_msat / 1000 : 0,
-        fee: result.fee_msat ? result.fee_msat / 1000 : 0,
+        // SendPaymentResponse has no amount or fee. The BOLT11 amount is the
+        // authoritative source because amount-bearing invoices are not re-amounted.
+        amount: invoiceAmount ?? request.amount ?? 0,
+        fee: 0,
         status: mapPaymentStatus(result.status),
         timestamp: Date.now(),
       };
