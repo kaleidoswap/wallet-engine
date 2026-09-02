@@ -579,13 +579,7 @@ export class SparkAdapter implements IProtocolAdapter {
         this.invoiceRequestIds.set(encodedInvoice, result.id);
       }
 
-      const expiresAt = parseSdkExpiryMs(
-        "expiryTime" in inv
-          ? (inv as { expiryTime?: unknown }).expiryTime
-          : "expiresAt" in inv
-            ? (inv as { expiresAt?: unknown }).expiresAt
-            : undefined,
-      );
+      const expiresAt = parseSdkExpiryMs(inv.expiresAt);
       return {
         invoice: encodedInvoice,
         paymentHash: inv.paymentHash ?? "",
@@ -685,7 +679,8 @@ export class SparkAdapter implements IProtocolAdapter {
         // Amountless ("0-sat") BOLT-11 invoices require `amountSatsToSend`
         // explicitly, and it is rejected on amount-bearing ones — so gate on the
         // invoice, not on whether the caller supplied an amount.
-        const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null;
+        const decodedInvoice = decodeBolt11(destination);
+        const invoiceIsAmountless = decodedInvoice.amountMsat == null;
         const result = await wallet.payLightningInvoice({
           invoice: destination,
           maxFeeSats: extReq.maxFee ?? DEFAULT_MAX_FEE_SATS,
@@ -695,12 +690,9 @@ export class SparkAdapter implements IProtocolAdapter {
         } as Parameters<typeof wallet.payLightningInvoice>[0]);
         const lnResult = result as unknown as Record<string, unknown>;
 
-        const id = String(lnResult.id ?? "");
-        const amountSats = Number(
-          lnResult.amountSats ?? lnResult.totalValue ?? request.amount ?? 0,
-        );
-        const timestamp =
-          lnResult.createdTime instanceof Date ? lnResult.createdTime.getTime() : Date.now();
+        const id = result.id;
+        const amountSats = Number(decodedInvoice.amountSat ?? request.amount ?? 0);
+        const timestamp = parseSdkExpiryMs(result.createdAt) ?? Date.now();
 
         const settlement = await waitForLightningSendSettlement(wallet, id, lnResult);
         if (settlement.status === "failed") {

@@ -322,20 +322,23 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
 
     // 1) Lightning receive (BOLT11) — when the caller targets the LN layer.
     if (request.layer === 'BTC_LN') {
-      const r: any = await this.account.createLightningInvoice({
+      const r = await this.account.createLightningInvoice({
         amountSats: request.amount ?? 0,
         memo: request.description,
         expirySeconds: request.expirySeconds,
-      })
-      const inv: any = r?.invoice ?? {}
-      const encoded = inv?.encodedInvoice ?? r?.encodedInvoice ?? r?.invoice ?? ''
+      }) as {
+        id?: string
+        invoice?: { encodedInvoice?: string; paymentHash?: string; expiresAt?: string }
+      }
+      const inv = r?.invoice
+      const encoded = inv?.encodedInvoice ?? ''
       // Track the receive-request id so getInvoiceStatus can poll it later.
       if (r?.id && encoded) this.invoiceRequestIds.set(encoded, r.id)
       return {
         invoice: encoded,
-        paymentHash: inv?.paymentHash ?? r?.id ?? '',
+        paymentHash: inv?.paymentHash ?? '',
         amount: request.amount,
-        expiresAt: parseSdkExpiryMs(inv?.expiryTime ?? inv?.expiresAt) ?? expiresAt,
+        expiresAt: parseSdkExpiryMs(inv?.expiresAt) ?? expiresAt,
         description: request.description,
       }
     }
@@ -400,7 +403,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         // Amountless (0-sat) invoices require an explicit amount; the SDK
         // rejects amountSatsToSend on amount-bearing ones, so gate on the
         // invoice itself, not on whether the caller supplied an amount.
-        const invoiceIsAmountless = decodeBolt11(destination).amountMsat == null
+        const decodedInvoice = decodeBolt11(destination)
+        const invoiceIsAmountless = decodedInvoice.amountMsat == null
         const result: any = await this.account.payLightningInvoice({
           invoice: destination,
           maxFeeSats: maxFee,
@@ -408,7 +412,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
             ? { amountSatsToSend: request.amount }
             : {}),
         })
-        const id = String(result?.id ?? result?.paymentHash ?? '')
+        const id = String(result?.id ?? '')
         // Raw wallet access is best-effort: without it the poller degrades to
         // 'pending' rather than failing a payment that was already dispatched.
         const rawWallet = (this.account as any)?._wallet ?? {}
@@ -421,12 +425,12 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
           )
         }
         return {
-          paymentHash: String(result?.paymentHash ?? result?.id ?? ''),
+          paymentHash: id,
           preimage: settlement.preimage,
-          amount: Number(result?.amountSats ?? result?.totalValue ?? request.amount ?? 0),
-          fee: settlement.feeSats || Number(result?.feeSats ?? 0),
+          amount: Number(decodedInvoice.amountSat ?? request.amount ?? 0),
+          fee: settlement.feeSats,
           status: settlement.status,
-          timestamp: result?.createdTime instanceof Date ? result.createdTime.getTime() : timestamp,
+          timestamp: parseSdkExpiryMs(result?.createdAt) ?? timestamp,
         }
       }
 
