@@ -110,13 +110,7 @@ export class SparkAdapter implements IProtocolAdapter {
       this.config = sparkConfig;
       log.info("[SparkAdapter] Connected to Spark successfully");
     } catch (error: unknown) {
-      // Fail CLOSED. On a wallet switch A→B whose connect throws, the client
-      // manager has already torn A's wallet down (isConnected() is false), but a
-      // `this.config` left over from A's earlier successful connect still holds
-      // A's mnemonic — and the signing methods below used to gate on that field
-      // alone. Any code path still holding this adapter (an in-flight LNURL-auth
-      // challenge, a dapp PSBT request) could then sign with WALLET A's KEYS
-      // while every indicator said the wallet was locked.
+      // Drop stale key material when a wallet-switch connection fails.
       this.config = null;
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Spark: ${msg}`, "SPARK", error);
@@ -636,12 +630,7 @@ export class SparkAdapter implements IProtocolAdapter {
     const lower = input.trim().toLowerCase();
 
     if (lower.startsWith("ln")) {
-      // bolt11 invoice. `decodeBolt11` is already imported and used in this file
-      // (sendPayment), and it reads the amount out of the HRP — so returning no
-      // amount here silently defeated the pre-flight "verify what you're paying"
-      // step on a protocol that declares `lightning-send`. The payment hash is
-      // deliberately still empty: bolt11.ts states the full field decode
-      // (payment_hash, description) is left to node-side decoders.
+      // The lightweight parser proves the amount but not the payment hash.
       const { amountSat, amountMsat } = decodeBolt11(input.trim());
       return {
         paymentHash: "",
@@ -1105,10 +1094,7 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
-    // A locked wallet must not be able to keep signing — the invariant
-    // BaseWdkAdapter states for the WDK family (BaseWdkAdapter.ts:30-33) and
-    // commit fb826c9 (H1) applies engine-wide. Holding a mnemonic is not the
-    // same as being connected.
+    // Retained mnemonic state never authorizes signing after disconnect.
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
     }
@@ -1210,14 +1196,7 @@ export class SparkAdapter implements IProtocolAdapter {
       // INVOICE_CREATED, TRANSFER_CREATED, etc.
       return { status: "Pending" };
     } catch (error: unknown) {
-      // A lookup that FAILED is not a Pending payment. Mapping the gateway's error
-      // to `Pending` made a receive-flow poll wait forever on an invoice whose
-      // status could not be read, and the host could never distinguish "not paid
-      // yet" from "we could not check" — so it could neither retry nor warn.
-      // Both RGB siblings propagate here (`RgbAdapter`/`RlnWdkAdapter`
-      // getInvoiceStatus), and this adapter's `sendPayment` already throws.
-      // `Pending` stays for the genuinely-unknown-but-answered cases above
-      // (untracked invoice, no request row) (audit finding G-F3).
+      // A failed lookup is not evidence that the invoice remains pending.
       const msg = error instanceof Error ? error.message : String(error);
       log.warn("[SparkAdapter] Invoice status check failed:", msg);
       throw new ProtocolError(
@@ -1306,22 +1285,7 @@ export class SparkAdapter implements IProtocolAdapter {
             return { txId: success.txid };
           }
 
-          // NO sats-leg fallback. This entry point is `sendAsset` — the caller asked
-          // to move a TOKEN. An empty `tokenTransactionSuccess` means the token leg
-          // did NOT succeed, so returning `satsTransactionSuccess[0]`'s id told the
-          // caller "your token send succeeded, here is its id" while handing them
-          // the id of a different, BTC transfer — and it skipped the
-          // `saveSentTokenRecord` call above, the only reliable record of an
-          // outgoing token transfer, so the send was invisible in history too.
-          //
-          // The old comment read "maybe it was a sats invoice bundled with token".
-          // For a genuinely bundled invoice BOTH legs succeed, so `success` above is
-          // present and this path never runs. What the fallback actually covered was
-          // a sats-ONLY invoice reached through `sendAsset` — where
-          // `fulfillSparkInvoice` was handed `amount: BigInt(tokenAmount)` and would
-          // settle that many SATS instead of that many units of the asset. Reporting
-          // that as a successful asset send is worse than failing
-          // (audit finding G-F5).
+          // A sats-leg ID cannot prove the token send requested by this method.
           throw new ProtocolError(
             "Spark invoice payment returned no token transfer result",
             "SPARK",

@@ -111,11 +111,7 @@ export class RgbAdapter implements IProtocolAdapter {
       kaleidoClientManager.initialize({
         baseUrl: rgbConfig.makerUrl || "",
         nodeUrl: rgbConfig.nodeUrl,
-        // `jwt` is the documented NODE-auth credential (types/rgb.ts:28) while
-        // `apiKey` is documented as the maker's. Forwarding only `apiKey` meant a
-        // host that configured `jwt` per the docs got a node client with no
-        // Authorization header and no warning. Same precedence as the WDK path
-        // (RlnWdkAdapter.ts:154) so the two backends agree.
+        // Prefer the documented node credential over the maker API key alias.
         apiKey: rgbConfig.jwt ?? rgbConfig.apiKey,
         transport,
         nwcUri: rgbConfig.nwcUri,
@@ -155,16 +151,7 @@ export class RgbAdapter implements IProtocolAdapter {
         log.info("[RgbAdapter] No maker URL provided (swaps disabled)");
       }
     } catch (error: unknown) {
-      // FAIL CLOSED. `kaleidoClientManager.initialize()` ran before the
-      // `getNodeInfo()` handshake, and the fund-moving methods on this adapter gate
-      // on `kaleidoClientManager.hasNode()` — config presence — not on
-      // `isConnected()`. So a connect() that threw (bad credentials, version skew)
-      // used to leave the manager initialized with the node URL: the host marked
-      // the wallet disconnected and hid the send UI, while any code path still
-      // holding this adapter could call `sendPayment`/`payKeysend`/`sendAsset`/
-      // `sendBtcOnchain` and have it sail through the `hasNode()` guard and pay.
-      // Resetting here revokes node access with the failed connect
-      // (audit finding G-F6).
+      // Revoke the initialized node client when its connection handshake fails.
       this.connected = false;
       this.config = null;
       kaleidoClientManager.reset();
@@ -285,20 +272,10 @@ export class RgbAdapter implements IProtocolAdapter {
 
   async getAsset(assetId: string): Promise<UnifiedAsset> {
     const assets = await this.listAssets();
-    // Asset identity in RGB is the contract id ONLY. `ticker` is free text
-    // chosen by the issuer, so the old `a.id === assetId || a.ticker === assetId`
-    // let an impostor asset shadow a genuine one: an issuer who sets
-    // `ticker: 'rgb:real-usdt'` and gets listed first captured even an EXACT
-    // CONTRACT-ID lookup, returning their worthless asset (and its balance) to a
-    // caller that did the right thing. Match the id first — the three sibling
-    // RGB adapters (RlnWdkAdapter, RgbLibWdkAdapter, RgbLibWasmAdapter) are all
-    // id-only, which is the intended semantics.
+    // Contract IDs are authoritative; issuer-controlled tickers cannot shadow one.
     const byId = assets.find((a) => a.id === assetId);
     if (byId) return byId;
-    // Ticker lookup stays available for hosts that resolve a user-visible
-    // symbol, but only when it is UNAMBIGUOUS — two assets sharing a ticker is
-    // exactly the impostor case, and picking the first-listed one silently
-    // prefers whichever the attacker got in front.
+    // A ticker is usable only when it identifies exactly one asset.
     const byTicker = assets.filter((a) => a.ticker === assetId);
     if (byTicker.length === 1) return byTicker[0];
     if (byTicker.length > 1) {
@@ -327,12 +304,7 @@ export class RgbAdapter implements IProtocolAdapter {
         return convertBtcBalance(btcBalance);
       }
 
-      // Get RGB asset balance AT THE ASSET'S OWN PRECISION. `convertSdkBalance`
-      // defaults to 8 (the BTC convention), which silently understates every
-      // non-8-precision asset by 10^(8-p) — a precision-0 asset holding 1,000,000
-      // units rendered as "0.01000000" — and disagreed with the same asset's
-      // `listAssets()` card, which does use the real precision. Metadata is
-      // fetched in parallel so this costs no extra round trip.
+      // Resolve precision with the balance so non-BTC assets render in their units.
       const [balanceData, metadata] = await Promise.all([
         client.rln.getAssetBalance({ asset_id: assetId }),
         client.rln.getAssetMetadata({ asset_id: assetId }),
@@ -391,13 +363,7 @@ export class RgbAdapter implements IProtocolAdapter {
         client.rln.listTransfers({ asset_id: filter.asset }) as Promise<{
           transfers?: Record<string, unknown>[];
         }>,
-        // No per-leg `.catch` default. Swallowing a failing rail returned a
-        // history silently MISSING every LN payment (or every swap) while
-        // presenting it as complete: a user reconciling an asset's balance
-        // against its activity sees sats they cannot account for, and nothing
-        // signals that a whole rail is absent. The transfers leg above already
-        // fails the call; the three now behave alike. (There is no `partial`
-        // flag on the result to degrade to — see REPORT-2.)
+        // Without a partial-result marker, a failed rail must fail the whole view.
         client.rln.listPayments() as Promise<{
           payments?: Record<string, unknown>[];
         }>,
@@ -407,14 +373,7 @@ export class RgbAdapter implements IProtocolAdapter {
         }>,
       ]);
 
-      // Resolve every asset whose base units appear in a row, so history renders
-      // at the asset's own precision rather than the BTC default of 8 (a 500-unit
-      // precision-0 receive displayed as "0.00000500" — and history is what a
-      // merchant checks before treating an invoice as paid). Three different
-      // assets can be involved: the requested asset for transfers, each payment's
-      // own `asset_id`, and each swap's `from_asset`, which need not be the
-      // requested one. Deduplicated and fetched in parallel, so a history with
-      // one counter-asset costs one extra round trip, not one per row.
+      // Resolve each row's asset once; swaps may render a counter-asset precision.
       const precisionOf = await this.resolveAssetPrecisions(client, [
         filter.asset,
         ...(paymentsResponse.payments ?? []).map((p) => p.asset_id as string | null | undefined),
@@ -478,18 +437,7 @@ export class RgbAdapter implements IProtocolAdapter {
     }
   }
 
-  /**
-   * Resolve the display precision of each asset a history call renders amounts
-   * in, as a lookup keyed by asset id.
-   *
-   * BTC — which the node encodes as a missing/`"BTC"` asset id — is 8 by
-   * definition and costs no round trip. Every other id is looked up once via
-   * `getAssetMetadata`, deduplicated, in parallel. A response that omits
-   * `precision` falls back to 8, matching `getAssetBalance` (41bc6bf); a lookup
-   * that THROWS fails the whole call, matching this method's own rail policy
-   * (e92aa0b) — a history rendered at a fabricated precision is wrong in the same
-   * silent way as one missing a rail, and there is no `partial` flag to degrade to.
-   */
+  /** Resolve deduplicated row precisions; BTC and missing metadata default to 8. */
   private async resolveAssetPrecisions(
     client: ReturnType<typeof kaleidoClientManager.getClient>,
     assetIds: (string | null | undefined)[],
@@ -745,13 +693,7 @@ export class RgbAdapter implements IProtocolAdapter {
       const btcBalance = await client.rln.getBtcBalance();
       const vanilla = btcBalance?.vanilla || {};
 
-      // Vanilla only. "Colored" sats sit under RGB asset allocations and cannot be
-      // spent as ordinary BTC — `convertBtcBalance` (rgb-converters.ts) states the
-      // same policy in its doc comment and returns vanilla only, so summing them
-      // here made one adapter report two different BTC balances for identical node
-      // state (`getAssetBalance('BTC')` → 5000 vs `getBtcBalance()` → 7000). The
-      // overstated figure is the one a host uses to bound a send or a "max" button.
-      // Colored sats remain visible per-asset and via `getRgbDetailedBalance()`.
+      // Colored sats carry RGB allocations and are not spendable as ordinary BTC.
       const confirmed = vanilla.spendable || 0;
       // `future` is the expected balance after all pending txs settle.
       // Pending incoming = amount above spendable; pending outgoing reduces future below spendable.
@@ -875,14 +817,7 @@ export class RgbAdapter implements IProtocolAdapter {
     }
   }
 
-  /**
-   * Resolve a sat/vB fee rate for an RGB on-chain operation. Thin wrapper around
-   * {@link resolveRgbFeeRatePolicy}, supplying `estimateFn` and `network` from live
-   * adapter state; the pure policy lives outside the class so it is unit-testable.
-   *
-   * Closes [GL #26]: RGB on-chain spends previously used a hardcoded regtest-era
-   * `1`/`5`, which on a busy mainnet mempool means "never confirms".
-   */
+  /** Apply the shared RGB fee policy to this adapter's estimator and network. */
   private async resolveFeeRate(
     provided: number | undefined,
     urgency: FeeUrgency = "normal",
@@ -890,15 +825,7 @@ export class RgbAdapter implements IProtocolAdapter {
     return resolveRgbFeeRatePolicy({
       provided,
       urgency,
-      // An ABSENT network must fail toward the mainnet floor, not away from it.
-      // `BaseProtocolConfig.network` is optional with no documented default, and
-      // the policy maps an unknown network to 1 sat/vB (documented, and correct
-      // for regtest/signet). A host that omits `network` while pointed at a
-      // mainnet node therefore built real mainnet transactions at 1 sat/vB —
-      // unconfirmable, with no engine-level RBF path, locking the wallet's UTXOs
-      // and RGB allocations. Both WDK RGB adapters already default an absent
-      // network to 'mainnet' (RlnWdkAdapter.ts:143, RgbLibWasmAdapter.ts:158);
-      // this is that parity. Overpaying on regtest/signet costs nothing.
+      // Unknown network fails toward the mainnet floor; overpaying test sats is safe.
       network: this.config?.network ?? 'mainnet',
       estimateFn: async (blocks) => {
         try {
@@ -1144,12 +1071,7 @@ export class RgbAdapter implements IProtocolAdapter {
         "NO_AMOUNT",
       );
     }
-    // Fail CLOSED on a non-finite expiry. `expiresAt` is `expires_at * 1000` from
-    // the maker response, so a maker that omits or renames the field yields NaN —
-    // and the old `quote.expiresAt > 0` form made `NaN > 0` false, silently
-    // skipping the engine's only client-side expiry check. A counterparty must
-    // not be able to switch off a safety check by leaving a field out. (The
-    // amount guard directly above is already written NaN-safe; this matches it.)
+    // Missing or non-finite maker expiry cannot disable the client-side check.
     if (!Number.isFinite(quote.expiresAt) || quote.expiresAt <= 0) {
       throw new ProtocolError(
         "Approved quote has no usable expiry — request a fresh quote",

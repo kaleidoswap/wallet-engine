@@ -287,18 +287,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     return asset.balance;
   }
 
-  /**
-   * Drop the shared snapshot so the next balance/VTXO read hits the Ark provider.
-   *
-   * The old body was an empty no-op whose comment claimed "balances are fetched
-   * live on each call" — false: every read goes through
-   * `getArkadeBalanceCached`/`getArkadeVtxosCached` (3 s TTL,
-   * arkade-snapshot-cache.ts), and only SENDS invalidated it. So a user who
-   * pulled to refresh after a deposit got a success and the same stale snapshot,
-   * for up to the TTL. `ProtocolManager.refreshBalances` documents the intent
-   * this now honours: "invalidate every connected adapter's balance cache so the
-   * next read is fresh" (audit finding G-F10).
-   */
+  /** Drop the shared snapshot so the next balance/VTXO read reaches Ark. */
   async refreshBalances(): Promise<void> {
     invalidateArkadeSnapshotCache();
   }
@@ -347,13 +336,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // Payment Operations
   // =========================================================================
 
-  /**
-   * Arkade receive is an address, not a bolt11 invoice — EXCEPT when the caller
-   * asks for Lightning via the documented `InvoiceRequest.layer` selector. ARKADE
-   * declares the `lightning-receive` operation and `capabilities` exists "so the
-   * UI can gate actions" (IProtocolAdapter.ts:90-95), so a BTC_LN request must not
-   * come back as an Ark address a host would render as a Lightning QR.
-   */
+  /** Honor an explicit Lightning layer instead of returning an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
@@ -483,16 +466,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
           );
         }
         return {
-          // `paymentHash` is the field a host persists, logs and shows as the
-          // payment's public identifier, and `getPaymentStatus(paymentHash)`
-          // searches history by it. The old
-          // `result.preimage ?? result.txid ?? ''` therefore (a) put a SECRET —
-          // the payment preimage, which is proof of payment — into that field
-          // whenever Boltz resolved with a preimage but no on-chain txid yet, and
-          // (b) guaranteed the status lookup could never match, so the payment
-          // stayed pending forever. Four sibling adapters keep the preimage in
-          // `PaymentResult.preimage`, which exists for exactly this
-          // (types/base.ts:175) (audit finding G-F11).
+          // Keep the settlement secret separate from the public lookup identifier.
           paymentHash: result.txid ?? "",
           preimage: result.preimage,
           amount: result.amount ?? request.amount ?? 0,
@@ -556,19 +530,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
   }
 
-  /**
-   * Resolve a payment's terminal state from the SDK's transaction history.
-   * `paymentHash` is the txid from `sendBitcoin`/`sendLightningPayment`; Boltz may
-   * return a preimage instead, in which case there is no history row yet and the
-   * payment stays pending.
-   */
+  /** Resolve public payment IDs against transaction history. */
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
-    // A DISCONNECTED adapter is not reporting a pending payment — it is reporting
-    // that it cannot look anything up. Every peer adapter throws NOT_CONNECTED in
-    // this state (SparkWdkAdapter, RlnWdkAdapter, ArkadeWdkAdapter all
-    // assertConnected; LiquidWdkAdapter propagates), so answering `pending` here
-    // denied the host even "adapter locked" as a signal and made a poll wait
-    // forever (audit finding G-F2). Nothing pins this behaviour.
+    // Disconnection is a lookup failure, not evidence that payment is pending.
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
