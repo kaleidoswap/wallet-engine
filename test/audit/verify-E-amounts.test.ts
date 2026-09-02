@@ -28,7 +28,7 @@ describe('VERIFY E-F1: formatAmount float division + toFixed range', () => {
 
 describe('VERIFY E-F2: convertSdkBalance defaults precision to 8', () => {
   it('a precision-0 RGB asset balance is understated by 1e8', () => {
-    const b: any = { settled: 1_000_000, spendable: 1_000_000, future: 0, offchain_outbound: 0, offchain_inbound: 0 }
+    const b: any = { settled: 1_000_000, spendable: 1_000_000, future: 1_000_000, offchain_outbound: 0, offchain_inbound: 0 }
     const withDefault = convertSdkBalance(b)
     const withReal = convertSdkBalance(b, 0)
     console.log('default(=8):', withDefault.totalDisplay, '| real precision 0:', withReal.totalDisplay)

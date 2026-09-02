@@ -36,7 +36,7 @@ export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset[
   const spendable = vanilla.spendable || 0;
   const settled = vanilla.settled || 0;
   const future = vanilla.future || 0;
-  const owned = future || settled || spendable || 0;
+  const owned = vanilla.future ?? vanilla.settled ?? vanilla.spendable ?? 0;
   return {
     total: owned,
     available: spendable,
@@ -64,7 +64,7 @@ export function convertSdkBalance(
   const settled = balance.settled || 0;
   const spendable = balance.spendable || 0;
   const future = balance.future || 0;
-  const owned = future || settled || spendable || 0;
+  const owned = balance.future ?? balance.settled ?? balance.spendable ?? 0;
   return {
     total: owned,
     available: spendable,
@@ -90,7 +90,7 @@ export function convertNodeBalance(
   const settled = balance?.settled || 0;
   const available = balance?.spendable || 0;
   const future = balance?.future || 0;
-  const total = future || settled || available || 0;
+  const total = balance?.future ?? balance?.settled ?? balance?.spendable ?? 0;
   const pending = Math.max(0, future - settled);
 
   return {

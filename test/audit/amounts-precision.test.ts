@@ -108,7 +108,7 @@ describe('F2: RgbAdapter.getAssetBalance precision drop (RgbAdapter.ts:281)', ()
         getAssetBalance: async () => ({
           settled: 1_000_000,
           spendable: 1_000_000,
-          future: 0,
+          future: 1_000_000,
           offchain_outbound: 0,
           offchain_inbound: 0,
         }),
@@ -321,7 +321,7 @@ describe('control: KaleidoswapSwap rejects the same hostile inputs', () => {
 // convertSdkBalance default — direct converter-level confirmation of F2's default
 describe('F2 converter default (rgb-converters.ts:54)', () => {
   it('convertSdkBalance defaults to precision 8 when caller omits it', () => {
-    const bal = convertSdkBalance({ settled: 1_000_000, spendable: 1_000_000, future: 0 } as any)
+    const bal = convertSdkBalance({ settled: 1_000_000, spendable: 1_000_000, future: 1_000_000 } as any)
     expect(bal.totalDisplay).toBe('0.01000000')
   })
 })
