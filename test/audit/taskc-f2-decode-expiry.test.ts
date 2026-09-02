@@ -7,8 +7,10 @@
  * regresses. The commit that removed the `.skip` records the failing output at its
  * parent.
  */
-import { describe, it, expect } from 'vitest'
+import { afterEach, describe, it, expect, vi } from 'vitest'
+import { RgbAdapter } from '../../src/adapters/RgbAdapter'
 import { RlnWdkAdapter } from '../../src/adapters/wdk/RlnWdkAdapter'
+import { kaleidoClientManager } from '../../src/lib/kaleido-client-manager'
 
 /**
  * AUDIT C-F2 — decodeInvoice reports EXPIRED invoices as payable.
@@ -25,6 +27,17 @@ function connectedRln(account: any) {
   Object.assign(adapter as any, { connected: true, account })
   return adapter
 }
+
+function connectedRgb(client: unknown) {
+  const adapter = new RgbAdapter()
+  Object.assign(adapter as any, { connected: true, config: { nodeUrl: 'https://node.example' } })
+  vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
+  vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue(client as any)
+  return adapter
+}
+
+afterEach(() => vi.restoreAllMocks())
 
 describe('AUDIT C-F2: decodeInvoice expiry', () => {
   it('an invoice created 2h ago with expiry_sec=3600 must decode as already expired', async () => {
@@ -43,5 +56,22 @@ describe('AUDIT C-F2: decodeInvoice expiry', () => {
     const d = await adapter.decodeInvoice('lnbc50u1pabcdef')
     // Correct value: (timestamp + expiry_sec) * 1000 = ~1h in the PAST.
     expect(d.expiresAt).toBeLessThanOrEqual(Date.now())
+  })
+
+  it('legacy RgbAdapter also anchors expiry_sec to the invoice timestamp', async () => {
+    const nowSec = Math.floor(Date.now() / 1000)
+    const adapter = connectedRgb({
+      rln: {
+        decodeLNInvoice: async () => ({
+          amt_msat: 5_000_000,
+          expiry_sec: 3600,
+          timestamp: nowSec - 7200,
+          payment_hash: 'ph',
+          payee_pubkey: 'pk',
+        }),
+      },
+    })
+    const decoded = await adapter.decodeInvoice('lnbc50u1pabcdef')
+    expect(decoded.expiresAt).toBe((nowSec - 3600) * 1000)
   })
 })

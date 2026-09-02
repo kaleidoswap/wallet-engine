@@ -594,7 +594,9 @@ export class RgbAdapter implements IProtocolAdapter {
           : undefined,
         amountMsat: amtMsat ?? undefined,
         description: decoded.description,
-        expiresAt: decoded.expiry_sec ? Date.now() + decoded.expiry_sec * 1000 : 0,
+        expiresAt: decoded.expiry_sec
+          ? (Number(decoded.timestamp) + Number(decoded.expiry_sec)) * 1000
+          : 0,
         destination: decoded.payee_pubkey || "",
         asset_id: decoded.asset_id ?? undefined,
         asset_amount: decoded.asset_amount ?? undefined,
