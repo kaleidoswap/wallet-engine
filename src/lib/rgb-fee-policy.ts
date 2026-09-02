@@ -33,6 +33,11 @@ export const MAINNET_FEE_FLOOR: Record<FeeUrgency, number> = {
   high: 25,
 };
 
+/** Default when neither a caller nor an estimator supplies a usable fee rate. */
+export function defaultRgbFeeRate(network: string | null | undefined): number {
+  return network === "mainnet" ? MAINNET_FEE_FLOOR.normal : 1;
+}
+
 export interface ResolveRgbFeeRateInput {
   /** Caller-provided rate (advanced UI override). Wins when > 0. */
   provided: number | undefined;

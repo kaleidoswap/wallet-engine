@@ -37,7 +37,7 @@ import { loadWdkModule } from './moduleLoader'
 import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './RgbCore'
 import type { RgbBalanceLike } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
-import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
+import { defaultRgbFeeRate } from '../../lib/rgb-fee-policy'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
@@ -451,7 +451,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // Same rationale as sendAsset: createUtxosBegin selects from vanilla UTXOs
     // tracked in the local DB; sync first so the indexer's current view is used.
     await this.refreshBalances()
-    const feeRate = BigInt(Math.round(params.feeRate ?? this.defaultFeeRate()))
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.createUtxosBegin(
       this.online,
       params.upTo ?? false,
@@ -530,7 +530,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // without a fresh sync+refresh sendBegin fails with "Insufficient total
     // assignments" despite a non-zero UI balance.
     await this.refreshBalances()
-    const feeRate = BigInt(Math.round(params.feeRate ?? this.defaultFeeRate()))
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.sendBegin(
       this.online,
       recipientMap,
@@ -549,7 +549,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
-    const feeRate = BigInt(Math.round(params.feeRate ?? this.defaultFeeRate()))
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.sendBtcBegin(
       this.online,
       params.address,
@@ -605,19 +605,6 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   /** Estimate the on-chain fee rate (sat/vB) for a confirmation target (IProtocolAdapter hook). */
-  /**
-   * Fee rate to use when the caller supplied none. The default path used to be a
-   * hardcoded `1`, which on mainnet builds an unconfirmable transaction carrying
-   * RGB allocations and wallet sats — and this adapter never consulted
-   * `resolveRgbFeeRatePolicy` at all, so the mainnet floor that exists for the
-   * node-backed RGB adapter did not apply here. Floors at the shared
-   * `MAINNET_FEE_FLOOR` on mainnet; 1 sat/vB stays the non-mainnet default, as
-   * the policy documents.
-   */
-  private defaultFeeRate(): number {
-    return this.network === 'mainnet' ? MAINNET_FEE_FLOOR.normal : 1
-  }
-
   async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
     this.assertConnected()
     const target = Number.isFinite(blocks) && blocks > 0 ? Math.round(blocks) : 6

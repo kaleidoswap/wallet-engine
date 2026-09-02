@@ -40,7 +40,7 @@ import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } 
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { KaleidoswapSwap, type SwapQuoteRequest } from '../../swap/KaleidoswapSwap'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
-import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
+import { defaultRgbFeeRate } from '../../lib/rgb-fee-policy'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
 import { roundedMsatToSat, toSafeAmountNumber } from '../../lightning/amounts'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -524,7 +524,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
           },
         ],
       },
-      feeRate: params.feeRate ?? params.fee_rate ?? this.defaultFeeRate(),
+      feeRate: params.feeRate ?? params.fee_rate ?? defaultRgbFeeRate(this.network),
       donation: params.donation ?? false,
       minConfirmations: params.minConfirmations ?? params.min_confirmations ?? 1,
     })
@@ -567,20 +567,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       // Floor a cold-started node's 1 sat/vB estimate on mainnet — the estimate
       // is the node's opinion, not a policy, and this adapter never consulted
       // `resolveRgbFeeRatePolicy`.
-      fee_rate: params.feeRate ?? Math.max((await this.estimateRgbFee(6)).fee_rate, this.defaultFeeRate()),
+      fee_rate: params.feeRate ?? Math.max((await this.estimateRgbFee(6)).fee_rate, defaultRgbFeeRate(this.network)),
       skip_sync: false,
     })
     return { success: true }
-  }
-
-  /**
-   * Fee rate to use when neither the caller nor the node supplied a usable one.
-   * `sendRgb`/`createUtxos` previously forwarded `undefined` (WDK's own 3 sat/vB
-   * default) or a bare `?? 1`, so mainnet RGB spends could build below the floor
-   * the engine defines for exactly this case.
-   */
-  private defaultFeeRate(): number {
-    return this.network === 'mainnet' ? MAINNET_FEE_FLOOR.normal : 1
   }
 
   async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
