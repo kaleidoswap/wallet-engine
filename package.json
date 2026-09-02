@@ -72,6 +72,7 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
+    "check:lockfiles": "node scripts/check-lockfile-consistency.mjs",
     "example:tour": "tsx examples/tour/tour.ts",
     "clean": "rm -rf dist",
     "prepublishOnly": "npm run build"
