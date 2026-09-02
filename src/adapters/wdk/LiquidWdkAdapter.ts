@@ -409,7 +409,9 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         amount,
         amountDisplay: formatAmount(amount, precision),
         fee,
-        asset: assetId ? this.txAsset(assetId, policy) : (undefined as unknown as UnifiedAsset),
+        asset: assetId
+          ? this.txAsset(assetId, policy)
+          : this.txAsset(policy || 'BTC', policy || 'BTC'),
         protocolData: { height: t.height, assetId, balance: t.balance },
       }
     })

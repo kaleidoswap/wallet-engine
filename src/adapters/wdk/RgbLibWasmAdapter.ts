@@ -336,7 +336,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         timestamp: timestampSeconds * 1000,
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: rgbBtcAsset(0, RGB_L1_PROFILE),
         protocolData: {
           ...t,
           transactionType: normalizeRgbLibTxType(t.transactionType ?? t.transaction_type),

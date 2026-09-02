@@ -210,7 +210,7 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         timestamp: Number(confTime?.timestamp ?? 0) * 1000,
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: rgbBtcAsset(0, RGB_L1_PROFILE),
         protocolData: t,
       }
     })

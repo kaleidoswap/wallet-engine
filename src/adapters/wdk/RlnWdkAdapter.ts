@@ -435,7 +435,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
         timestamp: (t.confirmation_time?.timestamp ?? 0) * 1000,
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: rgbBtcAsset(0, RLN_PROFILE),
         protocolData: t,
       }
     })

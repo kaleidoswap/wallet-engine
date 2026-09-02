@@ -47,6 +47,30 @@ const isLightningInvoice = (value: string): boolean => {
   return /^ln(bc|tb|bcrt|sb)/.test(body)
 }
 
+const ARKADE_TRANSACTION_BTC: UnifiedAsset = {
+  id: 'BTC',
+  name: 'Bitcoin (Arkade)',
+  ticker: 'BTC',
+  precision: 8,
+  protocol: 'ARKADE',
+  layer: 'BTC_ARKADE',
+  balance: {
+    total: 0,
+    available: 0,
+    pending: 0,
+    locked: 0,
+    totalDisplay: formatSats(0),
+    availableDisplay: formatSats(0),
+  },
+  capabilities: {
+    canSend: true,
+    canReceive: true,
+    canSwap: false,
+    supportsLightning: false,
+    supportsOnchain: true,
+  },
+}
+
 export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   protocol: 'ARKADE'
   /** BIP-39 mnemonic for this wallet. */
@@ -436,7 +460,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         timestamp: Number.isFinite(createdAt) && createdAt > 0 ? createdAt : 0,
         amount: Math.abs(Number(t?.amount ?? 0)),
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: ARKADE_TRANSACTION_BTC,
         protocolData: t,
       }
     })
