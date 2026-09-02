@@ -27,13 +27,20 @@ host can observe; each carries its migration note.
   `SWAP_ALREADY_EXECUTED`), and a recovery record is persisted *before*
   execution so a failure between `initSwap` and `executeSwap` no longer strands
   an untrackable live swap.
+- **Flashnet history backfill verifies wallet ownership.** Server-nominated swap
+  hashes are recorded as outgoing only after Spark proves every spent token
+  output belonged to the active wallet.
 - **Policy bypasses closed:** a `['BIP21']`-scoped grant can no longer pay an
   arbitrary Lightning invoice via an embedded rail (every rail a BIP321 URI
   carries is checked); the policy evaluates the amount the invoice *encodes*,
   not the caller's declared amount; a `bitcoin:` URI address is validated so a
   Liquid address no longer routes as a Bitcoin L1 send; RGB assets resolve by
   contract id, not issuer-chosen ticker; no signing for a host-locked wallet;
-  quote expiry fails closed on a missing or non-finite `expires_at`.
+  quote expiry fails closed on a missing or non-finite `expires_at` on both RGB
+  swap backends.
+- **Boltz chain-swap responses are bound to the approved spend.** A maker funding
+  amount that differs from the requested satoshis is rejected, and empty claim
+  or refund broadcast transaction IDs no longer count as success.
 - Non-canonical zbase32 signature lengths are rejected; nsec/hex-rooted wallets
   (the default Arkade type) can now sign on every signing path.
 
@@ -66,8 +73,9 @@ host can observe; each carries its migration note.
   and do not blind-retry (the adapters that succeeded are already down).
 - **`connect()` tears down a live session first.** One extra `disconnect()` per
   reconnect; `isConnected()` inside an adapter's `connect()` is now always false.
-- **RGB money methods throw `NOT_CONNECTED`** when only a node URL is configured
-  and the adapter has not completed `connect()`. Read methods are unchanged.
+- **RGB node methods throw `NOT_CONNECTED`** when only a node URL is configured
+  and the adapter has not completed `connect()`; this applies to reads as well as
+  money methods.
 - **BOLT12 offers are no longer `direct` routes.** Nothing could pay one, and the
   Spark/Arkade gates forwarded `lno1…` to BOLT11-only or on-chain methods (lite
   mode auto-paid that). Offers still appear in `.routes`, never as `direct`.
@@ -82,8 +90,12 @@ host can observe; each carries its migration note.
 - Some calls now throw instead of returning success-shaped junk: sends with no
   transaction id, contentless broadcasts, malformed maker quotes, and list stubs
   that answered "empty" while disconnected.
-- Orchestra `X-Idempotency-Key` is a canonical content hash of the request body
-  rather than a per-call `crypto.randomUUID()`.
+- Internal cleanup centralizes RGB connection checks and default fee selection;
+  audit-history comments are trimmed to the shortest load-bearing rationale.
+- **BREAKING: `CreateQuoteParams` requires `attemptId`.** Generate it once with
+  `createOrchestraQuoteAttemptId()` for each intentional quote and reuse it for
+  retries. The quote idempotency key hashes canonical request content plus that
+  attempt; `submitOrder` remains a pure content hash of the deposit proof.
 
 ### Added
 - **`maxQuoteSlippageBps?: number`** on `KaleidoswapSwapConfig` and the RGB
@@ -93,6 +105,8 @@ host can observe; each carries its migration note.
   a grant field; BTC continues to use `maxAmountSat`.
 - **Swap recovery:** `listIncompleteSwaps()` and `resumeSwap(identifier,
   accessToken?)` on `ProtocolManager`, narrowed via `asSwapRecoveryOperations`.
+- **`createOrchestraQuoteAttemptId()`** uses the injected
+  `IRuntimeProvider.randomBytes` port; no platform RNG is accessed directly.
 - `refreshBalances()` exposes per-protocol refresh outcomes instead of
   swallowing a failed leg.
 - `prepare` hook: `npm install` from a git dependency now produces `dist/`.
@@ -103,15 +117,35 @@ host can observe; each carries its migration note.
 - Adapters no longer report success on failure: a contentless SDK send yielded
   `{ paymentHash: '', status: 'confirmed' }`; a failing history endpoint was
   swallowed, silently dropping every Lightning payment from the list.
-- Lightning preimage placed in `paymentHash` (Arkade); Spark token send reported
-  done with a sats transfer's id; Spark invoice-status lookup failure reported
-  as `pending`.
+- WDK BTC transaction rows now carry their domain asset, so an asset-scoped
+  history query retains RLN, native/wasm RGB-L1, Arkade and metadata-poor Liquid
+  activity instead of silently returning an empty list.
+- Lightning result mappings now follow the declared SDK shapes: Spark uses
+  `expiresAt`, request `id`, `createdAt`, decoded invoice amount and settlement
+  fee; Arkade reads settlement from transaction history; RLN derives invoice
+  payment hashes from BOLT11, reads wrapped payment status and `amt_msat`, stops
+  probing undeclared send-response amount/fee/preimage fields, and never exposes
+  a receiver `payment_secret` as a settlement preimage.
+- Spark WDK direct sends read `TransactionResult.hash` and remain pending until
+  observed; Spark token sends no longer report a sats transfer's id, and invoice
+  status lookup failures no longer report `pending`.
+- Arkade keeps Lightning preimages out of `paymentHash`.
 - RGB: `created_at` converted from seconds to ms; mainnet fee floor applied on
-  the three paths that bypassed it; invoice expiry derived from the invoice's
-  own `timestamp` (RLN WDK); BTC pending aligned with the owned-vs-unsettled
-  delta; the documented `jwt` node credential is forwarded; an unrecognised RGB
-  network fails closed; node access is revoked when `connect()` fails.
-- Liquid: L-BTC no longer listed twice when the policy asset is unknown.
+  the three paths that bypassed it and adapter defaults now share one policy;
+  invoice expiry is derived from the invoice's own `timestamp` on both node
+  backends; payment results prefer the encoded invoice amount over a stale caller
+  amount; a real `future: 0` balance is preserved; BTC pending aligns with the
+  owned-vs-unsettled delta; the documented `jwt` node credential is forwarded;
+  an unrecognised RGB network fails closed; node access is revoked when
+  `connect()` fails.
+- Lowercase `btc` is classified consistently by RGB adapters, swap policy and
+  the manager, so it uses satoshi caps instead of the non-BTC `AMOUNT_UNKNOWN`
+  path.
+- Liquid: L-BTC no longer lists twice when the policy asset is unknown, and
+  history infers an unambiguous policy asset from fee deltas during a network-info
+  outage.
+- Orchestra status lookups reject a wrapped null order instead of returning an
+  undefined status.
 - Arkade: `refreshBalances()` actually refreshes; `InvoiceRequest.layer` is
   honoured so a `BTC_LN` request returns a bolt11; undecodable invoice input is
   rejected; the incoming-funds listener slot is claimed before the awaited
