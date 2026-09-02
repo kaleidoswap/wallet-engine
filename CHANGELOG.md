@@ -7,7 +7,119 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
-_Nothing yet._
+Security audit remediation (#71). Items marked **BREAKING** change behaviour a
+host can observe; each carries its migration note.
+
+### Security
+- **Wallet identity is enforced across every singleton client manager.** The
+  Spark, Arkade, Arkade-swaps, Flashnet and Arkade Intents managers could hand
+  wallet B's session a client built for wallet A (spending A's funds), or let an
+  SDK handshake that outlived a teardown re-install itself and bring a "locked"
+  wallet back live and signing. The guard is now one module
+  (`src/lib/wallet-session.ts`: generation counter + in-flight slot keyed by
+  wallet identity) adopted by every wallet-scoped manager.
+- **Maker quotes are validated against the request.** A returned pair that
+  differs from the requested pair throws `QUOTE_ASSET_MISMATCH`; a from-leg
+  outside tolerance throws `QUOTE_AMOUNT_DIVERGENCE`; both legs must be positive
+  safe integers (`BAD_AMOUNT`). The request's asset IDs are authoritative on both
+  swap paths — the maker's echo is never trusted.
+- **Swap quotes cannot be executed twice or concurrently** (`SWAP_IN_FLIGHT`,
+  `SWAP_ALREADY_EXECUTED`), and a recovery record is persisted *before*
+  execution so a failure between `initSwap` and `executeSwap` no longer strands
+  an untrackable live swap.
+- **Policy bypasses closed:** a `['BIP21']`-scoped grant can no longer pay an
+  arbitrary Lightning invoice via an embedded rail (every rail a BIP321 URI
+  carries is checked); the policy evaluates the amount the invoice *encodes*,
+  not the caller's declared amount; a `bitcoin:` URI address is validated so a
+  Liquid address no longer routes as a Bitcoin L1 send; RGB assets resolve by
+  contract id, not issuer-chosen ticker; no signing for a host-locked wallet;
+  quote expiry fails closed on a missing or non-finite `expires_at`.
+- Non-canonical zbase32 signature lengths are rejected; nsec/hex-rooted wallets
+  (the default Arkade type) can now sign on every signing path.
+
+### Changed
+- **BREAKING: non-BTC swaps are denied unless the asset has a cap.** The spend
+  cap is sat-denominated but was compared against the raw base-unit
+  `fromAmount` of whatever asset the quote named. `executeSwap` now fails closed
+  for a non-BTC from-asset with no `maxAmountByAsset` entry (`AMOUNT_UNKNOWN`);
+  above its cap uses `AMOUNT_OVER_GLOBAL_LIMIT`. **Migration:** list each
+  swappable asset in `SigningPolicy.maxAmountByAsset`.
+- **BREAKING: maker from-leg divergence beyond `maxQuoteSlippageBps` is
+  rejected.** Default 100 bps (1%); `0` requires an exact match. A host that
+  previously accepted any maker adjustment now rejects beyond 1%.
+- **BREAKING: `RgbLibWasmAdapter.getBtcBalance()` reports vanilla sats only.**
+  Colored (RGB-allocated) sats are no longer summed in, matching the other
+  backends — BTC balances may decrease by that amount. They remain visible in
+  `getRgbDetailedBalance()`; spending one as plain BTC destroys the allocation.
+- **BREAKING: `listTransactions` is newest-first on every adapter**, and
+  `offset`/`limit` apply *after* ordering, so page 1 is the newest page
+  everywhere. Spark now honours `limit` (5 used to return 16). Hosts persisting
+  positional cursors must reset them.
+- **BREAKING: `TransactionStatus` gains `'unknown'`.** `getPaymentStatus`
+  returns it when the status lookup itself *throws*, instead of `'pending'`
+  (which made pollers wait forever on an already-failed payment). An answered
+  lookup with no matching payment still returns `'pending'`. **Migration:** add
+  the case to exhaustive switches; pollers should stop and surface a retry.
+- **BREAKING: `disconnectAll()` rejects** with `DISCONNECT_INCOMPLETE` when any
+  adapter teardown fails or times out. Every adapter is still attempted first. A
+  rejection means the wallet is **not** locked — do not present it as locked,
+  and do not blind-retry (the adapters that succeeded are already down).
+- **`connect()` tears down a live session first.** One extra `disconnect()` per
+  reconnect; `isConnected()` inside an adapter's `connect()` is now always false.
+- **RGB money methods throw `NOT_CONNECTED`** when only a node URL is configured
+  and the adapter has not completed `connect()`. Read methods are unchanged.
+- **BOLT12 offers are no longer `direct` routes.** Nothing could pay one, and the
+  Spark/Arkade gates forwarded `lno1…` to BOLT11-only or on-chain methods (lite
+  mode auto-paid that). Offers still appear in `.routes`, never as `direct`.
+- **`SendRoute.adapter` / `ReceiveRoute.adapter` are deprecated** — direct calls
+  bypass every policy gate. `resolveUnifiedSend().best` is a ranking hint, not
+  an authorization; authorize and execute through the manager.
+- `asRgbOperations()` verifies every promised method and throws naming the
+  missing one instead of returning a partial handle.
+- RGB history renders at each asset's own precision and can now fail on a
+  metadata lookup; test doubles for the rln client must implement
+  `getAssetMetadata`.
+- Some calls now throw instead of returning success-shaped junk: sends with no
+  transaction id, contentless broadcasts, malformed maker quotes, and list stubs
+  that answered "empty" while disconnected.
+- Orchestra `X-Idempotency-Key` is a canonical content hash of the request body
+  rather than a per-call `crypto.randomUUID()`.
+
+### Added
+- **`maxQuoteSlippageBps?: number`** on `KaleidoswapSwapConfig` and the RGB
+  adapter config. Invalid values fail with `BAD_QUOTE_TOLERANCE`.
+- **`maxAmountByAsset?: Record<string, string>`** on `SigningPolicy` — per-asset
+  base-unit caps as decimal strings, compared with `BigInt`. Global surface, not
+  a grant field; BTC continues to use `maxAmountSat`.
+- **Swap recovery:** `listIncompleteSwaps()` and `resumeSwap(identifier,
+  accessToken?)` on `ProtocolManager`, narrowed via `asSwapRecoveryOperations`.
+- `refreshBalances()` exposes per-protocol refresh outcomes instead of
+  swallowing a failed leg.
+- `prepare` hook: `npm install` from a git dependency now produces `dist/`.
+  Registry installs are unchanged; the build is skipped when TypeScript is
+  absent.
+
+### Fixed
+- Adapters no longer report success on failure: a contentless SDK send yielded
+  `{ paymentHash: '', status: 'confirmed' }`; a failing history endpoint was
+  swallowed, silently dropping every Lightning payment from the list.
+- Lightning preimage placed in `paymentHash` (Arkade); Spark token send reported
+  done with a sats transfer's id; Spark invoice-status lookup failure reported
+  as `pending`.
+- RGB: `created_at` converted from seconds to ms; mainnet fee floor applied on
+  the three paths that bypassed it; invoice expiry derived from the invoice's
+  own `timestamp` (RLN WDK); BTC pending aligned with the owned-vs-unsettled
+  delta; the documented `jwt` node credential is forwarded; an unrecognised RGB
+  network fails closed; node access is revoked when `connect()` fails.
+- Liquid: L-BTC no longer listed twice when the policy asset is unknown.
+- Arkade: `refreshBalances()` actually refreshes; `InvoiceRequest.layer` is
+  honoured so a `BTC_LN` request returns a bolt11; undecodable invoice input is
+  rejected; the incoming-funds listener slot is claimed before the awaited
+  subscribe.
+- Unified receive: BIP21 amounts parsed with a decimal grammar; the address is
+  percent-encoded in the generated URI.
+- Millisatoshi rendering standardized; lossy Spark token amount conversion is
+  rejected.
 
 ## [1.0.0-beta.65] - 2026-08-22
 
