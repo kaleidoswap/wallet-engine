@@ -378,7 +378,8 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const r: any = await this.node.sendPayment(body)
     return {
       paymentHash: r?.payment_hash ?? '',
-      preimage: r?.payment_secret,
+      // BOLT11's payment_secret is supplied by the receiver in the invoice; it
+      // is not the payment preimage and therefore is not proof of settlement.
       // The node's `SendPaymentResponse` carries no amount and no fee
       // (kaleido-sdk node-types.d.ts:3568-3576), and `PaymentResult.amount` is a
       // REQUIRED field. Falling back to `request.amount ?? 0` recorded a 0-sat
