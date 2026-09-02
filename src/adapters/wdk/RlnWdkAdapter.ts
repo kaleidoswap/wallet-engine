@@ -386,7 +386,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       // send for every amount-bearing invoice — which is the correct call pattern
       // here, since the adapter deliberately does not re-amount those. Read the
       // amount the invoice actually encodes; `decodeBolt11` is already in scope.
-      amount: Number(request.amount ?? decoded.amountSat ?? 0),
+      amount: Number(decoded.amountSat ?? request.amount ?? 0),
       // Still 0: nothing in the response reports the routing fee. A status
       // lookup is the only source, so callers must not read this as "free".
       fee: 0,

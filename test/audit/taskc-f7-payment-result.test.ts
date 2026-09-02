@@ -47,4 +47,10 @@ describe('AUDIT C-F7: sendPayment PaymentResult fidelity', () => {
     expect(r.status).toBe('confirmed')
     expect(r.amount).toBe(1000)
   })
+
+  it('records the invoice amount instead of a stale caller amount', async () => {
+    const adapter = connectedRln()
+    const r = await adapter.sendPayment({ invoice: 'lnbc10u1pabcdef', amount: 7 } as any)
+    expect(r.amount).toBe(1000)
+  })
 })
