@@ -268,16 +268,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Invoices -----------------------------------------------------------
-  /**
-   * Arkade on-chain receive is an address, not a bolt11 invoice (mirrors the
-   * native adapter) — EXCEPT when the caller asks for Lightning via the
-   * documented `InvoiceRequest.layer` selector. ARKADE declares the
-   * `lightning-receive` operation (capabilities/operations.ts), and
-   * `capabilities` exists "so the UI can gate actions"
-   * (IProtocolAdapter.ts:90-95); returning an Ark address for a BTC_LN request
-   * handed a caller a non-Lightning artifact under a flag that promised one — and
-   * a host rendering `invoice` as a Lightning QR showed an Ark address.
-   */
+  /** Honor the requested layer so Lightning callers never receive an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
     if (request.layer === 'BTC_LN') return this.createArkadeLightningInvoice(request)
@@ -335,10 +326,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       const invoiceBody = dest.toLowerCase().startsWith('lightning:') ? dest.slice('lightning:'.length) : dest
       try {
         const result: any = await swaps.sendLightningPayment({ invoice: invoiceBody })
-        // See the note on `ArkadeAdapter.sendPayment` (audit finding G-F11): the
-        // preimage is a secret and belongs in `PaymentResult.preimage`, not in the
-        // field hosts treat as the payment's public identifier and that
-        // `getPaymentStatus` searches history by.
+        // A preimage is settlement proof, not the public history identifier.
         if (!result?.txid && !result?.preimage) {
           throw new ProtocolError(
             'Arkade Lightning send returned no transaction id and no preimage',
@@ -378,13 +366,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // Off-chain Ark transfer to an Ark address (settles immediately, zero-conf UX).
     const r: any = await this.account.sendTransaction({ to: dest, value: request.amount })
     const hash = r?.hash ?? ''
-    // Same guard as `sendBtcOnchain` below, which was applying it to the SAME SDK
-    // call ten lines away. Without it, an SDK that resolves with a sparse object
-    // instead of throwing returned `{ status: 'confirmed', txid: '' }`: the caller
-    // believes funds were sent and confirmed, and holds no identifier to track or
-    // reconcile the payment. docs/wdk-parity.md:66-67 states an Ark send returns
-    // "a tx id/hash"; :68-70 states a missing one is a send error, never silent
-    // success. This is the shape accepted for Spark in 612b856.
+    // A successful send must be traceable and reconcilable.
     if (!hash) {
       throw new ProtocolError('Arkade send did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
     }
@@ -494,11 +476,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async listChannels(): Promise<any[]> {
-    // A disconnected adapter must not answer as if this were the wallet's state:
-    // a dashboard that skipped its own isConnected() gate renders "0 channels /
-    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
-    // array on the PROTOCOL having no channels, not on being disconnected, and
-    // every sibling read on these adapters already asserts (audit finding G-F9).
+    // Distinguish an unsupported channel model from an unavailable wallet.
     this.assertConnected()
     return [] // Arkade has no LN channels (LN via Boltz swaps)
   }

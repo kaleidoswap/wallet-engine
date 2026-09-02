@@ -1,14 +1,4 @@
-/**
- * RlnWdkAdapter
- * -------------
- * Wraps the WDK RGB-Lightning module (@kaleidorg/wdk-wallet-rln, over kaleido-sdk)
- * onto the `IProtocolAdapter` contract: BTC on-chain and Lightning, RGB assets
- * on-chain and over Lightning, plus channels and atomic swaps. The RLN account
- * talks to a remote RGB-Lightning node over HTTP (nodeUrl).
- *
- * No WDK/kaleido-sdk types cross the contract — node responses are read as `any`
- * and translated.
- */
+/** WDK RGB-Lightning adapter; SDK response types stay behind this boundary. */
 
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
 import {
@@ -125,15 +115,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   private makerUrl = ''
   private maxQuoteSlippageBps: number | undefined
 
-  /**
-   * RLN swaps need a maker. `BaseWdkAdapter.supportsSwaps()` returns the STATIC
-   * capability-manifest flag, so this adapter answered `true` on a config with no
-   * `makerUrl` while both swap entry points throw CONFIG
-   * ("RLN swaps require a makerUrl in the adapter config", :587-589) — and
-   * `ProtocolManager.getSwapQuote`/`executeSwap` gate on exactly this method
-   * before calling through. The native `RgbAdapter` sibling is config-dependent;
-   * this is that parity.
-   */
+  /** Swap capability also depends on a configured maker. */
   supportsSwaps(): boolean {
     return super.supportsSwaps() && !!this.makerUrl
   }
@@ -319,14 +301,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const d: any = isBolt11(invoice)
       ? await this.account.decodeLNInvoice(invoice)
       : await this.account.decodeRgbInvoice(invoice)
-    // An RGB on-chain invoice carries its requested amount in `assignment`
-    // (`DecodeRGBInvoiceResponse.assignment`, kaleido-sdk node-types.d.ts:2911-2927
-    // → `AssignmentFungible { type: 'Fungible', value }`). None of the other
-    // fields read below — `amt_msat`, `amount`, `asset_amount`, `payment_hash`,
-    // `payee_pubkey`, `expiry_sec` — exist on that response at all; they belong to
-    // `DecodeLNInvoiceResponse`. So without reading `assignment` an amount-bearing
-    // RGB invoice decoded to `asset_amount: undefined` and the confirmation screen
-    // had no amount to show: the user paid blind.
+    // RGB on-chain invoice amounts live in a typed fungible assignment.
     const assignment = d?.assignment as { type?: string; value?: unknown } | undefined
     const assignedAmount =
       assignment && typeof assignment === 'object' && assignment.type === 'Fungible'
@@ -340,11 +315,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
         : d?.amount,
       amountMsat: d?.amt_msat,
       description: d?.description,
-      // `expiry_sec` is a DURATION from the invoice's own `timestamp` (creation,
-      // unix seconds — both on `DecodeLNInvoiceResponse`, node-types.d.ts:2888-2906).
-      // Computing `Date.now() + expiry_sec` ignored `timestamp`, so an invoice
-      // created 2h ago with a 1h expiry decoded as expiring in ANOTHER hour: a dead
-      // invoice read as live to any caller gating a payment or refund on `expiresAt`.
+      // `expiry_sec` is a duration from the invoice's creation timestamp.
       expiresAt: d?.expiry_sec
         ? (d?.timestamp != null
             ? (Number(d.timestamp) + Number(d.expiry_sec)) * 1000
@@ -378,14 +349,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const r: any = await this.node.sendPayment(body)
     return {
       paymentHash: r?.payment_hash ?? '',
-      // BOLT11's payment_secret is supplied by the receiver in the invoice; it
-      // is not the payment preimage and therefore is not proof of settlement.
-      // The node's `SendPaymentResponse` carries no amount and no fee
-      // (kaleido-sdk node-types.d.ts:3568-3576), and `PaymentResult.amount` is a
-      // REQUIRED field. Falling back to `request.amount ?? 0` recorded a 0-sat
-      // send for every amount-bearing invoice — which is the correct call pattern
-      // here, since the adapter deliberately does not re-amount those. Read the
-      // amount the invoice actually encodes; `decodeBolt11` is already in scope.
+      // The invoice amount wins because amount-bearing invoices are not re-amounted.
       amount: Number(decoded.amountSat ?? request.amount ?? 0),
       // Still 0: nothing in the response reports the routing fee. A status
       // lookup is the only source, so callers must not read this as "free".
@@ -417,14 +381,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     const r: any = await this.account.listTransactions()
     const txs: any[] = r?.transactions ?? []
-    // Direction and amount come from received/sent, not from a transaction_type
-    // string: the node's enum is RgbSend | Drain | CreateUtxos | SendBtc |
-    // Incoming — there is no 'User' — and the schema has no `amount` field. The
-    // old predicate (`transaction_type === 'User' || t.amount < 0`) was therefore
-    // always false, so EVERY on-chain tx reported as a receive; and `received ??
-    // sent` always took `received`, which is 0 on a send. A full-wallet drain
-    // displayed in history as "received 0". Matches the sibling adapters
-    // (RgbLibWdkAdapter.ts:214, RgbLibWasmAdapter.ts:851-885).
+    // The node expresses direction and amount as received/sent deltas.
     const mapped = txs.map((t) => {
       const received = Number(t.received ?? 0)
       const sent = Number(t.sent ?? 0)
@@ -534,10 +491,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     this.assertConnected()
     const r: any = await this.account.sendBtc(params)
     const txid: string = r?.txid ?? ''
-    // A send that reports success with no transaction id can never be tracked or
-    // reconciled, and a status poll on `''` returns pending forever. The in-repo
-    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
-    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    // A successful send must be traceable and reconcilable.
     if (!txid) {
       throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_LN', 'SEND_ERROR')
     }

@@ -173,14 +173,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     this.connected = true
   }
 
-  /**
-   * Tear down symmetrically with `connect()`. The base implementation clears only
-   * this adapter's own account/manager/mnemonic — "a locked wallet must not be
-   * able to keep signing", per its doc comment — but `connect()` also handed the
-   * raw SparkWallet to the `sparkClientManager` singleton. Without releasing it
-   * there, the singleton keeps serving a live, signing-capable wallet long after
-   * the adapter reports disconnected.
-   */
+  /** Release the externally adopted signing wallet during teardown. */
   async disconnect(): Promise<void> {
     const adopted = (this.account as any)?._wallet
     try {
@@ -463,11 +456,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
           hash?: string
           fee?: bigint
         }
-        // A resolved SDK call is not proof the transfer exists. Without an id
-        // there is nothing to reconcile or retry against, so fail loud rather
-        // than hand the caller a success-shaped result with an empty
-        // paymentHash — the Spark *invoice* branch above already does exactly
-        // this ("returned no result"), and sendBtcOnchain does it too.
+        // A successful send must be traceable and reconcilable.
         const transferId = transfer?.hash ?? ''
         if (!transferId) {
           throw new ProtocolError(
@@ -766,11 +755,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   }
 
   async listChannels(): Promise<any[]> {
-    // A disconnected adapter must not answer as if this were the wallet's state:
-    // a dashboard that skipped its own isConnected() gate renders "0 channels /
-    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
-    // array on the PROTOCOL having no channels, not on being disconnected, and
-    // every sibling read on these adapters already asserts (audit finding G-F9).
+    // Distinguish an unsupported channel model from an unavailable wallet.
     this.assertConnected()
     return [] // Spark has no LN channels
   }
@@ -947,12 +932,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
             invalidateSparkBalanceCache()
             return { txId: success.txid }
           }
-          // No sats-leg fallback — see the note on `SparkAdapter.sendAsset`
-          // (audit finding G-F5). An empty `tokenTransactionSuccess` means the token
-          // leg did not succeed; returning a SATS transfer id as the result of a
-          // TOKEN send reports a success that did not happen, with the id of a
-          // different transfer, and skips `saveSentTokenRecord`. A genuinely bundled
-          // sats+token invoice succeeds on both legs, so `success` above covers it.
+          // Never report a sats-leg ID as proof that the token leg succeeded.
           throw new ProtocolError(
             'Spark invoice payment returned no token transfer result',
             'SPARK',

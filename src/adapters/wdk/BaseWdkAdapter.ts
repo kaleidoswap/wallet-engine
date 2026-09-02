@@ -1,15 +1,4 @@
-/**
- * BaseWdkAdapter
- * --------------
- * Shared base for the WDK-backed adapters. Every one wraps a lazily-loaded
- * `manager` + `account` pair and repeats the same connection bookkeeping, so this
- * class owns that once.
- *
- * It deliberately does NOT implement the data methods — those differ per protocol.
- * It provides the connection lifecycle, the connected-guard, the swap-capability
- * lookup, and the allowlisted escape hatch; subclasses set
- * `this.manager`/`this.account`/`this.connected` in their own `connect()`.
- */
+/** Shared connection lifecycle for WDK-backed adapters. */
 
 import { ProtocolType, ProtocolError } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
@@ -33,38 +22,20 @@ export abstract class BaseWdkAdapter {
     return this.connected
   }
 
-  /**
-   * Tear down a live session before a re-connect installs a new manager/account
-   * pair. Subclasses overwrite `this.manager`/`this.account` unconditionally in
-   * their own `connect()`, so without this the previous pair was abandoned
-   * UNDISPOSED — still holding keys, still able to sign — and for RGB-L1 two
-   * wallet instances raced on the same dataDir/IndexedDB.
-   *
-   * `ProtocolManager.connect()` calls `adapter.connect(config)` directly and never
-   * `adapter.disconnect()` (audit finding F-F6), so a wallet switch arrives here
-   * with the previous wallet still live. The native client managers already
-   * disconnect-then-reinit; this is that parity (audit finding G-F13).
-   *
-   * Call it AFTER config validation, so an invalid config cannot tear down a
-   * working session.
-   */
+  /** Release retained keys before replacing a live session; validate config first. */
   protected async releasePreviousConnection(): Promise<void> {
     if (!this.connected && !this.account && !this.manager) return
     try {
       await this.disconnect()
     } catch (error: unknown) {
-      // `disconnect()` revokes the local state synchronously before awaiting any
-      // third-party teardown, so a rejection here means only that the previous
-      // SDK's cleanup failed. That must not block the new connection.
+      // Local signing state is already revoked, so SDK cleanup cannot block reconnect.
       log.warn(`[${this.constructor.name}] Error tearing down the previous connection:`, error)
     }
   }
 
   /** Tear down the account + manager (whichever teardown hooks they expose) and reset state. */
   async disconnect(): Promise<void> {
-    // Revoke local signing capability synchronously. Third-party cleanup may
-    // reject or never settle; neither outcome may keep the adapter connected or
-    // leave its mnemonic reachable through this instance.
+    // Revoke local signing state before awaiting fallible third-party cleanup.
     const account = this.account
     const manager = this.manager
     this.account = null
@@ -92,12 +63,7 @@ export abstract class BaseWdkAdapter {
     }
   }
 
-  /**
-   * Dispatch a caller-supplied operation to the account ONLY if allowlisted.
-   * `operation` may be caller-influenced (deep links, chat/MCP args), so it never
-   * indexes the account directly — blocking meta members (`constructor`,
-   * `__proto__`, prototype methods) and any non-whitelisted method.
-   */
+  /** Dispatch caller-influenced operations only through an explicit allowlist. */
   protected async runAllowlistedOp(
     allowed: ReadonlySet<string>,
     operation: string,

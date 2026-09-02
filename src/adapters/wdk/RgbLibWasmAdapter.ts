@@ -75,12 +75,7 @@ function toRgbNetwork(network: string): string {
     case 'regtest':
       return 'Regtest'
     default:
-      // Fail CLOSED. Defaulting an unrecognised label to 'Mainnet' meant a host
-      // typo, or a newer network name rgb-lib does not enumerate ('testnet4'),
-      // silently derived MAINNET keys while `getConnectionInfo()` kept reporting
-      // the requested network — the user believes they are on a valueless
-      // network while handing out real mainnet receive addresses. Refuse to
-      // guess which chain a wallet is for.
+      // Never guess a chain for key and address derivation.
       throw new ProtocolError(
         `Unsupported RGB network '${network}' (expected mainnet, testnet, signet, or regtest)`,
         'RGB_L1',
@@ -359,11 +354,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   async listChannels(): Promise<unknown[]> {
-    // A disconnected adapter must not answer as if this were the wallet's state:
-    // a dashboard that skipped its own isConnected() gate renders "0 channels /
-    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
-    // array on the PROTOCOL having no channels, not on being disconnected, and
-    // every sibling read on these adapters already asserts (audit finding G-F9).
+    // Distinguish an unsupported channel model from an unavailable wallet.
     this.assertConnected()
     return []
   }
@@ -560,10 +551,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const signed = await this.account.signPsbt(unsigned)
     const txid: string = await this.account.sendBtcEnd(this.online, signed, false)
     await this.flushState()
-    // A send that reports success with no transaction id can never be tracked or
-    // reconciled, and a status poll on `''` returns pending forever. The in-repo
-    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
-    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    // A successful send must be traceable and reconcilable.
     if (!txid) {
       throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
     }

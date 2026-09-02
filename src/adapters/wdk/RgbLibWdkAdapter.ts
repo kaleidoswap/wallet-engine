@@ -75,14 +75,7 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       transportEndpoint: cfg.transportEndpoint,
     })
     this.account = await this.manager.getAccount()
-    // rgb-lib needs the wallet registered with the indexer before first use, and
-    // `getBtcBalance()` below depends on it. The old `.catch(() => {})` let
-    // connect() RESOLVE when registration failed (indexer 404/500, firewall), so
-    // `isConnected()` reported true and every later balance/history call operated
-    // on an unregistered wallet — the UI showed the wallet online while its data
-    // source was broken. Let the rejection fail connect(); `releasePreviousConnection`
-    // above means a failed connect leaves no half-built session behind, and the
-    // sibling `RgbLibWasmAdapter.connect` awaits its `goOnline` with no catch.
+    // Registration is part of readiness; an unregistered wallet cannot serve reads.
     await this.account.registerWallet?.()
     this.connected = true
   }
@@ -231,11 +224,7 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async listChannels(): Promise<unknown[]> {
-    // A disconnected adapter must not answer as if this were the wallet's state:
-    // a dashboard that skipped its own isConnected() gate renders "0 channels /
-    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
-    // array on the PROTOCOL having no channels, not on being disconnected, and
-    // every sibling read on these adapters already asserts (audit finding G-F9).
+    // Distinguish an unsupported channel model from an unavailable wallet.
     this.assertConnected()
     return []
   }
@@ -282,10 +271,7 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const r: any = await this.account.sendTransaction({ to: params.address, value: params.amount, feeRate: params.feeRate })
     const txid: string = typeof r === 'string' ? r : (r?.txid ?? r?.hash ?? '')
-    // A send that reports success with no transaction id can never be tracked or
-    // reconciled, and a status poll on `''` returns pending forever. The in-repo
-    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
-    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    // A successful send must be traceable and reconcilable.
     if (!txid) {
       throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
     }

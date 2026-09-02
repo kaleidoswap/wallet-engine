@@ -335,10 +335,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       this.account.transfer({ recipient: request.invoice.trim(), amount: request.amount })
     )
     const hash: string = r?.hash ?? ''
-    // A send that reports success with no transaction id can never be tracked or
-    // reconciled, and a status poll on `''` returns pending forever. The in-repo
-    // precedent is `ArkadeWdkAdapter.sendBtcOnchain`, which throws
-    // SEND_ERROR here; docs/wdk-parity.md:68-70 calls it "never silent success".
+    // A successful send must be traceable and reconcilable.
     if (!hash) {
       throw new ProtocolError('Liquid send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
     }
@@ -595,11 +592,7 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     throw new ProtocolError('Liquid has no invoices', 'LIQUID', 'NOT_SUPPORTED')
   }
   async listChannels(): Promise<any[]> {
-    // A disconnected adapter must not answer as if this were the wallet's state:
-    // a dashboard that skipped its own isConnected() gate renders "0 channels /
-    // 0 transfers" for a locked wallet. `listChannels`' JSDoc conditions the empty
-    // array on the PROTOCOL having no channels, not on being disconnected, and
-    // every sibling read on these adapters already asserts (audit finding G-F9).
+    // Distinguish an unsupported channel model from an unavailable wallet.
     this.assertConnected()
     return [] // no Lightning
   }
@@ -607,28 +600,12 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return this.listTransactions()
   }
   async listTransfers(): Promise<any> {
-    // Without this the null account produced an opaque `TypeError` instead of a
-    // ProtocolError NOT_CONNECTED (audit finding G-F9).
     this.assertConnected()
     return this.withLock(() => this.account.listTransactions())
   }
 
   // --- helpers ------------------------------------------------------------
-  /**
-   * The network's policy asset (L-BTC), or a hard failure.
-   *
-   * `getPolicyAsset()` deliberately swallows a `getNetworkInfo()` failure into
-   * `''` and leaves it uncached so the next call retries. That is fine as a
-   * caching decision but NOT as an input to a balance or history view: with
-   * `policy === ''`, `listAssets()` emitted the synthetic L-BTC entry under
-   * `id: ''` AND the raw policy-asset entry from `account.listAssets()` (the
-   * dedupe `if (a.asset_id === policy) continue` can never match), so the same
-   * funds were listed twice. Fail loudly instead — a retryable error beats a
-   * balance that double-counts (audit finding G-F14).
-   *
-   * Used by `listAssets` only. History keeps the soft lookup and falls back to an
-   * unambiguous fee-delta inference, so a momentary outage does not hide activity.
-   */
+  /** Require policy identity where ambiguity could double-count L-BTC. */
   private async requirePolicyAsset(): Promise<string> {
     const policy = await this.getPolicyAsset()
     if (!policy) {
