@@ -329,6 +329,56 @@ describe('refund guard', () => {
   })
 })
 
+describe('broadcast result integrity', () => {
+  const BASE = {
+    swapId: 'swap-1',
+    index: 0,
+    from: 'BTC' as const,
+    to: 'L-BTC' as const,
+    userLockAmount: 100_000,
+    serverLockAmount: 99_000,
+    claimTimeoutBlockHeight: 5000,
+    lockupAddress: 'bcrt1qlockup',
+    destinationAddress: 'el1qdestination',
+    lockupTxid: 'funding-txid',
+    createdAt: 1,
+    updatedAt: 1,
+    response: encode({ lockupDetails: {}, claimDetails: {} }),
+  }
+
+  function installContentlessBroadcast() {
+    const manager = boltzSwapClientManager as any
+    manager.sdk.SwapScript.fromChain = () => ({
+      constructClaim: async () => ({ broadcast: async () => '', hex: () => '', txid: () => '' }),
+      constructRefund: async () => ({ broadcast: async () => '', hex: () => '', txid: () => '' }),
+    })
+  }
+
+  it('does not report a claim when broadcast returns no transaction id', async () => {
+    const store = new BoltzChainSwapStore(new MemoryStorage())
+    await store.put({ ...BASE, phase: 'server_locked' })
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    installContentlessBroadcast()
+
+    await expect(swap.claim('swap-1')).rejects.toThrow(/claim transaction id/)
+    const record = await store.get('swap-1')
+    expect(record).toMatchObject({ phase: 'server_locked' })
+    expect(record).not.toHaveProperty('claimTxid')
+  })
+
+  it('does not report a refund when broadcast returns no transaction id', async () => {
+    const store = new BoltzChainSwapStore(new MemoryStorage())
+    await store.put({ ...BASE, phase: 'refundable' })
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    installContentlessBroadcast()
+
+    await expect(swap.refund('swap-1')).rejects.toThrow(/refund transaction id/)
+    const record = await store.get('swap-1')
+    expect(record).toMatchObject({ phase: 'refundable' })
+    expect(record).not.toHaveProperty('refundTxid')
+  })
+})
+
 describe('claim guards', () => {
   const BASE = {
     index: 0,

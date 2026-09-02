@@ -67,7 +67,7 @@ function toSats(value: unknown, field: string): number {
 }
 
 function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value.length === 0) {
+  if (typeof value !== 'string' || value.trim().length === 0) {
     throw new ProtocolError(`Chain swap response is missing '${field}'`, 'BTC', 'BAD_RESPONSE')
   }
   return value
@@ -388,11 +388,14 @@ export class BoltzChainSwap {
       ...this.txParams(record, key.secretKey),
       cooperative: false,
     })
-    const claimTxid = await tx.broadcast(
-      boltzSwapClientManager.getConfig().network,
-      this.config.bitcoinEsploraUrl ?? null,
-      this.config.liquidEsploraUrl ?? null,
-      null
+    const claimTxid = requireString(
+      await tx.broadcast(
+        boltzSwapClientManager.getConfig().network,
+        this.config.bitcoinEsploraUrl ?? null,
+        this.config.liquidEsploraUrl ?? null,
+        null
+      ),
+      'claim transaction id'
     )
     const updated: BoltzChainSwapRecord = {
       ...record,
@@ -421,11 +424,14 @@ export class BoltzChainSwap {
     const script = this.buildScript(record, 'lockup')
     const key = this.masterKey().deriveSwapKey(BigInt(record.index))
     const tx = await script.constructRefund(this.txParams(record, key.secretKey))
-    const refundTxid = await tx.broadcast(
-      boltzSwapClientManager.getConfig().network,
-      this.config.bitcoinEsploraUrl ?? null,
-      this.config.liquidEsploraUrl ?? null,
-      null
+    const refundTxid = requireString(
+      await tx.broadcast(
+        boltzSwapClientManager.getConfig().network,
+        this.config.bitcoinEsploraUrl ?? null,
+        this.config.liquidEsploraUrl ?? null,
+        null
+      ),
+      'refund transaction id'
     )
     const updated: BoltzChainSwapRecord = {
       ...record,
