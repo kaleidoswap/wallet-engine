@@ -4,6 +4,7 @@
 
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
+import { isBtcAssetId } from "../lib/asset-id";
 import { kaleidoClientManager } from "../lib/kaleido-client-manager";
 import {
   KaleidoError,
@@ -319,7 +320,7 @@ export class RgbAdapter implements IProtocolAdapter {
       const client = kaleidoClientManager.getClient();
 
       // Check if requesting BTC balance
-      if (assetId === "BTC" || assetId.toLowerCase() === "btc") {
+      if (isBtcAssetId(assetId)) {
         const btcBalance = await client.rln.getBtcBalance();
         return convertBtcBalance(btcBalance);
       }
@@ -428,7 +429,7 @@ export class RgbAdapter implements IProtocolAdapter {
         .filter((payment) => {
           const paymentAssetId = payment.asset_id as string | null | undefined;
           // Match BTC payments to BTC, RGB payments to their asset_id.
-          if (filter.asset === "BTC" || filter.asset?.toLowerCase() === "btc") {
+          if (isBtcAssetId(filter.asset)) {
             return !paymentAssetId;
           }
           return paymentAssetId === filter.asset;
@@ -437,7 +438,7 @@ export class RgbAdapter implements IProtocolAdapter {
           convertPaymentToTransaction(payment, precisionOf(payment.asset_id as string | null)),
         );
 
-      const isAssetBtc = filter.asset === "BTC" || filter.asset?.toLowerCase() === "btc";
+      const isAssetBtc = isBtcAssetId(filter.asset);
       const matchesSwapAsset = (swap: Record<string, unknown>): boolean => {
         const fromAsset = (swap.from_asset as string | null | undefined) ?? null;
         const toAsset = (swap.to_asset as string | null | undefined) ?? null;
@@ -491,8 +492,7 @@ export class RgbAdapter implements IProtocolAdapter {
     client: ReturnType<typeof kaleidoClientManager.getClient>,
     assetIds: (string | null | undefined)[],
   ): Promise<(assetId: string | null | undefined) => number> {
-    const isBtc = (id: string | null | undefined): boolean =>
-      !id || id === "BTC" || id.toLowerCase() === "btc";
+    const isBtc = (id: string | null | undefined): boolean => !id || isBtcAssetId(id);
 
     const wanted = [...new Set(assetIds.filter((id) => !isBtc(id)) as string[])];
     const entries = await Promise.all(
@@ -543,7 +543,7 @@ export class RgbAdapter implements IProtocolAdapter {
       };
 
       // Include asset fields if provided (for RGB Lightning invoices)
-      const isRgbInvoice = request.asset && request.asset !== "BTC" && request.asset !== "btc";
+      const isRgbInvoice = request.asset && !isBtcAssetId(request.asset);
 
       if (isRgbInvoice) {
         lnInvoiceParams.asset_id = request.asset;

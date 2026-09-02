@@ -17,6 +17,7 @@
 import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
 import { parseUnifiedReceiveURI, receiveMethodsOf } from '../receive/unifiedReceive'
+import { isBtcAssetId } from '../lib/asset-id'
 
 /**
  * Fund-moving / signing operations a policy can gate. `blindLiquidPset` and
@@ -154,7 +155,7 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
   // 1. Global per-transaction cap, regardless of grants/mode. When a cap is set for
   // an amount-op but the amount is unknown, fail CLOSED: an unknown amount must
   // never slip past a spend limit (e.g. an unresolved amountless BOLT11).
-  const isNonBtcSwap = req.operation === 'swap' && req.assetId != null && req.assetId !== 'BTC'
+  const isNonBtcSwap = req.operation === 'swap' && req.assetId != null && !isBtcAssetId(req.assetId)
   const hasGlobalCap = policy.maxAmountSat != null || policy.maxAmountByAsset != null
 
   if (isNonBtcSwap && hasGlobalCap) {

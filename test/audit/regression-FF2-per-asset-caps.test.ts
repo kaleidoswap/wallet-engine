@@ -53,6 +53,24 @@ describe("F-F2 per-asset spending caps", () => {
     expect(executed).toHaveLength(1);
   });
 
+  it("treats a lowercase BTC identifier as the satoshi path", async () => {
+    const { manager, executed } = await managerWith({ maxAmountSat: 100_000 });
+    await manager.executeSwap(quote("btc", 100_000));
+    await expect(manager.executeSwap(quote("btc", 100_001))).rejects.toMatchObject({
+      code: "AMOUNT_OVER_GLOBAL_LIMIT",
+    });
+    expect(executed).toHaveLength(1);
+  });
+
+  it("classifies lowercase BTC consistently inside the policy evaluator", () => {
+    expect(evaluatePolicy({
+      operation: "swap",
+      amountSat: 100_000,
+      assetId: "btc",
+      assetAmount: "100000",
+    }, { maxAmountSat: 100_000 })).toEqual({ allowed: true });
+  });
+
   it("allows a non-BTC swap under its base-unit cap", async () => {
     const { manager, executed } = await managerWith({
       maxAmountSat: 100_000,

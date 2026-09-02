@@ -36,6 +36,7 @@ import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
 import { decodeBolt11 } from '../lib/bolt11'
+import { isBtcAssetId } from '../lib/asset-id'
 import type {
   LiquidPsetReview,
   LiquidPsetSignRequest,
@@ -664,7 +665,7 @@ export class ProtocolManager {
     // oracle. Non-BTC swaps therefore carry their asset id and raw amount to the
     // policy, which applies an explicit `maxAmountByAsset` entry or keeps the
     // existing fail-closed AMOUNT_UNKNOWN denial when none exists.
-    const fromIsSats = quote.fromAsset === 'BTC'
+    const fromIsSats = isBtcAssetId(quote.fromAsset)
     this.enforce('swap', {
       amountSat: fromIsSats ? quote.fromAmount : undefined,
       assetId: fromIsSats ? undefined : quote.fromAsset,
