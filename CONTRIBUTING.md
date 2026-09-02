@@ -6,11 +6,18 @@ adapters, docs — are welcome.
 ## Development
 
 ```bash
-npm install
-npm run build      # tsc type-check + emit
-npm test           # vitest
-npm run test:watch # watch mode
+pnpm install --frozen-lockfile
+pnpm run build      # tsc type-check + emit
+pnpm test           # vitest
+pnpm run test:watch # watch mode
 ```
+
+`pnpm-lock.yaml` is the authoritative dependency lock. `package-lock.json`
+exists only because the live native-dependency integration job must use npm;
+it is generated, not hand-maintained. After changing dependencies and updating
+the pnpm lock, regenerate it with
+`npm install --package-lock-only --ignore-scripts --no-audit --no-fund`, then
+run `npm run check:lockfiles`.
 
 CI runs the build, the test suite (Node 20 & 22), and a production-dependency
 audit on every PR. Please make sure all three pass locally before opening a PR.

@@ -23,6 +23,9 @@ jobs:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
 
+      - name: Check lockfile consistency
+        run: npm run check:lockfiles
+
       - run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Type-check + build (tsc)

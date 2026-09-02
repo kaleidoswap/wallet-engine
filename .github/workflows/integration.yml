@@ -17,12 +17,16 @@ on:
       - 'src/**'
       - 'test/integration/**'
       - 'package.json'
+      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/integration.yml'
   pull_request:
     paths:
       - 'src/**'
       - 'test/integration/**'
       - 'package.json'
+      - 'package-lock.json'
+      - 'pnpm-lock.yaml'
       - '.github/workflows/integration.yml'
   workflow_dispatch:
     inputs:
@@ -51,9 +55,9 @@ jobs:
         with:
           node-version: 22
 
-      # npm, not pnpm: pnpm leaves the rgb-lib native dep unhoisted and
-      # `pnpm rebuild` no-ops on it, producing no .node artifact.
-      - run: npm install --ignore-scripts --no-audit --no-fund
+      # npm, not pnpm: pnpm leaves rgb-lib unhoisted, so its rebuild produces no
+      # .node artifact. `ci`, not `install`, reproduces the shipped dependency tree.
+      - run: npm ci --ignore-scripts --no-audit --no-fund
 
       # Only the RGB-L1 native bindings need lifecycle scripts (node-gyp build
       # against the prebuilt librgblibcffi). Rebuild that one package instead
