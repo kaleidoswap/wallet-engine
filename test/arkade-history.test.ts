@@ -9,6 +9,7 @@ import {
   commitmentIdRow,
   emptyIdRow,
   TS_1,
+  TS_2,
   TS_3,
 } from './fixtures/arkade'
 
@@ -73,5 +74,17 @@ describe('ArkadeWdkAdapter.listTransactions (issue #6)', () => {
     for (const tx of txs) {
       expect(tx.timestamp).toBeLessThan(Date.parse('2100-01-01'))
     }
+  })
+})
+
+describe('ArkadeWdkAdapter.getPaymentStatus SDK receipt shape', () => {
+  it('uses ArkTransaction history instead of probing fields on raw transaction hex', async () => {
+    const result = await adapterWith([sentSettled]).getPaymentStatus(sentSettled.key.arkTxid)
+    expect(result).toMatchObject({
+      paymentHash: sentSettled.key.arkTxid,
+      status: 'confirmed',
+      amount: 12_000,
+      timestamp: TS_2,
+    })
   })
 })
