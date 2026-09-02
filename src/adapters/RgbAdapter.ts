@@ -15,7 +15,6 @@ import {
   Layer as SdkLayer,
 } from "kaleido-sdk";
 import type {
-  CreateLNInvoiceResponse,
   DecodeLNInvoiceResponse,
   KeysendResponse,
   LNInvoiceRequest,
@@ -51,6 +50,7 @@ import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy"
 import { toSwapAmount, validateSwapQuoteTerms } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
 import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
+import { decodeBolt11Invoice } from "../lib/bolt11";
 import {
   convertBtcBalance,
   convertNodeAssetToUnified,
@@ -562,13 +562,12 @@ export class RgbAdapter implements IProtocolAdapter {
         }
       }
 
-      const lnInvoice = (await client.rln.createLNInvoice(
-        lnInvoiceParams,
-      )) as CreateLNInvoiceResponse & { payment_hash?: string };
+      const lnInvoice = await client.rln.createLNInvoice(lnInvoiceParams);
+      const paymentHash = decodeBolt11Invoice(lnInvoice.invoice).paymentHash;
 
       return {
         invoice: lnInvoice.invoice ?? "",
-        paymentHash: lnInvoice.payment_hash ?? "",
+        paymentHash,
         amount: request.amount,
         expiresAt: Date.now() + (request.expirySeconds || 3600) * 1000,
         description: request.description,

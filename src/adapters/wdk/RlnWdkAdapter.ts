@@ -34,13 +34,12 @@ import {
 import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
-import { isBolt11 } from '../../lib/bolt11'
+import { decodeBolt11, decodeBolt11Invoice, isBolt11 } from '../../lib/bolt11'
 import { assertSafeToSign } from '../../lib/ln-message-sign'
 import { mapRgbStatus, rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RLN_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { KaleidoswapSwap, type SwapQuoteRequest } from '../../swap/KaleidoswapSwap'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
-import { decodeBolt11 } from '../../lib/bolt11'
 import { MAINNET_FEE_FLOOR } from '../../lib/rgb-fee-policy'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
 import { roundedMsatToSat, toSafeAmountNumber } from '../../lightning/amounts'
@@ -274,9 +273,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
         asset_id: request.asset,
         ...(request.assetAmount != null ? { asset_amount: request.assetAmount } : {}),
       })
+      const invoice = String(inv?.invoice ?? '')
       return {
-        invoice: inv?.invoice ?? '',
-        paymentHash: inv?.payment_hash ?? '',
+        invoice,
+        paymentHash: decodeBolt11Invoice(invoice).paymentHash,
         amount: request.assetAmount,
         expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
         description: request.description,
@@ -304,9 +304,10 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
       amt_msat: request.amount != null ? request.amount * 1000 : undefined,
       expiry_sec: request.expirySeconds ?? 3600,
     })
+    const invoice = String(inv?.invoice ?? '')
     return {
-      invoice: inv?.invoice ?? '',
-      paymentHash: inv?.payment_hash ?? '',
+      invoice,
+      paymentHash: decodeBolt11Invoice(invoice).paymentHash,
       amount: request.amount,
       expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
       description: request.description,
