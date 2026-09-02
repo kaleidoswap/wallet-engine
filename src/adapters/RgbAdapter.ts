@@ -193,6 +193,8 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   private assertNodeConnected(): void {
+    // The shared manager can be initialized independently; require this adapter's
+    // own successful handshake before any node operation, especially money paths.
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
     }
@@ -609,17 +611,6 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    // MONEY PATH — gate on the adapter's own connection state, not merely on
-    // whether a node URL is configured. `hasNode()` reads the client manager's
-    // config; `isConnected()` also requires that THIS adapter completed a
-    // handshake and has not been disconnected. They diverge whenever the module
-    // singleton is initialised without a successful `connect()` — which 321ac98
-    // closed for the failed-connect route by resetting the manager, but which any
-    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
-    // A disconnected adapter must not be able to spend (audit finding G-F6).
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
     this.assertNodeConnected();
 
     try {
@@ -663,17 +654,6 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
-    // MONEY PATH — gate on the adapter's own connection state, not merely on
-    // whether a node URL is configured. `hasNode()` reads the client manager's
-    // config; `isConnected()` also requires that THIS adapter completed a
-    // handshake and has not been disconnected. They diverge whenever the module
-    // singleton is initialised without a successful `connect()` — which 321ac98
-    // closed for the failed-connect route by resetting the manager, but which any
-    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
-    // A disconnected adapter must not be able to spend (audit finding G-F6).
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
     this.assertNodeConnected();
 
     try {
@@ -987,17 +967,6 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async sendAsset(params: Record<string, unknown>): Promise<unknown> {
-    // MONEY PATH — gate on the adapter's own connection state, not merely on
-    // whether a node URL is configured. `hasNode()` reads the client manager's
-    // config; `isConnected()` also requires that THIS adapter completed a
-    // handshake and has not been disconnected. They diverge whenever the module
-    // singleton is initialised without a successful `connect()` — which 321ac98
-    // closed for the failed-connect route by resetting the manager, but which any
-    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
-    // A disconnected adapter must not be able to spend (audit finding G-F6).
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
     this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
@@ -1040,17 +1009,6 @@ export class RgbAdapter implements IProtocolAdapter {
     amount: number;
     feeRate?: number;
   }): Promise<unknown> {
-    // MONEY PATH — gate on the adapter's own connection state, not merely on
-    // whether a node URL is configured. `hasNode()` reads the client manager's
-    // config; `isConnected()` also requires that THIS adapter completed a
-    // handshake and has not been disconnected. They diverge whenever the module
-    // singleton is initialised without a successful `connect()` — which 321ac98
-    // closed for the failed-connect route by resetting the manager, but which any
-    // other caller of the exported `kaleidoClientManager.initialize()` reopens.
-    // A disconnected adapter must not be able to spend (audit finding G-F6).
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
     this.assertNodeConnected();
     try {
       const client = kaleidoClientManager.getClient();
