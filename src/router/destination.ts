@@ -112,23 +112,11 @@ export function classifyDestination(raw: string): ClassifiedDestination {
   if (RE.bip21.test(dest)) {
     const addr = dest.slice('bitcoin:'.length).split('?')[0]
     const lightningFallback = extractLightning(dest)
-    // BIP321 allows an address-less URI (`bitcoin:?lightning=…`). With no on-chain
-    // address, fail CLOSED rather than emit a `direct` route whose `value` is the
-    // empty string — that would let lite mode auto-select a send to an empty
-    // destination while dropping the embedded rails. Callers wanting those must go
-    // through `resolveUnifiedSend`; `lightningFallback` is still surfaced.
+    // Address-less BIP321 has no direct on-chain route; embedded rails remain.
     if (!addr) {
       return { kind: 'BIP21', layer: null, format: null, candidates: [], lightningFallback, value: '' }
     }
-    // The `bitcoin:` prefix must not buy an address a validation exemption. Every
-    // other branch below is an anchored matcher and anything unmatched falls
-    // through to UNKNOWN; without the same check here, `bitcoin:<anything>` yields
-    // a BTC_L1 route with `direct: true` for arbitrary text — and routes a Liquid
-    // address as an on-chain Bitcoin send. Fail CLOSED on an address we cannot
-    // positively identify as Bitcoin, exactly as the address-less form above does,
-    // while still surfacing `lightningFallback` so a caller can route that rail
-    // explicitly. (`resolveUnifiedSend` already re-classifies each rail and so was
-    // never affected; this makes the two entry points agree.)
+    // A `bitcoin:` prefix cannot exempt an address from strict BTC validation.
     if (!RE.btc.test(addr)) {
       return { kind: 'BIP21', layer: null, format: null, candidates: [], lightningFallback, value: addr }
     }

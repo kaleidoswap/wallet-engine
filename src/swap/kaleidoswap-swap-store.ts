@@ -47,11 +47,7 @@ export function kaleidoswapNow(): number {
   return getPlatform()?.runtime.now() ?? Date.now()
 }
 
-/**
- * Wallet-scoped swap records. A missing wallet identity deliberately disables
- * persistence because a globally persisted key could leak records after a
- * wallet switch; the current instance still gets an isolated memory namespace.
- */
+/** Missing wallet identity disables persistence to prevent cross-wallet records. */
 export class KaleidoswapSwapStore {
   private readonly prefix: string
   private readonly persistent: boolean

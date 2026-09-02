@@ -1,16 +1,4 @@
-/**
- * Unified Receive URI (BIP321)
- * ----------------------------
- * Builds ONE QR payload any wallet can pay, while Kaleido-aware wallets get the
- * richer multi-protocol options. The base is a BIP321 `bitcoin:` URI — an optional
- * on-chain address in the path plus payment methods as query params (`lightning=`,
- * `lno=`), with unknown params ignored by other wallets, so it stays
- * backward-compatible with BIP21.
- *
- * Per BIP321 the address MAY be omitted, so a lite wallet with no on-chain address
- * can still publish one QR. Ark / Spark / Liquid / RGB ride as extra params only
- * Kaleido wallets read. Pure + dependency-free.
- */
+/** Build and parse BIP321 receive URIs with optional Kaleido-specific rails. */
 
 export interface UnifiedReceiveParams {
   /** On-chain BTC address. OPTIONAL under BIP321 — omit for a LN/asset-only QR. */
@@ -49,14 +37,7 @@ const K = {
   assetAmount: 'assetamount',
 } as const
 
-/**
- * Build a single BIP321 `bitcoin:` URI carrying every available receive method. The
- * address is optional; at least one of (address | lightning | lno | spark | ark |
- * liquid | rgb) must be present.
- *
- * e.g. `bitcoin:bc1q...?amount=0.001&lightning=lnbc...&spark=spark1...`
- *      `bitcoin:?lightning=lnbc...&liquid=lq1...`  (address omitted)
- */
+/** Build one BIP321 URI; the address is optional but some receive rail is required. */
 export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   const hasMethod =
     !!p.btcAddress ||
@@ -92,13 +73,7 @@ export function buildUnifiedReceiveURI(p: UnifiedReceiveParams): string {
   }
 
   const qs = params.toString()
-  // BIP321: `bitcoin:` + optional address + optional `?params`. The address is
-  // percent-encoded like every other field: interpolated raw, an address holding
-  // a `?` or `&` injects query params into our own QR — a caller-supplied
-  // `bc1qGOOD?lightning=lnbcATTACKER` produced a URI whose `lightning=` rail we
-  // never set and whose `amount=` was swallowed into the injected value. Normal
-  // base58/bech32 addresses contain no reserved characters, so their encoding is
-  // a no-op and existing QRs are byte-for-byte unchanged.
+  // Encode the path so reserved characters cannot inject payment rails.
   return `bitcoin:${encodeURIComponent(p.btcAddress ?? '')}${qs ? `?${qs}` : ''}`
 }
 
@@ -111,9 +86,7 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
   const params = new URLSearchParams(m[2] ?? '')
   return {
     btcAddress,
-    // Junk, negative, non-decimal or out-of-range `amount=` surfaces as
-    // `undefined`, never as a number flowing into a send. BTC amounts carry at
-    // most 8 decimals (one satoshi) and never exceed max supply.
+    // Invalid BTC amounts stay undefined rather than flowing into a send.
     amountBtc: toDecimalAmount(params.get('amount'), { maxDecimals: 8, max: MAX_BTC }),
     label: params.get('label') ?? undefined,
     lightningInvoice: params.get(K.lightning) ?? undefined,
@@ -128,14 +101,7 @@ export function parseUnifiedReceiveURI(uri: string): UnifiedReceiveParams | null
   }
 }
 
-/**
- * BIP21/BIP321 amounts are written as a plain non-negative decimal. `Number()`
- * alone also accepts hex (`0x10` → 16), exponent (`1e300`), sign, and surrounding
- * whitespace — none of which a spec-compliant wallet emits, and all of which make
- * this engine read a different amount from the same QR than every other wallet
- * does. Match the grammar explicitly and reject anything else, so a hostile or
- * malformed URI surfaces as `undefined` rather than as an attacker-chosen number.
- */
+/** Match the BIP21 decimal grammar instead of `Number()`'s hex/exponent forms. */
 const DECIMAL_AMOUNT = /^\d+(?:\.\d+)?$/
 
 function toDecimalAmount(v: string | null, opts: { maxDecimals?: number; max?: number } = {}): number | undefined {
@@ -148,11 +114,7 @@ function toDecimalAmount(v: string | null, opts: { maxDecimals?: number; max?: n
   return n
 }
 
-/**
- * Percent-decode the URI path. Malformed encoding (a hostile QR ending in a bare
- * `%`) must not throw out of the parser — fall back to the raw text, matching how
- * `extractLightning` in the destination classifier handles the same hazard.
- */
+/** Malformed path encoding falls back to raw text instead of aborting a scan. */
 function decodePath(raw: string): string {
   try {
     return decodeURIComponent(raw)
@@ -170,12 +132,8 @@ function formatBtc(amountBtc: number): string {
 }
 
 /**
- * The distinct payment methods present in a parsed unified URI.
- *
- * A unified URI may carry several independent methods, and they are NOT
- * cryptographically bound to each other — a scanned QR could pair an address with
- * an unrelated invoice. Consumers MUST present the methods and let the user/router
- * choose explicitly, never silently auto-paying a different method than intended.
+ * List independent, unbound payment rails so callers can authorize the selected
+ * one instead of silently auto-paying another.
  */
 export function receiveMethodsOf(p: UnifiedReceiveParams): Array<keyof UnifiedReceiveParams> {
   const keys: Array<keyof UnifiedReceiveParams> = [

@@ -1,19 +1,4 @@
-/**
- * Shared `TransactionFilter` application for `IProtocolAdapter.listTransactions`.
- *
- * `listTransactions(filter?)` accepts a `TransactionFilter`
- * (`asset`/`type`/`status`/`fromTimestamp`/`toTimestamp`/`limit`/`offset`), but
- * five adapters named the parameter `_filter` and discarded it, and two more
- * pushed limit/offset into a per-leg RPC without slicing the MERGED result. A host
- * paginating with `{ limit: 20, offset: 20 }` therefore got the full unfiltered
- * list back — page 2 was page 1 — with no signal that the filter had been ignored
- * (audit finding G-F8).
- *
- * The adapter contract specifies newest-first ordering. Sorting here before
- * slicing makes pagination deterministic even when an SDK returns oldest-first.
- *
- * Pure: same input, same output, no `this`, no I/O.
- */
+/** Shared newest-first filtering and pagination for adapter transaction lists. */
 
 import type { TransactionFilter, UnifiedTransaction } from '../types/base'
 

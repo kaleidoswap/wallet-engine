@@ -253,12 +253,8 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
       return deny('DEST_NOT_ALLOWLISTED', `destination not in grant '${grant.id}' allowlist`)
     }
     if (grant.allowedDestinationKinds) {
-      // A BIP321 URI is not one destination: it can carry a Lightning invoice, a
-      // BOLT12 offer, and Spark/Ark/Liquid/RGB addresses alongside the on-chain
-      // one, and the router will pay any of them — ranking Lightning FIRST. So
-      // classifying only the outer string let a grant scoped to 'BIP21' execute
-      // an attacker-chosen BOLT11 that the same grant denied when pasted bare.
-      // Require EVERY rail the URI offers to be a kind this grant allows.
+      // Embedded rails are independent destinations; checking only the outer
+      // BIP321 URI would let a disallowed invoice bypass the grant.
       for (const kind of destinationKindsOf(req.destination)) {
         if (!grant.allowedDestinationKinds.includes(kind)) {
           return deny('DEST_KIND_NOT_ALLOWED', `destination kind '${kind}' not allowed by grant '${grant.id}'`)

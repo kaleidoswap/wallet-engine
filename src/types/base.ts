@@ -51,56 +51,18 @@ export interface UnifiedAsset {
   metadata?: Record<string, any>
 }
 
-/**
- * An asset's balance in that asset's own base units.
- *
- * These field meanings were unstated for long enough that two converters in this
- * one repository diverged on them (audit finding C-F4: the legacy RGB converters
- * emitted `total = settled, pending = future`, so a UI summing `total + pending`
- * double-counted and an unconfirmed receive was invisible). The semantics below
- * are the ones `RgbCore.rgbAssetBalance` — the shared source of truth for the WDK
- * RGB adapters — has always implemented, and that the legacy converters were
- * aligned onto in commit 5f38ec5.
- *
- * `total` and `pending` OVERLAP by design. `pending` is a *component* of `total`,
- * not an addition to it, so `total + pending` is never a meaningful figure.
- */
+/** Asset base units; `pending` overlaps `total` and must not be added to it. */
 export interface AssetBalance {
-  /**
-   * Everything the wallet OWNS, including amounts not yet settled — i.e. the
-   * projected balance once every pending transaction confirms. A just-received,
-   * unconfirmed asset counts here.
-   *
-   * NOT the confirmed-only figure, and NOT `available + pending`.
-   */
+  /** Projected owned balance after pending transactions settle. */
   total: number
-  /**
-   * What can be spent RIGHT NOW. Excludes unconfirmed receives and anything
-   * locked. Always `<= total`.
-   */
+  /** Currently spendable balance; always `<= total`. */
   available: number
-  /**
-   * The unsettled DELTA — how much of `total` has not confirmed yet. Zero for a
-   * fully settled balance.
-   *
-   * NOT the projected total (that is `total`), and not a second bucket to add to
-   * it. Producers with no notion of unconfirmed funds report 0.
-   */
+  /** Unsettled component already included in `total`. */
   pending: number
-  /**
-   * Owned but not spendable for a reason other than confirmation — e.g. an RGB
-   * off-chain outbound capacity, or a token amount committed elsewhere. Optional
-   * because most producers have no such concept. Counted inside `total`.
-   */
+  /** Owned but unavailable for a reason other than confirmation. */
   locked?: number
 
-  /**
-   * `total` rendered at the ASSET'S OWN precision via `formatAmount`, e.g. a
-   * precision-0 asset holding 1,000,000 units renders "1000000", not "0.01000000".
-   * Producers that do not know the asset's precision default to 8 (the BTC
-   * convention) — which is correct for sats and wrong for everything else, so a
-   * producer that CAN resolve the real precision must.
-   */
+  /** `total` rendered at the asset's precision. */
   totalDisplay: string
   /** `available` rendered the same way as `totalDisplay`. */
   availableDisplay: string

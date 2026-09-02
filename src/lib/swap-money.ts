@@ -1,19 +1,4 @@
-/**
- * swap-money
- * ----------
- * Fail-closed coercion for money fields arriving from the maker API.
- *
- * Extracted from `KaleidoswapSwap` so the two code paths that consume the SAME
- * maker responses coerce them the same way. They did not: the WDK path
- * (`src/swap/KaleidoswapSwap.ts`) has coerced every amount, fee, price and
- * expiry since the swap hardening, while the native path
- * (`RgbAdapter.getSwapQuote` / `getSwapStatus`) took each field raw off the wire
- * — so a negative `final_fee` and an amount past 2^53 both passed through
- * unchecked on one path and were rejected on the other (audit finding E-F4).
- *
- * This module also owns quote/request validation. Keeping coercion and authority
- * checks at one boundary prevents the native and WDK maker paths from drifting.
- */
+/** Shared fail-closed money coercion and quote binding for both maker paths. */
 
 import { ProtocolError } from '../types/base'
 
@@ -40,18 +25,7 @@ export interface ValidatedSwapTerms {
   toAmount: number
 }
 
-/**
- * Coerce an SDK money field to a number, failing CLOSED on values that would
- * silently corrupt: `NaN`/`Infinity` (a renamed/missing field), a negative
- * value (a hostile/buggy maker returning a negative fee/amount/price that would
- * poison downstream net-amount math), or magnitudes past `Number.MAX_SAFE_INTEGER`
- * where JS would lose integer precision. Every field this coerces — amounts,
- * fees, price, expiry timestamp — is non-negative by definition. Money must
- * never flow through as a quietly-wrong number.
- *
- * Note the missing-field case is deliberate rather than defaulted: a counterparty
- * must not be able to switch off a safety check by leaving a field out.
- */
+/** Reject non-finite, negative, or precision-losing maker money fields. */
 export function toSwapAmount(value: unknown, field: string): number {
   const n = Number(value)
   if (!Number.isFinite(n)) {
@@ -100,14 +74,7 @@ function quoteTolerance(value: number | undefined): number {
   return tolerance
 }
 
-/**
- * Bind maker-authored quote terms to the caller's request.
- *
- * Asset ids must match exactly. The returned from-leg may differ only within
- * `maxQuoteSlippageBps`; the to-leg is the maker's price and is shape-checked,
- * not compared to a caller price expectation. Returned asset ids are validated
- * but the request's ids are always emitted as the authoritative values.
- */
+/** Bind maker assets exactly and limit from-leg divergence to caller policy. */
 export function validateSwapQuoteTerms(
   requested: RequestedSwapTerms,
   returned: ReturnedSwapTerms,

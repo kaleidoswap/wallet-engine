@@ -1,13 +1,4 @@
-/**
- * CrossProtocolRouter
- * -------------------
- * Sits ON TOP of the adapters and chooses BETWEEN protocols: given a destination
- * or receive intent, returns the protocol(s) that can fulfil it, filtered to what
- * is registered and connected. This is what makes lite mode possible.
- *
- * Reads the capability manifest and the destination classifier — never adapter
- * internals.
- */
+/** Route destinations through connected adapters using capability data. */
 
 import { ProtocolAdapterRegistry, IProtocolAdapter } from '../adapters/IProtocolAdapter'
 import { ProtocolType, Layer } from '../types/base'
@@ -22,12 +13,7 @@ import {
   railOfKind,
 } from './preference'
 
-/**
- * Whether `protocol` can pay `dest` DIRECTLY (no swap), per the capability
- * manifest. Reads capability flags rather than exact layer strings, so a protocol
- * reaching a surface by another path (Spark paying on-chain via a deposit/exit) is
- * still recognised.
- */
+/** Capability-based direct settlement, including alternate protocol paths. */
 function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination): boolean {
   const caps = getCapabilities(protocol)
   switch (dest.kind) {
@@ -35,12 +21,7 @@ function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination):
     case 'LN_ADDRESS':
       return caps.supportsLightning
     case 'BOLT12':
-      // Paying an OFFER is a distinct capability from paying an invoice, and no
-      // adapter has it (finding B-F5). Certifying these off `supportsLightning`
-      // made `best` — the route lite mode auto-pays — a route guaranteed to fail
-      // or, worse, to pay the wrong rail: Spark's `startsWith("ln")` gate forwards
-      // an `lno1…` to BOLT11-only `payLightningInvoice`, and both Arkade matchers
-      // let it fall through to an ON-CHAIN send to the offer string.
+      // BOLT12 payment is distinct from generic Lightning support.
       return caps.supportsLightning && caps.supportsBolt12
     case 'BTC_ONCHAIN':
     case 'BIP21':
@@ -60,10 +41,7 @@ function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination):
 
 export interface SendRoute {
   protocol: ProtocolType
-  /**
-   * @deprecated Calling this live adapter bypasses every `ProtocolManager`
-   * policy gate. Execute fund-moving operations through `ProtocolManager`.
-   */
+  /** @deprecated Direct calls bypass `ProtocolManager` policy gates. */
   adapter: IProtocolAdapter
   layer: Layer | null
   /** True when this protocol can pay the destination directly (no swap). */
@@ -80,10 +58,7 @@ export interface SendResolution {
 
 export interface ReceiveRoute {
   protocol: ProtocolType
-  /**
-   * @deprecated This is a live raw adapter. Use `ProtocolManager` operation
-   * methods whenever an action can sign or move funds.
-   */
+  /** @deprecated Use policy-checked manager methods for signing or funds. */
   adapter: IProtocolAdapter
   layer: Layer
 }
@@ -101,11 +76,7 @@ export interface UnifiedSendResolution {
   source: UnifiedReceiveParams | null
   /** Every payable rail×protocol route, ranked by preference (best first). */
   routes: UnifiedSendRoute[]
-  /**
-   * Highest-ranked direct route, or null. This is a ranking hint, not an
-   * authorisation: consult the policy-checked `ProtocolManager` before paying.
-   * See SECURITY.md: consumers must not silently auto-pay one URI method.
-   */
+  /** Highest-ranked direct route; a ranking hint, not payment authorization. */
   best: UnifiedSendRoute | null
 }
 

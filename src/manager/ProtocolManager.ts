@@ -283,18 +283,8 @@ export class ProtocolManager {
         throw new ProtocolError(`Connection invalidated: ${protocol}`, protocol, 'CONNECTION_INVALIDATED')
       }
 
-      // Tear the live session down before installing a new one. Without this the
-      // previous wallet's client was simply dropped undisposed — the mechanism
-      // that made the A7 cross-wallet leak deterministic (audit finding F-F6).
-      //
-      // Bounded, and its failure is logged rather than propagated: every
-      // adapter's `disconnect()` revokes local signing capability synchronously
-      // before awaiting any third-party teardown, so a rejection here means only
-      // that the OLD SDK's cleanup failed. Refusing the new connection over that
-      // would leave the host unable to switch wallets because the wallet it is
-      // leaving is wedged. Same policy as the adapter-side
-      // `BaseWdkAdapter.releasePreviousConnection()` (32eea17), which this makes
-      // redundant-but-harmless: that hook early-returns once the manager has run.
+      // Local teardown revokes signing synchronously; log bounded SDK cleanup
+      // failure so a wedged old client cannot prevent a wallet switch.
       if (adapter.isConnected()) {
         try {
           await this.disconnectAdapterBounded(adapter)
@@ -341,25 +331,7 @@ export class ProtocolManager {
     }
   }
 
-  /**
-   * Tear down every registered adapter. This is the LOCK PATH — the CHANGELOG
-   * names it as such, and a host calls it when the user locks the wallet.
-   *
-   * Every adapter is attempted, in parallel, under the same {@link
-   * DISCONNECT_TIMEOUT_MS} bound as `disconnect(protocol)`, so one hung SDK
-   * cannot stop the others being torn down. Routing is invalidated
-   * synchronously, before any third-party cleanup is awaited.
-   *
-   * REJECTS when any adapter failed or timed out, naming them, with the
-   * individual reasons on `details`. It previously resolved and only logged
-   * those failures, so a host awaiting it showed a locked wallet while a
-   * still-connected adapter went on signing — the exact state this method exists
-   * to prevent, reported as success. Resolution now means every adapter really
-   * is down; a rejection means the host must not present the wallet as locked.
-   *
-   * A rejection is not a reason to retry blindly: the successful adapters are
-   * already torn down, and `getAllConnectionInfo()` reports which are not.
-   */
+  /** Tear down every adapter; reject if any remain live so lock cannot lie. */
   async disconnectAll(): Promise<void> {
     const adapters = this.registry.getAll()
     for (const adapter of adapters) this.bumpConnectionGeneration(adapter.protocolName)
@@ -474,20 +446,7 @@ export class ProtocolManager {
     return this.getActiveAdapterUnchecked().sendPayment(request)
   }
 
-  /**
-   * Sat amount a send will actually move, for policy evaluation (finding F-F1).
-   *
-   * The INVOICE wins whenever it encodes an amount. The adapters forward the
-   * caller's `amount` only for amountless invoices — both send paths gate on
-   * `decodeBolt11(...).amountMsat == null`, so stale UI state or WebLN args cannot
-   * silently re-amount a payment. Preferring `request.amount` here evaluated a
-   * number the adapters discard: a caller could pass a 1,000,000-sat invoice with
-   * `amount: 500` and clear a 1,000-sat cap while the wallet paid the full
-   * 1,000,000.
-   *
-   * Undefined only for a truly amountless invoice with no explicit amount — which
-   * the policy engine treats as unknown and denies whenever a cap is set.
-   */
+  /** Invoice amount wins because amount-bearing invoices ignore caller overrides. */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
     const invoiceAmountSat = decodeBolt11(request.invoice).amountSat
     if (invoiceAmountSat != null) return invoiceAmountSat
@@ -652,19 +611,8 @@ export class ProtocolManager {
 
   async executeSwap(quote: Quote): Promise<SwapResult> {
     const receiverAddress = (quote as Quote & { receiverAddress?: unknown }).receiverAddress
-    // `Quote.fromAmount` is in RAW BASE UNITS of `quote.fromAsset` (documented on
-    // `QuoteRequest`, types/base.ts:233-238, and on the swap boundary,
-    // KaleidoswapSwap.ts:11-16) — satoshis ONLY when the from-asset is BTC.
-    // `PolicyRequest.amountSat` is satoshis (policy/index.ts:30). Passing one as
-    // the other made a sat-denominated cap meaningless for every non-BTC
-    // from-asset: `{ maxAmountSat: 100_000 }` allowed a quote of
-    // `{ fromAsset: 'XAUT', fromAmount: 90_000 }` — thousands of dollars, millions
-    // of sats — because 90_000 <= 100_000 numerically.
-    //
-    // A sat-denominated cap cannot bound an arbitrary asset without a price
-    // oracle. Non-BTC swaps therefore carry their asset id and raw amount to the
-    // policy, which applies an explicit `maxAmountByAsset` entry or keeps the
-    // existing fail-closed AMOUNT_UNKNOWN denial when none exists.
+    // A satoshi cap cannot bound another asset without a price oracle; send its
+    // raw base units to the per-asset policy instead.
     const fromIsSats = isBtcAssetId(quote.fromAsset)
     this.enforce('swap', {
       amountSat: fromIsSats ? quote.fromAmount : undefined,
