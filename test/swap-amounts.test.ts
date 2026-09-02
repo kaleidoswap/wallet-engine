@@ -158,6 +158,16 @@ describe('KaleidoswapSwap.executeSwap quote binding', () => {
     expect(ordered).toBe(false)
   })
 
+  it.each([0, NaN])('rejects an unusable expiry (%s) before ordering', async (expiresAt) => {
+    let ordered = false
+    const swap = new KaleidoswapSwap({} as any, { baseUrl: 'http://localhost' })
+    ;(swap as any).proto = { swap: async () => ((ordered = true), FILL) }
+    await expect(
+      swap.executeSwap({ ...APPROVED, id: `bad-expiry-${String(expiresAt)}`, expiresAt } as any),
+    ).rejects.toThrow(/expir/i)
+    expect(ordered).toBe(false)
+  })
+
   it('rejects a quote without an rfq id', async () => {
     const swap = swapWithSwapResponse(FILL)
     await expect(swap.executeSwap({ ...APPROVED, id: '' } as any)).rejects.toThrow(/rfq/i)

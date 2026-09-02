@@ -161,7 +161,10 @@ export class KaleidoswapSwap {
     if (!(quote.fromAmount > 0) || !(quote.toAmount > 0)) {
       throw new ProtocolError('Swap execution requires the approved quote amounts', 'RGB_LN', 'NO_AMOUNT')
     }
-    if (quote.expiresAt > 0 && Date.now() > quote.expiresAt) {
+    if (!Number.isFinite(quote.expiresAt) || quote.expiresAt <= 0) {
+      throw new ProtocolError('Approved quote has no usable expiry — request a fresh quote', 'RGB_LN', 'QUOTE_EXPIRED')
+    }
+    if (Date.now() > quote.expiresAt) {
       throw new ProtocolError('Approved quote has expired — request a fresh quote', 'RGB_LN', 'QUOTE_EXPIRED')
     }
     if (!this.store.tryClaim(quote.id)) {
