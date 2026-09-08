@@ -391,6 +391,90 @@ describe('RgbLibWasmAdapter', () => {
     await adapter.disableVssBackup()
     expect(seen).toEqual({ restored: true, disabled: true })
   })
+
+  describe('issueAssetNia', () => {
+    it('normalizes a freshly issued asset into the RGB_L1 profile', async () => {
+      let flushed = false
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: { settled: 1000, spendable: 1000 } }),
+        issueAssetNia: () => ({
+          assetId: 'rgb:NEW',
+          ticker: 'NEW',
+          name: 'New Asset',
+          precision: 2,
+          balance: { settled: 500, spendable: 500 },
+        }),
+        flush: async () => {
+          flushed = true
+        },
+      })
+      const asset = await adapter.issueAssetNia({ ticker: 'NEW', name: 'New Asset', precision: 2, amounts: [500] })
+      expect(asset).toMatchObject({ id: 'rgb:NEW', ticker: 'NEW', precision: 2, protocol: 'RGB_L1' })
+      expect(asset.balance.total).toBe(500)
+      // Issuance mutates RGB state, which cannot be rebuilt from the seed.
+      expect(flushed).toBe(true)
+    })
+
+    it('reads through the prototype getters of a wasm-bindgen instance', async () => {
+      // rgb-lib-wasm returns a class instance with no enumerable own
+      // properties: spreading or structured-cloning one yields `{}`, which is
+      // how issuance used to surface as a hollow success.
+      class WasmAssetNia {
+        get assetId() {
+          return 'rgb:WASM'
+        }
+        get ticker() {
+          return 'WASM'
+        }
+        get precision() {
+          return 0
+        }
+      }
+      const raw = new WasmAssetNia()
+      expect({ ...raw }).toEqual({})
+
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: { settled: 0, spendable: 0 } }),
+        issueAssetNia: () => raw,
+      })
+      const asset = await adapter.issueAssetNia({ ticker: 'WASM', name: 'Wasm', amounts: [1] })
+      expect(asset).toMatchObject({ id: 'rgb:WASM', ticker: 'WASM', protocol: 'RGB_L1' })
+    })
+
+    it('prefers toJSON when the binding provides one', async () => {
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: { settled: 0, spendable: 0 } }),
+        issueAssetNia: () => ({ toJSON: () => ({ asset_id: 'rgb:JSON', ticker: 'JSN' }) }),
+      })
+      expect(await adapter.issueAssetNia({ ticker: 'JSN', name: 'Json', amounts: [1] })).toMatchObject({
+        id: 'rgb:JSON',
+      })
+    })
+
+    it('throws instead of reporting a hollow success when no asset id comes back', async () => {
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: { settled: 0, spendable: 0 } }),
+        issueAssetNia: () => ({}),
+      })
+      await expect(
+        adapter.issueAssetNia({ ticker: 'NIL', name: 'Nil', amounts: [1] })
+      ).rejects.toThrow(/no asset id/i)
+    })
+
+    it('fails closed when the rgb-lib build ships no issuance binding', async () => {
+      const adapter = connected({ getBtcBalance: () => ({ vanilla: {} }) })
+      await expect(
+        adapter.issueAssetNia({ ticker: 'X', name: 'X', amounts: [1] })
+      ).rejects.toThrow(/not available/i)
+    })
+
+    it('rejects an empty amounts list', async () => {
+      const adapter = connected({ getBtcBalance: () => ({ vanilla: {} }), issueAssetNia: () => ({}) })
+      await expect(adapter.issueAssetNia({ ticker: 'X', name: 'X', amounts: [] })).rejects.toThrow(
+        /at least one issuance amount/i
+      )
+    })
+  })
 })
 
 describe('createWdkRegistry rgbL1Backing', () => {
