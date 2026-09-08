@@ -119,6 +119,8 @@ function createMakerStub(): MakerClient {
 }
 
 class KaleidoClientManager {
+  // No wallet-derived identity is held here: these are host-supplied node/maker
+  // transports, constructed synchronously and replaced before initialize returns.
   private client: KaleidoClient | null = null;
   private config: KaleidoClientConfig | null = null;
   /** Held only in NWC mode so reset() can tear down the relay pool. */

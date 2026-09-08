@@ -5,6 +5,7 @@
 
 import type { AssetBalanceResponse, BtcBalanceResponse } from "kaleido-sdk/rln";
 import type { UnifiedAsset, UnifiedTransaction } from "../types/base";
+import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
 import {
   formatAmount,
   mapPaymentStatus,
@@ -19,17 +20,23 @@ import {
 
 /**
  * `wallet.getBtcBalance()` splits BTC into vanilla and colored (RGB-allocated)
- * sub-balances. Only the vanilla portion is the BTC asset's balance — colored sats
- * are accounted under each RGB asset, and must never show as spendable BTC.
+ * sub-balances. Only the vanilla portion is the BTC asset's balance. A colored sat
+ * carries an RGB allocation; spending it as ordinary BTC destroys that asset, so
+ * colored sats are exposed only through the RGB balance views.
  */
 export function convertBtcBalance(btcBalance: BtcBalanceResponse): UnifiedAsset["balance"] {
   const vanilla = btcBalance.vanilla ?? { settled: 0, future: 0, spendable: 0 };
+  // `future` is owned after settlement; pending is only its unsettled delta.
+  const spendable = vanilla.spendable || 0;
+  const settled = vanilla.settled || 0;
+  const future = vanilla.future || 0;
+  const owned = vanilla.future ?? vanilla.settled ?? vanilla.spendable ?? 0;
   return {
-    total: vanilla.settled || 0,
-    available: vanilla.spendable || 0,
-    pending: vanilla.future || 0,
-    totalDisplay: formatAmount(vanilla.settled || 0, 8),
-    availableDisplay: formatAmount(vanilla.spendable || 0, 8),
+    total: owned,
+    available: spendable,
+    pending: Math.max(0, future - settled),
+    totalDisplay: formatAmount(owned, 8),
+    availableDisplay: formatAmount(spendable, 8),
   };
 }
 
@@ -42,15 +49,20 @@ export function convertSdkBalance(
   balance: AssetBalanceResponse,
   precision: number = 8,
 ): UnifiedAsset["balance"] {
+  // Match RgbCore: total is projected ownership, pending is the unsettled delta.
+  const settled = balance.settled || 0;
+  const spendable = balance.spendable || 0;
+  const future = balance.future || 0;
+  const owned = balance.future ?? balance.settled ?? balance.spendable ?? 0;
   return {
-    total: balance.settled || 0,
-    available: balance.spendable || 0,
-    pending: balance.future || 0,
+    total: owned,
+    available: spendable,
+    pending: Math.max(0, future - settled),
     locked: balance.offchain_outbound || 0,
     offchain_outbound: balance.offchain_outbound || 0,
     offchain_inbound: balance.offchain_inbound || 0,
-    totalDisplay: formatAmount(balance.settled || 0, precision),
-    availableDisplay: formatAmount(balance.spendable || 0, precision),
+    totalDisplay: formatAmount(owned, precision),
+    availableDisplay: formatAmount(spendable, precision),
   } as UnifiedAsset["balance"];
 }
 
@@ -63,9 +75,12 @@ export function convertNodeBalance(
   balance: Record<string, number> | undefined,
   precision: number = 8,
 ): UnifiedAsset["balance"] {
-  const total = balance?.settled || 0;
+  // Same semantics as `convertSdkBalance` above / `RgbCore.rgbAssetBalance`.
+  const settled = balance?.settled || 0;
   const available = balance?.spendable || 0;
-  const pending = balance?.future || 0;
+  const future = balance?.future || 0;
+  const total = balance?.future ?? balance?.settled ?? balance?.spendable ?? 0;
+  const pending = Math.max(0, future - settled);
 
   return {
     total,
@@ -112,17 +127,23 @@ export function convertNodeAssetToUnified(asset: Record<string, unknown>): Unifi
 /**
  * On-chain RGB transfer from `client.rln.listTransfers()`. `asset` is left empty;
  * the caller joins on `asset_id` against the asset inventory.
+ *
+ * @param precision Display precision of the transferred asset; defaults to 8.
  */
 export function convertTransferToTransaction(
   transfer: Record<string, unknown>,
+  precision: number = 8,
 ): UnifiedTransaction {
   return {
     id: (transfer.txid as string) || `tx_${Date.now()}`,
     type: mapTransferType(transfer.kind as string | undefined),
     status: mapTransferStatus(transfer.status as string | undefined),
-    timestamp: (transfer.created_at as number) || Date.now(),
+    // The SDK uses Unix seconds; the engine contract uses milliseconds.
+    timestamp: transfer.created_at ? (transfer.created_at as number) * 1000 : Date.now(),
     amount: (transfer.amount as number) || 0,
-    amountDisplay: formatAmount((transfer.amount as number) || 0, 8),
+    // ASSET base units → the asset's own precision. `fee` below stays at 8: it
+    // is the on-chain miner fee, denominated in sats regardless of the asset.
+    amountDisplay: formatAmount((transfer.amount as number) || 0, precision),
     fee: transfer.fee as number | undefined,
     feeDisplay: formatAmount((transfer.fee as number) || 0, 8),
     asset: {} as UnifiedAsset, // Would need to be populated
@@ -136,10 +157,13 @@ export function convertTransferToTransaction(
  * Maker/taker swap from `client.rln.listSwaps()`. The same swap appears once per
  * side, so `side` distinguishes them in the rendered id. Timestamp prefers
  * `completed_at`, then `initiated_at`, then `requested_at` (seconds → ms).
+ *
+ * @param precision Display precision of the swap's from asset; defaults to 8.
  */
 export function convertSwapToTransaction(
   swap: Record<string, unknown>,
   side: "maker" | "taker",
+  precision: number = 8,
 ): UnifiedTransaction {
   const paymentHash = (swap.payment_hash as string) || `swap_${Date.now()}`;
   const requestedAt = (swap.requested_at as number | undefined) ?? 0;
@@ -154,7 +178,8 @@ export function convertSwapToTransaction(
     status: mapSwapStatus(swap.status as string | undefined),
     timestamp,
     amount: qtyFrom,
-    amountDisplay: formatAmount(qtyFrom, 8),
+    // `qty_from` uses the from asset's precision, not the queried asset's.
+    amountDisplay: formatAmount(qtyFrom, precision),
     fee: 0,
     feeDisplay: formatAmount(0, 8),
     asset: {} as UnifiedAsset,
@@ -165,12 +190,19 @@ export function convertSwapToTransaction(
 /**
  * Lightning payment from `client.rln.listPayments()`. Direction comes from the
  * `inbound` flag; amount prefers `asset_amount`, else the BTC msat figure as sats.
+ *
+ * @param precision RGB asset precision; the millisatoshi fallback renders as BTC.
  */
-export function convertPaymentToTransaction(payment: Record<string, unknown>): UnifiedTransaction {
+export function convertPaymentToTransaction(
+  payment: Record<string, unknown>,
+  precision: number = 8,
+): UnifiedTransaction {
   const inbound = Boolean(payment.inbound);
   const assetAmount = (payment.asset_amount as number | null | undefined) ?? null;
   const amtMsat = (payment.amt_msat as number | null | undefined) ?? null;
-  const amount = assetAmount ?? (amtMsat ? Math.floor(amtMsat / 1000) : 0);
+  const amount = assetAmount ?? (amtMsat
+    ? toSafeAmountNumber(roundedMsatToSat(String(amtMsat)), "sat")
+    : 0);
   const timestamp = (payment.created_at as number | undefined)
     ? (payment.created_at as number) * 1000
     : Date.now();
@@ -180,7 +212,8 @@ export function convertPaymentToTransaction(payment: Record<string, unknown>): U
     status: mapPaymentStatus(payment.status as string | undefined),
     timestamp,
     amount,
-    amountDisplay: formatAmount(amount, 8),
+    // Asset amounts use asset precision; the millisatoshi fallback is BTC.
+    amountDisplay: formatAmount(amount, assetAmount !== null ? precision : 8),
     fee: 0,
     feeDisplay: formatAmount(0, 8),
     asset: {} as UnifiedAsset,

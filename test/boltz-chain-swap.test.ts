@@ -155,6 +155,14 @@ describe('getQuote', () => {
     await expect(makeSwap().getQuote({ ...REQ, fromAmount: 500 })).rejects.toThrow(/pair limits/)
   })
 
+  it('rejects non-integral and unsafe quote amounts before calling the maker', async () => {
+    for (const fromAmount of [Number.NaN, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+      await expect(makeSwap().getQuote({ ...REQ, fromAmount })).rejects.toThrow(
+        /positive safe integer/
+      )
+    }
+  })
+
   it('rejects an amount the fees would consume entirely', async () => {
     installFakeSdk({
       chainPairs: async () => ({
@@ -203,7 +211,7 @@ describe('createSwap', () => {
     expect(await store.get('swap-1')).toMatchObject({ swapId: 'swap-1', index: 0 })
   })
 
-  it('takes the funding amount from the maker response, not the request', async () => {
+  it('rejects a maker response that changes the requested funding amount', async () => {
     installFakeSdk({
       createChainSwap: async () => ({
         id: 'swap-1',
@@ -211,10 +219,18 @@ describe('createSwap', () => {
         claimDetails: { lockupAddress: 'el1qclaim', amount: 99_000n, timeoutBlockHeight: 5000n },
       }),
     })
-    const record = await makeSwap().createSwap(PARAMS)
-    expect(record.userLockAmount).toBe(100_500)
-    expect(record.serverLockAmount).toBe(99_000)
-    expect(record.lockupAddress).toBe('bcrt1qlockup')
+    await expect(makeSwap().createSwap(PARAMS)).rejects.toThrow(/funding amount .* requested/i)
+  })
+
+  it('rejects fractional money fields returned by the maker', async () => {
+    installFakeSdk({
+      createChainSwap: async () => ({
+        id: 'swap-1',
+        lockupDetails: { lockupAddress: 'bcrt1qlockup', amount: 100_000 },
+        claimDetails: { lockupAddress: 'el1qclaim', amount: 98_999.5, timeoutBlockHeight: 5000 },
+      }),
+    })
+    await expect(makeSwap().createSwap(PARAMS)).rejects.toThrow(/whole satoshis/i)
   })
 
   it('sends the sha256 preimage hash and one key for both sides', async () => {
@@ -224,7 +240,7 @@ describe('createSwap', () => {
         sent = req
         return {
           id: 'swap-1',
-          lockupDetails: { lockupAddress: 'a', amount: 1n },
+          lockupDetails: { lockupAddress: 'a', amount: BigInt(PARAMS.amountSat) },
           claimDetails: { lockupAddress: 'b', amount: 1n, timeoutBlockHeight: 5000n },
         }
       },
@@ -310,6 +326,56 @@ describe('refund guard', () => {
 
   it('rejects an unknown swap id', async () => {
     await expect(makeSwap().claim('nope')).rejects.toThrow(/Unknown chain swap/)
+  })
+})
+
+describe('broadcast result integrity', () => {
+  const BASE = {
+    swapId: 'swap-1',
+    index: 0,
+    from: 'BTC' as const,
+    to: 'L-BTC' as const,
+    userLockAmount: 100_000,
+    serverLockAmount: 99_000,
+    claimTimeoutBlockHeight: 5000,
+    lockupAddress: 'bcrt1qlockup',
+    destinationAddress: 'el1qdestination',
+    lockupTxid: 'funding-txid',
+    createdAt: 1,
+    updatedAt: 1,
+    response: encode({ lockupDetails: {}, claimDetails: {} }),
+  }
+
+  function installContentlessBroadcast() {
+    const manager = boltzSwapClientManager as any
+    manager.sdk.SwapScript.fromChain = () => ({
+      constructClaim: async () => ({ broadcast: async () => '', hex: () => '', txid: () => '' }),
+      constructRefund: async () => ({ broadcast: async () => '', hex: () => '', txid: () => '' }),
+    })
+  }
+
+  it('does not report a claim when broadcast returns no transaction id', async () => {
+    const store = new BoltzChainSwapStore(new MemoryStorage())
+    await store.put({ ...BASE, phase: 'server_locked' })
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    installContentlessBroadcast()
+
+    await expect(swap.claim('swap-1')).rejects.toThrow(/claim transaction id/)
+    const record = await store.get('swap-1')
+    expect(record).toMatchObject({ phase: 'server_locked' })
+    expect(record).not.toHaveProperty('claimTxid')
+  })
+
+  it('does not report a refund when broadcast returns no transaction id', async () => {
+    const store = new BoltzChainSwapStore(new MemoryStorage())
+    await store.put({ ...BASE, phase: 'refundable' })
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    installContentlessBroadcast()
+
+    await expect(swap.refund('swap-1')).rejects.toThrow(/refund transaction id/)
+    const record = await store.get('swap-1')
+    expect(record).toMatchObject({ phase: 'refundable' })
+    expect(record).not.toHaveProperty('refundTxid')
   })
 })
 

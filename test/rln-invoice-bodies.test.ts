@@ -1,11 +1,14 @@
 import { describe, it, expect } from 'vitest'
 import { RlnWdkAdapter } from '../src/adapters/wdk/RlnWdkAdapter'
 
+const BOLT11 =
+  'lnbc1pvjluezsp5zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zyg3zygspp5qqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqqqsyqcyq5rqwzqfqypqdpl2pkx2ctnv5sxxmmwwd5kgetjypeh2ursdae8g6twvus8g6rfwvs8qun0dfjkxaq9qrsgq357wnc5r2ueh7ck6q93dj32dlqnls087fxdwk8qakdyafkq3yap9us6v52vjjsrvywa6rt52cm9r9zqt8r2t7mlcwspyetp5h2tztugp9lfyql'
+
 function connectedRln() {
   const calls: Record<string, any[]> = {}
   const record = (name: string) => async (body: any) => {
     ;(calls[name] ??= []).push(body)
-    if (name === 'createLNInvoice') return { invoice: 'lnbc...' }
+    if (name === 'createLNInvoice') return { invoice: BOLT11 }
     if (name === 'createRgbInvoice') return { invoice: 'rgb:...', recipient_id: 'rcpt' }
     if (name === 'sendPayment') return { payment_hash: 'ph', status: 'Succeeded' }
     return {}

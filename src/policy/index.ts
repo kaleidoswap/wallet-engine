@@ -1,21 +1,9 @@
-/**
- * Signing / spend policy
- * ----------------------
- * A pure, portable gate for fund-moving and signing operations, centralizing checks
- * that would otherwise scatter across adapters and hosts: per-transaction spend
- * limits, destination allowlists, and per-app capability grants.
- *
- * `evaluatePolicy` is pure (no I/O, no globals), so it is trivially testable and
- * ports cleanly to Rust/Kotlin/Swift. Hosts wire it in via `ProtocolManager`
- * (opt-in) or call it at their own boundary.
- *
- * DEFAULT-ALLOW: a policy only ever tightens behaviour, so with none set the engine
- * behaves as before. `mode: 'deny'` flips to default-deny, requiring an explicit
- * matching grant.
- */
+/** Pure signing and spend policy for engine and host boundaries. */
 
 import type { ProtocolType } from '../types/base'
 import { classifyDestination, type DestinationKind } from '../router/destination'
+import { parseUnifiedReceiveURI, receiveMethodsOf } from '../receive/unifiedReceive'
+import { isBtcAssetId } from '../lib/asset-id'
 
 /**
  * Fund-moving / signing operations a policy can gate. `blindLiquidPset` and
@@ -38,6 +26,10 @@ export interface PolicyRequest {
   protocol?: ProtocolType
   /** Amount in satoshis for send/keysend/swap. Omitted when not known/applicable. */
   amountSat?: number
+  /** Non-BTC swap input asset. Omitted for satoshi-denominated operations. */
+  assetId?: string
+  /** Non-BTC swap input amount in base units, as a decimal string. */
+  assetAmount?: string
   /** Raw destination string (invoice/address); classified internally for kind checks. */
   destination?: string
   /** Identifies the caller/app performing the op (deep link, dapp origin, MCP tool). */
@@ -67,25 +59,50 @@ export interface SigningPolicy {
   mode?: 'allow' | 'deny'
   /** Global per-transaction spend cap (sats), applied on top of any grant cap. */
   maxAmountSat?: number
+  /** Per-asset raw-unit swap caps; active policies deny unlisted non-BTC assets. */
+  maxAmountByAsset?: Record<string, string>
   /** Per-app capability grants, resolved by `PolicyRequest.grantId`. */
   grants?: CapabilityGrant[]
 }
 
-export type PolicyDecision = { allowed: true } | { allowed: false; code: string; reason: string }
+export type PolicyDecision =
+  | { allowed: true }
+  | { allowed: false; code: string; reason: string; details?: unknown }
 
 export class PolicyError extends Error {
   readonly code: string
-  constructor(code: string, message: string) {
+  readonly details?: unknown
+  constructor(code: string, message: string, details?: unknown) {
     super(message)
     this.name = 'PolicyError'
     this.code = code
+    this.details = details
   }
 }
 
 const AMOUNT_OPS: ReadonlySet<PolicyOperation> = new Set(['send', 'keysend', 'swap'])
 
-function deny(code: string, reason: string): PolicyDecision {
-  return { allowed: false, code, reason }
+/** Include every unified payment rail; unknown embedded rails fail closed. */
+function destinationKindsOf(destination: string): DestinationKind[] {
+  const kinds: DestinationKind[] = [classifyDestination(destination).kind]
+  const parsed = parseUnifiedReceiveURI(destination)
+  if (!parsed) return kinds
+  for (const method of receiveMethodsOf(parsed)) {
+    const value = parsed[method]
+    if (typeof value !== 'string' || value === '') continue
+    // The on-chain address is already covered by the outer BIP21 classification.
+    if (method === 'btcAddress') continue
+    kinds.push(classifyDestination(value).kind)
+  }
+  return kinds
+}
+
+function deny(code: string, reason: string, details?: unknown): PolicyDecision {
+  return { allowed: false, code, reason, ...(details === undefined ? {} : { details }) }
+}
+
+function isDecimalBaseUnits(value: unknown): value is string {
+  return typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value)
 }
 
 /**
@@ -103,10 +120,54 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
     return deny('AMOUNT_INVALID', `'${req.operation}' amount must be a positive safe integer`)
   }
 
+  if (req.assetAmount != null && (!isDecimalBaseUnits(req.assetAmount) || req.assetAmount === '0')) {
+    return deny(
+      'AMOUNT_INVALID',
+      `'${req.operation}' asset amount must be a positive base-unit decimal string`,
+      { asset: req.assetId, amount: req.assetAmount },
+    )
+  }
+
   // 1. Global per-transaction cap, regardless of grants/mode. When a cap is set for
   // an amount-op but the amount is unknown, fail CLOSED: an unknown amount must
   // never slip past a spend limit (e.g. an unresolved amountless BOLT11).
-  if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
+  const isNonBtcSwap = req.operation === 'swap' && req.assetId != null && !isBtcAssetId(req.assetId)
+  const hasGlobalCap = policy.maxAmountSat != null || policy.maxAmountByAsset != null
+
+  if (isNonBtcSwap && hasGlobalCap) {
+    const hasAssetCap =
+      policy.maxAmountByAsset != null &&
+      Object.prototype.hasOwnProperty.call(policy.maxAmountByAsset, req.assetId!)
+    const cap = hasAssetCap ? policy.maxAmountByAsset![req.assetId!] : undefined
+    if (cap == null) {
+      return deny(
+        'AMOUNT_UNKNOWN',
+        `'swap' amount for asset '${req.assetId}' has no configured base-unit cap`,
+        { asset: req.assetId, cap: null },
+      )
+    }
+    if (!isDecimalBaseUnits(cap)) {
+      return deny(
+        'AMOUNT_INVALID',
+        `configured cap for asset '${req.assetId}' is not a base-unit decimal string`,
+        { asset: req.assetId, cap },
+      )
+    }
+    if (req.assetAmount == null) {
+      return deny(
+        'AMOUNT_UNKNOWN',
+        `'swap' amount for asset '${req.assetId}' is unknown but a cap is set`,
+        { asset: req.assetId, cap },
+      )
+    }
+    if (BigInt(req.assetAmount) > BigInt(cap)) {
+      return deny(
+        'AMOUNT_OVER_GLOBAL_LIMIT',
+        `amount ${req.assetAmount} of asset '${req.assetId}' exceeds global limit ${cap}`,
+        { asset: req.assetId, amount: req.assetAmount, cap },
+      )
+    }
+  } else if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
     if (req.amountSat == null) {
       return deny(
         'AMOUNT_UNKNOWN',
@@ -168,9 +229,12 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
       return deny('DEST_NOT_ALLOWLISTED', `destination not in grant '${grant.id}' allowlist`)
     }
     if (grant.allowedDestinationKinds) {
-      const kind = classifyDestination(req.destination).kind
-      if (!grant.allowedDestinationKinds.includes(kind)) {
-        return deny('DEST_KIND_NOT_ALLOWED', `destination kind '${kind}' not allowed by grant '${grant.id}'`)
+      // Embedded rails are independent destinations; checking only the outer
+      // BIP321 URI would let a disallowed invoice bypass the grant.
+      for (const kind of destinationKindsOf(req.destination)) {
+        if (!grant.allowedDestinationKinds.includes(kind)) {
+          return deny('DEST_KIND_NOT_ALLOWED', `destination kind '${kind}' not allowed by grant '${grant.id}'`)
+        }
       }
     }
   }
@@ -181,5 +245,7 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
 export function enforcePolicy(req: PolicyRequest, policy?: SigningPolicy): void {
   if (!policy) return
   const d = evaluatePolicy(req, policy)
-  if (!d.allowed) throw new PolicyError(d.code, `Policy denied '${req.operation}': ${d.reason}`)
+  if (!d.allowed) {
+    throw new PolicyError(d.code, `Policy denied '${req.operation}': ${d.reason}`, d.details)
+  }
 }

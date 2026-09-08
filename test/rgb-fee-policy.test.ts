@@ -1,9 +1,15 @@
 import { describe, it, expect } from 'vitest'
-import { resolveRgbFeeRatePolicy, MAINNET_FEE_FLOOR } from '../src/lib/rgb-fee-policy'
+import { defaultRgbFeeRate, resolveRgbFeeRatePolicy, MAINNET_FEE_FLOOR } from '../src/lib/rgb-fee-policy'
 
 const noEstimate = async () => null
 
 describe('resolveRgbFeeRatePolicy', () => {
+  it('shares the adapter default between mainnet and non-mainnet paths', () => {
+    expect(defaultRgbFeeRate('mainnet')).toBe(MAINNET_FEE_FLOOR.normal)
+    expect(defaultRgbFeeRate('regtest')).toBe(1)
+    expect(defaultRgbFeeRate(null)).toBe(1)
+  })
+
   it('honours a positive caller-provided rate', async () => {
     const rate = await resolveRgbFeeRatePolicy({ provided: 42, urgency: 'normal', network: 'mainnet', estimateFn: noEstimate })
     expect(rate).toBe(42)

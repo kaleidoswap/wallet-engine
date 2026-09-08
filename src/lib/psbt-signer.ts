@@ -12,7 +12,7 @@
 
 import { Transaction } from '@scure/btc-signer'
 import { HDKey } from '@scure/bip32'
-import { mnemonicToSeedSync } from '@scure/bip39'
+import { resolveWalletSeed } from './wallet-seed'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 
 // PSBT magic bytes: 0x70736274ff ("psbt" + separator 0xff)
@@ -44,12 +44,10 @@ export interface PsbtSignResult {
 }
 
 /**
- * Parse and attempt to sign a PSBT with keys derived from a BIP39 mnemonic.
- *
- * @param psbtHex  Hex-encoded PSBT bytes (no 0x prefix).
- * @param mnemonic BIP39 mnemonic for key derivation.
+ * Sign a PSBT from its BIP32 paths using an nsec, raw key, or mnemonic root.
+ * Invalid secret shapes fail rather than deriving a different wallet.
  */
-export function signPsbt(psbtHex: string, mnemonic: string): PsbtSignResult {
+export function signPsbt(psbtHex: string, secret: string): PsbtSignResult {
   const bytes = hexToBytes(psbtHex)
   assertPsbtMagic(bytes)
 
@@ -61,7 +59,7 @@ export function signPsbt(psbtHex: string, mnemonic: string): PsbtSignResult {
     throw new Error(`Failed to parse PSBT: ${msg}`)
   }
 
-  const seed = mnemonicToSeedSync(mnemonic)
+  const seed = resolveWalletSeed(secret)
   const root = HDKey.fromMasterSeed(seed)
 
   let signedCount = 0

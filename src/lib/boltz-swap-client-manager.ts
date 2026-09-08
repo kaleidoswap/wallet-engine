@@ -124,6 +124,8 @@ export function resolveBoltzBaseUrl(config: BoltzClientConfig): string {
 }
 
 class BoltzSwapClientManager {
+  // Not wallet-scoped: this singleton holds only a public maker/network client.
+  // Wallet keys are derived per BoltzChainSwap and never enter this manager.
   private sdk: BoltzSdkModule | null = null;
   private client: BoltzClientLike | null = null;
   private config: BoltzClientConfig | null = null;

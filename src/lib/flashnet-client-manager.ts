@@ -15,8 +15,10 @@ import {
   type FlashnetNetwork,
 } from '../types/flashnet'
 import { log } from './log'
-import { saveSentTokenRecord } from './spark-sent-token-records'
+import { normalizeTxHash, saveSentTokenRecord } from './spark-sent-token-records'
+import { txHashFromBytes, u8aToHex } from './spark-helpers'
 import type { SparkConfig } from '../types/spark'
+import { WalletSessionGuard, type SessionAttempt } from './wallet-session'
 
 /**
  * Normalize the SDK pools response to an array: it may return `Pool[]` or
@@ -34,28 +36,33 @@ function normalizePoolsResponse(response: unknown): unknown[] {
   return []
 }
 
+/** The guard's single slot: the FlashnetClient handshake. */
+const CLIENT_SLOT = 'client'
+
 class FlashnetClientManager {
   private client: FlashnetClient | null = null
-  private initPromise: Promise<void> | null = null
+  /** Guard fund-moving client construction by wallet identity and generation. */
+  private readonly session = new WalletSessionGuard({ name: 'FlashnetClientManager' })
   private poolId: string | null = null
   private network: FlashnetNetwork | null = null
 
   initialize(wallet: SparkWallet, sparkNetwork?: SparkConfig['network']): Promise<void> {
-    if (this.initPromise) return this.initPromise
-    this.initPromise = this.doInitialize(wallet, sparkNetwork).finally(() => {
-      this.initPromise = null
-    })
-    return this.initPromise
+    return this.session.begin(CLIENT_SLOT, wallet, (attempt) =>
+      this.doInitialize(wallet, sparkNetwork, attempt),
+    )
   }
 
   private async doInitialize(
     wallet: SparkWallet,
-    sparkNetwork?: SparkConfig['network'],
+    sparkNetwork: SparkConfig['network'] | undefined,
+    attempt: SessionAttempt,
   ): Promise<void> {
     if (this.client) {
       await this.disconnect()
     }
 
+    // Marked AFTER the re-init disconnect above, which invalidates the session itself.
+    attempt.mark()
     const network = getFlashnetNetworkForSpark(sparkNetwork)
     if (!network) {
       throw new Error('Flashnet is only available when Spark is on mainnet or regtest.')
@@ -65,8 +72,13 @@ class FlashnetClientManager {
       // The SDK accepts SparkWallet | IssuerSparkWallet but doesn't export a
       // shared base — the cast keeps the call site honest while letting the
       // rest of the file enjoy real types from the SDK.
-      this.client = new FlashnetClient(wallet as never)
-      await this.client.initialize()
+      const client = new FlashnetClient(wallet as never)
+      await client.initialize()
+
+      // Never install a client after its wallet session was torn down.
+      if (!(await attempt.claim(() => client.cleanup()))) return
+
+      this.client = client
       this.network = network
 
       try {
@@ -87,14 +99,18 @@ class FlashnetClientManager {
       }
 
       // Backfill outgoing-swap history into the sent-token outbox so past token
-      // swaps appear as sends. Flashnet's AMM swap endpoint is the authoritative,
-      // retroactive source of direction — the Spark SDK exposes none for token
-      // transactions. Best-effort and async: never blocks wallet init.
+      // swaps appear as sends. Flashnet nominates hashes, but the Spark operator
+      // must independently prove each one spent this wallet's token outputs.
+      // Best-effort and async: never blocks wallet init.
       void this.backfillSwapHistory(wallet)
     } catch (error) {
-      this.client = null
-      this.poolId = null
-      this.network = null
+      // Only clear state if this init still owns the session; a stale failure
+      // must not tear down a newer, successful one.
+      if (attempt.isCurrent) {
+        this.client = null
+        this.poolId = null
+        this.network = null
+      }
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`Failed to initialize FlashnetClient: ${message}`)
     }
@@ -135,14 +151,59 @@ class FlashnetClientManager {
         limit: 200,
       })
 
+      const candidates = (swaps ?? []).filter((swap) => {
+        const assetIn = swap?.assetInAddress
+        return !!assetIn && assetIn !== BTC_ASSET_PUBKEY && !!swap?.inboundTransferId
+      })
+      if (candidates.length === 0) return
+
+      const candidateHashes = candidates.map((swap) => normalizeTxHash(swap.inboundTransferId))
+      const candidateResponse = await wallet.queryTokenTransactionsByTxHashes(candidateHashes)
+      const candidateTransactions = new Map<string, any>()
+      for (const row of candidateResponse?.tokenTransactionsWithStatus ?? []) {
+        const hash = row?.tokenTransactionHash
+        if (hash instanceof Uint8Array) candidateTransactions.set(txHashFromBytes(hash), row)
+      }
+
+      const previousHashes = new Set<string>()
+      for (const row of candidateTransactions.values()) {
+        const transferInput = row?.tokenTransaction?.tokenInputs?.transferInput
+        for (const input of transferInput?.outputsToSpend ?? []) {
+          if (input?.prevTokenTransactionHash instanceof Uint8Array) {
+            previousHashes.add(txHashFromBytes(input.prevTokenTransactionHash))
+          }
+        }
+      }
+      if (previousHashes.size === 0) return
+
+      const previousResponse = await wallet.queryTokenTransactionsByTxHashes([...previousHashes])
+      const previousTransactions = new Map<string, any>()
+      for (const row of previousResponse?.tokenTransactionsWithStatus ?? []) {
+        const hash = row?.tokenTransactionHash
+        if (hash instanceof Uint8Array) previousTransactions.set(txHashFromBytes(hash), row)
+      }
+      const walletIdentity = normalizeTxHash(await wallet.getIdentityPublicKey())
+
       let recorded = 0
-      for (const swap of swaps ?? []) {
+      for (const swap of candidates) {
         // Only the token-in leg is an outflow that needs the outbox. The
         // token-out leg of a swap is a receive, already returned by the
         // Spark token-transaction query.
         const assetIn = swap?.assetInAddress
         const inboundTransferId = swap?.inboundTransferId
-        if (!assetIn || assetIn === BTC_ASSET_PUBKEY || !inboundTransferId) continue
+        if (!assetIn || !inboundTransferId) continue
+
+        const candidate = candidateTransactions.get(normalizeTxHash(inboundTransferId))
+        const inputs = candidate?.tokenTransaction?.tokenInputs?.transferInput?.outputsToSpend
+        if (!Array.isArray(inputs) || inputs.length === 0) continue
+        const spendsOnlyWalletOutputs = inputs.every((input: any) => {
+          if (!(input?.prevTokenTransactionHash instanceof Uint8Array)) return false
+          const previous = previousTransactions.get(txHashFromBytes(input.prevTokenTransactionHash))
+          const output = previous?.tokenTransaction?.tokenOutputs?.[input.prevTokenTransactionVout]
+          return output?.ownerPublicKey instanceof Uint8Array &&
+            normalizeTxHash(u8aToHex(output.ownerPublicKey)) === walletIdentity
+        })
+        if (!spendsOnlyWalletOutputs) continue
 
         const assetId = toHumanReadable(assetIn)
         const isUsdb = isUsdbTokenAddress(assetId)
@@ -213,7 +274,7 @@ class FlashnetClientManager {
     this.client = null
     this.poolId = null
     this.network = null
-    this.initPromise = null
+    this.session.invalidate()
   }
 }
 
