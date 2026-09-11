@@ -4,13 +4,21 @@
  * config comes from `config.ts`.
  */
 
-import { expect } from 'vitest'
+import { expect, type TestContext } from 'vitest'
 import type { IProtocolAdapter } from '../../src/adapters/IProtocolAdapter'
 import { SparkWdkAdapter } from '../../src/adapters/wdk/SparkWdkAdapter'
 import { LiquidWdkAdapter } from '../../src/adapters/wdk/LiquidWdkAdapter'
 import { ArkadeWdkAdapter } from '../../src/adapters/wdk/ArkadeWdkAdapter'
 import { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
-import { ARKADE, LIQUID, RGB_L1, SPARK, rgbDataDir, type WalletFixture } from './config'
+import {
+  ARKADE,
+  LIQUID,
+  REQUIRE_FUNDED_WALLETS,
+  RGB_L1,
+  SPARK,
+  rgbDataDir,
+  type WalletFixture,
+} from './config'
 
 /**
  * Retry a flaky async factory with backoff. The Spark regtest server intermittently
@@ -130,15 +138,44 @@ export function assertFunded(label: string, balance: { total: number }): void {
 }
 
 /**
- * Pick a small, safe send amount from a wallet's spendable balance. These run
- * against shared, slowly-draining test wallets, so a hardcoded amount eventually
- * exceeds the balance and fails for the wrong reason. Fails loudly (not skips) if
- * the wallet lacks even the small amount plus a fee buffer.
+ * Pick a small, safe send amount from a wallet's spendable balance, or skip the
+ * test when the wallet cannot cover one.
+ *
+ * These run against shared test wallets that drain, so a hardcoded amount
+ * eventually exceeds the balance. The question is what an empty wallet should
+ * do to the job. It used to fail it, identically to a broken transfer — and
+ * because these wallets do drain, `Live integration` sat red on `main` for
+ * three days and on every PR touching `src/**` whatever the diff (#77). A
+ * permanently red check is read and dismissed by hand, which is how a real
+ * drift failure gets waved through.
+ *
+ * A skip states the same fact without destroying the signal: the read-only
+ * contract assertions still run and still fail on drift, and the one thing
+ * that cannot run says so by name. `REQUIRE_FUNDED_WALLETS=1` restores the
+ * failure for the run that is actually asking whether the wallets are funded.
+ *
+ * Pass the test's own context so the skip lands on the test that needed the
+ * funds, not on the file.
  */
-export function spendableSend(total: number, label: string, target = 100, feeBuffer = 200): number {
-  expect(
-    total,
-    `${label}: needs > ${target + feeBuffer} sat spendable to exercise the send test (has ${total}) — top up the wallet`,
-  ).toBeGreaterThan(target + feeBuffer)
+export function spendableSend(
+  ctx: TestContext,
+  total: number,
+  label: string,
+  target = 100,
+  feeBuffer = 200,
+): number {
+  const needed = target + feeBuffer
+  if (total > needed) return target
+
+  const shortfall = `${label}: needs > ${needed} sat spendable to exercise the send test (has ${total}) — top up the wallet`
+  if (REQUIRE_FUNDED_WALLETS) {
+    expect(total, shortfall).toBeGreaterThan(needed)
+  }
+  // Printed as well as attached to the skip: a skip reason is easy to miss in a
+  // 26-test report, and the next person needs one line, not an archaeology dig.
+  console.warn(`⚠ SKIPPED — ${shortfall}`)
+  ctx.skip(shortfall)
+  // `ctx.skip()` aborts, so this is unreachable; it exists so the signature
+  // stays `number` and no call site has to handle a null it can never see.
   return target
 }

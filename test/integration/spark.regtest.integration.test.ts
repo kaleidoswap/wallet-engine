@@ -49,13 +49,13 @@ describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
     expect(a.address).not.toBe(b.address) // distinct wallets
   })
 
-  it('sends a native Spark transfer Alice → Bob', async () => {
+  it('sends a native Spark transfer Alice → Bob', async (ctx) => {
     const to = await bob.getReceiveAddress('SPARK')
     const before = (await bob.getBtcBalance()).total
     // Size the send to Alice's actual balance so this validates the transfer
     // MECHANISM without assuming a specific funded amount (these are shared,
     // slowly-draining test wallets). Fails loudly if Alice is genuinely empty.
-    const amount = spendableSend((await alice.getBtcBalance()).total, 'Alice/Spark')
+    const amount = spendableSend(ctx, (await alice.getBtcBalance()).total, 'Alice/Spark')
     const res = await alice.sendPayment({ invoice: to.address, amount })
     expect(res.status).toMatch(/pending|confirmed/)
     // Spark transfers settle fast; poll Bob's balance briefly.

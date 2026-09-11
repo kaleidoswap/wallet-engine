@@ -34,6 +34,10 @@ on:
         description: 'Run fund-moving send/transfer tests'
         type: boolean
         default: true
+      require_funded:
+        description: 'Fail (not skip) when a wallet is too empty to send'
+        type: boolean
+        default: false
 
 concurrency:
   # The suites are stateful per wallet (rgb-lib data dirs, wallet balances) —
@@ -71,4 +75,11 @@ jobs:
           BOB_MNEMONIC: ${{ secrets.BOB_MNEMONIC }}
           # Send tests run by default (push/PR); a dispatch can opt out via the input.
           RUN_SEND_TESTS: ${{ github.event_name != 'workflow_dispatch' && '1' || (inputs.run_send_tests && '1' || '') }}
+          # An empty wallet SKIPS its send test here rather than failing the job.
+          # These wallets drain by design, and a drained one is not a regression
+          # — but failing on it left this check red on `main` and on every PR
+          # touching `src/**` for three days (#77), which is the same as having
+          # no check. Dispatch with `require_funded` when the funding level is
+          # the thing being tested.
+          REQUIRE_FUNDED_WALLETS: ${{ (github.event_name == 'workflow_dispatch' && inputs.require_funded) && '1' || '' }}
         run: npm run test:integration
