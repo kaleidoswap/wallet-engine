@@ -46,6 +46,12 @@ export function msatToSat(value: MillisatoshiAmount): SatoshiAmount {
   return (amount / MSAT_PER_SAT).toString()
 }
 
+/** Integer-sat compatibility rendering: nearest satoshi, with half-sats rounded up. */
+export function roundedMsatToSat(value: MillisatoshiAmount): SatoshiAmount {
+  const amount = parseMsat(value)
+  return ((amount + MSAT_PER_SAT / 2n) / MSAT_PER_SAT).toString()
+}
+
 /**
  * Explicit adapter-boundary conversion for SDKs that require `number`. Values JS
  * cannot represent exactly are rejected before conversion.

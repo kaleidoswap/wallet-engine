@@ -130,7 +130,14 @@ describe('RgbLibWdkAdapter', () => {
     const adapter = connected({
       getAddress: async () => 'bcrt1qbtcaddr',
       registerWallet: async () => ({ address: 'bcrt1qbtcaddr', btcBalance: { vanilla: { settled: 2500, spendable: 2500 } } }),
-      sendTransaction: async (o: any) => sent.push(o),
+      // NOTE: this mock previously returned `sent.push(o)` (a number), so the
+      // adapter derived `txid: ''`. Returning a txid keeps this test about what it
+      // asserts — that the send maps to `sendTransaction({ to, value })` — now that
+      // an empty txid is a SEND_ERROR (audit finding G-F12).
+      sendTransaction: async (o: any) => {
+        sent.push(o)
+        return { txid: 'btc-txid' }
+      },
     })
     // receive address (no assetId) → a BTC address
     expect(await adapter.getReceiveAddress()).toMatchObject({ address: 'bcrt1qbtcaddr', format: 'BTC_ADDRESS' })

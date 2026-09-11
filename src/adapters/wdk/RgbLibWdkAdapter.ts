@@ -39,6 +39,7 @@ import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { rgbBtcAsset, rgbNiaAsset, rgbAssetBalance, RGB_L1_PROFILE } from './RgbCore'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
+import { applyTransactionFilter } from '../../lib/transaction-filter'
 
 export interface RgbLibAdapterConfig extends BaseProtocolConfig {
   protocol: 'RGB_L1'
@@ -62,6 +63,7 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const cfg = config as RgbLibAdapterConfig
     if (!cfg.mnemonic) throw new ProtocolError('RgbLibWdkAdapter requires a mnemonic', 'RGB_L1', 'CONFIG')
     if (!cfg.dataDir) throw new ProtocolError('RgbLibWdkAdapter requires a dataDir', 'RGB_L1', 'CONFIG')
+    await this.releasePreviousConnection()
     this.network = cfg.network ?? 'mainnet'
     // @ts-ignore — declared as an optional dep; resolved at runtime.
     const mod = await loadWdkModule('@utexo/wdk-wallet-rgb', () => import('@utexo/wdk-wallet-rgb'))
@@ -73,8 +75,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       transportEndpoint: cfg.transportEndpoint,
     })
     this.account = await this.manager.getAccount()
-    // rgb-lib needs the wallet registered with the indexer before first use.
-    await this.account.registerWallet?.().catch(() => {})
+    // Registration is part of readiness; an unregistered wallet cannot serve reads.
+    await this.account.registerWallet?.()
     this.connected = true
   }
 
@@ -113,12 +115,8 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async refreshBalances(): Promise<void> {
     this.assertConnected()
     // refreshWallet()/syncWallet() are synchronous void on the WDK account.
-    try {
-      this.account.refreshWallet?.()
-      this.account.syncWallet?.()
-    } catch {
-      /* best-effort */
-    }
+    this.account.refreshWallet?.()
+    this.account.syncWallet?.()
   }
 
   async listAssets(): Promise<UnifiedAsset[]> {
@@ -190,11 +188,11 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
    * BTC-L1 (vanilla) history from rgb-lib. `listTransactions()` is synchronous;
    * RGB asset detail is per-asset via `listTransfers({ asset_id })`.
    */
-  async listTransactions(_filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
+  async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
     const raw: any = await this.account.listTransactions()
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
-    return txs.map((t) => {
+    const mapped = txs.map((t) => {
       const received = Number(t.received ?? 0)
       const sent = Number(t.sent ?? 0)
       const confTime = t.confirmation_time ?? t.confirmationTime
@@ -205,10 +203,13 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         timestamp: Number(confTime?.timestamp ?? 0) * 1000,
         amount: Math.abs(received - sent) || received || sent,
         amountDisplay: '',
-        asset: undefined as unknown as UnifiedAsset,
+        asset: rgbBtcAsset(0, RGB_L1_PROFILE),
         protocolData: t,
       }
     })
+    // Apply the TransactionFilter the signature accepts: predicates, then a
+    // newest-first order, then offset/limit (audit finding G-F8).
+    return applyTransactionFilter(mapped, filter)
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
@@ -223,10 +224,13 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async listChannels(): Promise<unknown[]> {
+    // Distinguish an unsupported channel model from an unavailable wallet.
+    this.assertConnected()
     return []
   }
 
   async listPayments(): Promise<unknown> {
+    this.assertConnected()
     return []
   }
 
@@ -266,7 +270,12 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
     const r: any = await this.account.sendTransaction({ to: params.address, value: params.amount, feeRate: params.feeRate })
-    return { ok: true, txid: typeof r === 'string' ? r : (r?.txid ?? r?.hash ?? '') }
+    const txid: string = typeof r === 'string' ? r : (r?.txid ?? r?.hash ?? '')
+    // A successful send must be traceable and reconcilable.
+    if (!txid) {
+      throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
+    }
+    return { ok: true, txid }
   }
 
 }

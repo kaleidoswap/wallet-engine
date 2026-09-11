@@ -33,6 +33,15 @@ describe('IProtocolAdapter decomposition', () => {
     const rgbish = {
       ...new MemoAdapter(),
       createRgbInvoice: async () => ({}),
+      decodeRgbInvoice: async () => ({}),
+      createRgbUtxos: async () => ({ success: true }),
+      listRgbUnspents: async () => ({ unspents: [] }),
+      estimateRgbFee: async () => ({ fee_rate: 1 }),
+      getRgbDetailedBalance: async () => ({
+        vanilla: { settled: 0, future: 0, spendable: 0 },
+        colored: { settled: 0, future: 0, spendable: 0 },
+      }),
+      getInvoiceStatus: async () => ({}),
       sendAsset: async () => ({}),
     } as unknown as IProtocolAdapter
 

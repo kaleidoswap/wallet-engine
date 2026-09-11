@@ -28,12 +28,15 @@ import {
   ProtocolConfig,
   ProtocolAdapterRegistry,
   asSimplicityOperations,
+  asSwapRecoveryOperations,
   type ISimplicityOperations,
 } from '../adapters/IProtocolAdapter'
+import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
 import { decodeBolt11 } from '../lib/bolt11'
+import { isBtcAssetId } from '../lib/asset-id'
 import type {
   LiquidPsetReview,
   LiquidPsetSignRequest,
@@ -73,6 +76,12 @@ export interface ProtocolManagerConfig {
   allowUnsafeAdapterAccess?: boolean
 }
 
+export interface BalanceRefreshResult {
+  protocol: ProtocolType
+  ok: boolean
+  error?: unknown
+}
+
 export class ProtocolManager {
   private registry: ProtocolAdapterRegistry
   private activeProtocol: ProtocolType | null = null
@@ -109,7 +118,13 @@ export class ProtocolManager {
    */
   private enforce(
     operation: PolicyOperation,
-    opts: { amountSat?: number; destination?: string; protocol?: ProtocolType } = {},
+    opts: {
+      amountSat?: number
+      assetId?: string
+      assetAmount?: string
+      destination?: string
+      protocol?: ProtocolType
+    } = {},
   ): void {
     enforcePolicy(
       {
@@ -117,6 +132,8 @@ export class ProtocolManager {
         protocol: opts.protocol ?? this.activeProtocol ?? undefined,
         grantId: this.activeGrantId,
         amountSat: opts.amountSat,
+        assetId: opts.assetId,
+        assetAmount: opts.assetAmount,
         destination: opts.destination,
       },
       this.policy,
@@ -266,6 +283,26 @@ export class ProtocolManager {
         throw new ProtocolError(`Connection invalidated: ${protocol}`, protocol, 'CONNECTION_INVALIDATED')
       }
 
+      // Local teardown revokes signing synchronously; log bounded SDK cleanup
+      // failure so a wedged old client cannot prevent a wallet switch.
+      if (adapter.isConnected()) {
+        try {
+          await this.disconnectAdapterBounded(adapter)
+        } catch (error: unknown) {
+          this.log.warn(
+            `[ProtocolManager] Error tearing down the previous ${protocol} session:`,
+            error,
+          )
+        }
+        if (!this.isConnectionCurrent(protocol, generation)) {
+          throw new ProtocolError(
+            `Connection invalidated: ${protocol}`,
+            protocol,
+            'CONNECTION_INVALIDATED',
+          )
+        }
+      }
+
       await adapter.connect(config)
       if (!this.isConnectionCurrent(protocol, generation)) {
         await this.disconnectAdapterBounded(adapter)
@@ -294,6 +331,7 @@ export class ProtocolManager {
     }
   }
 
+  /** Tear down every adapter; reject if any remain live so lock cannot lie. */
   async disconnectAll(): Promise<void> {
     const adapters = this.registry.getAll()
     for (const adapter of adapters) this.bumpConnectionGeneration(adapter.protocolName)
@@ -302,14 +340,25 @@ export class ProtocolManager {
     const results = await Promise.allSettled(
       adapters.map((adapter) => this.disconnectAdapterBounded(adapter)),
     )
+    const failures: { protocol: ProtocolType; reason: unknown }[] = []
     results.forEach((result, index) => {
       if (result.status === 'rejected') {
         this.log.error(
           `[ProtocolManager] Error disconnecting ${adapters[index].protocolName}:`,
           result.reason,
         )
+        failures.push({ protocol: adapters[index].protocolName, reason: result.reason })
       }
     })
+    if (failures.length > 0) {
+      throw new ProtocolError(
+        `Failed to disconnect ${failures.map((f) => f.protocol).join(', ')} — ` +
+          `the wallet is NOT fully locked`,
+        failures[0].protocol,
+        'DISCONNECT_INCOMPLETE',
+        failures,
+      )
+    }
   }
 
   private disconnectAdapterBounded(adapter: IProtocolAdapter): Promise<void> {
@@ -359,15 +408,21 @@ export class ProtocolManager {
    * failures so one slow protocol can't block the others.
    */
   async refreshBalances(): Promise<void> {
-    const adapters = this.registry.getAll().filter((a) => a.isConnected())
-    const results = await Promise.allSettled(adapters.map((a) => a.refreshBalances()))
-    // Surface per-adapter failures (consistent with listAllAssets/listAllTransactions):
-    // a silently-swallowed invalidation leaves a stale balance with no diagnostic trail.
-    results.forEach((result, index) => {
-      if (result.status === 'rejected') {
-        this.log.error(`[ProtocolManager] Error refreshing balances for ${adapters[index].protocolName}:`, result.reason)
+    const results = await this.refreshBalancesWithResults()
+    for (const result of results) {
+      if (!result.ok) {
+        this.log.error(`[ProtocolManager] Error refreshing balances for ${result.protocol}:`, result.error)
       }
-    })
+    }
+  }
+
+  /** Refresh every connected adapter and return each outcome without rejecting the batch. */
+  async refreshBalancesWithResults(): Promise<BalanceRefreshResult[]> {
+    const adapters = this.registry.getAll().filter((adapter) => adapter.isConnected())
+    const settled = await Promise.allSettled(adapters.map((adapter) => adapter.refreshBalances()))
+    return settled.map((result, index) => result.status === 'fulfilled'
+      ? { protocol: adapters[index].protocolName, ok: true }
+      : { protocol: adapters[index].protocolName, ok: false, error: result.reason })
   }
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
@@ -391,14 +446,11 @@ export class ProtocolManager {
     return this.getActiveAdapterUnchecked().sendPayment(request)
   }
 
-  /**
-   * Sat amount a send will move, for policy evaluation: the explicit amount, else
-   * the BOLT11's. Undefined only for an amountless invoice with no explicit
-   * amount, which the policy engine denies whenever a spend cap is set.
-   */
+  /** Invoice amount wins because amount-bearing invoices ignore caller overrides. */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
-    if (request.amount != null) return request.amount
-    return decodeBolt11(request.invoice).amountSat
+    const invoiceAmountSat = decodeBolt11(request.invoice).amountSat
+    if (invoiceAmountSat != null) return invoiceAmountSat
+    return request.amount ?? undefined
   }
 
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
@@ -559,8 +611,13 @@ export class ProtocolManager {
 
   async executeSwap(quote: Quote): Promise<SwapResult> {
     const receiverAddress = (quote as Quote & { receiverAddress?: unknown }).receiverAddress
+    // A satoshi cap cannot bound another asset without a price oracle; send its
+    // raw base units to the per-asset policy instead.
+    const fromIsSats = isBtcAssetId(quote.fromAsset)
     this.enforce('swap', {
-      amountSat: quote.fromAmount,
+      amountSat: fromIsSats ? quote.fromAmount : undefined,
+      assetId: fromIsSats ? undefined : quote.fromAsset,
+      assetAmount: fromIsSats ? undefined : String(quote.fromAmount),
       destination: typeof receiverAddress === 'string' ? receiverAddress : undefined,
     })
     const adapter = this.getActiveAdapterUnchecked()
@@ -572,6 +629,34 @@ export class ProtocolManager {
       )
     }
     return adapter.executeSwap(quote)
+  }
+
+  /** Enumerate non-terminal swaps retained by the active adapter. */
+  async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
+    const adapter = this.getActiveAdapterUnchecked()
+    const recovery = asSwapRecoveryOperations(adapter)
+    if (!recovery) {
+      throw new ProtocolError(
+        'Swap recovery not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED',
+      )
+    }
+    return recovery.listIncompleteSwaps()
+  }
+
+  /** Resume maker status inspection by an RFQ id or payment hash. */
+  async resumeSwap(identifier: string, accessToken?: string): Promise<SwapResult> {
+    const adapter = this.getActiveAdapterUnchecked()
+    const recovery = asSwapRecoveryOperations(adapter)
+    if (!recovery) {
+      throw new ProtocolError(
+        'Swap recovery not supported by active protocol',
+        adapter.protocolName,
+        'NOT_SUPPORTED',
+      )
+    }
+    return recovery.resumeSwap(identifier, accessToken)
   }
 
   // ========================================================================

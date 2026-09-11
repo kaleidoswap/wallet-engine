@@ -64,12 +64,18 @@ describe('ProtocolManager lifecycle ownership', () => {
     manager.registerAdapter(stalled)
     manager.registerAdapter(second)
 
-    const disconnecting = manager.disconnectAll()
+    // Handler attached at creation: the rejection lands mid-`advanceTimers`.
+    const disconnecting = manager.disconnectAll().catch((e: unknown) => e as Error)
     await Promise.resolve()
     expect(second.isConnected()).toBe(false)
     expect(manager.getActiveProtocol()).toBeNull()
 
     await vi.advanceTimersByTimeAsync(2_001)
-    await expect(disconnecting).resolves.toBeUndefined()
+    // Was: `resolves.toBeUndefined()`. The BOUND is what this case tests — the
+    // healthy adapter came down above, before the stalled one's timer elapsed,
+    // and the call settles rather than hanging. It now settles as a REJECTION
+    // naming the adapter that did not come down (audit finding A-F9): reporting
+    // a successful lock over a still-connected adapter was the defect.
+    expect((await disconnecting).message).toMatch(/BTC/)
   })
 })
