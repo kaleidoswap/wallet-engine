@@ -38,6 +38,10 @@ on:
         description: 'Fail (not skip) when a wallet is too empty to send'
         type: boolean
         default: false
+      require_endpoints:
+        description: 'Fail (not skip) when a test network is unreachable'
+        type: boolean
+        default: false
 
 concurrency:
   # The suites are stateful per wallet (rgb-lib data dirs, wallet balances) —
@@ -82,4 +86,9 @@ jobs:
           # no check. Dispatch with `require_funded` when the funding level is
           # the thing being tested.
           REQUIRE_FUNDED_WALLETS: ${{ (github.event_name == 'workflow_dispatch' && inputs.require_funded) && '1' || '' }}
+          # An unreachable test network SKIPS its suite rather than failing the
+          # job, for the same reason: mutinynet, liquidtestnet and the regtest
+          # server going down is not a regression in this repo, and a job that
+          # cannot tell the two apart stops being read at all.
+          REQUIRE_LIVE_ENDPOINTS: ${{ (github.event_name == 'workflow_dispatch' && inputs.require_endpoints) && '1' || '' }}
         run: npm run test:integration
