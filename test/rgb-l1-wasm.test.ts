@@ -416,9 +416,9 @@ describe('RgbLibWasmAdapter', () => {
     })
 
     it('reads through the prototype getters of a wasm-bindgen instance', async () => {
-      // rgb-lib-wasm returns a class instance with no enumerable own
-      // properties: spreading or structured-cloning one yields `{}`, which is
-      // how issuance used to surface as a hollow success.
+      // Current builds return plain serde objects; keep the getter walk so a
+      // build that hands back a class instance (no enumerable own properties,
+      // so `{ ...raw }` is `{}`) still normalizes.
       class WasmAssetNia {
         get assetId() {
           return 'rgb:WASM'
@@ -473,6 +473,120 @@ describe('RgbLibWasmAdapter', () => {
       await expect(adapter.issueAssetNia({ ticker: 'X', name: 'X', amounts: [] })).rejects.toThrow(
         /at least one issuance amount/i
       )
+    })
+
+    it('carries the issuance fields into metadata (camelCase)', async () => {
+      const media = { filePath: '/tmp/logo.png', mime: 'image/png' }
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: {} }),
+        issueAssetNia: () => ({
+          assetId: 'rgb:META',
+          ticker: 'META',
+          name: 'Meta',
+          precision: 0,
+          issuedSupply: 1500,
+          timestamp: 1_700_000_000,
+          addedAt: 1_700_000_001,
+          media,
+          balance: { settled: 1500, spendable: 1500 },
+        }),
+      })
+      const asset = await adapter.issueAssetNia({ ticker: 'META', name: 'Meta', amounts: [1000, 500] })
+      expect(asset.metadata).toEqual({
+        issued_supply: 1500,
+        timestamp: 1_700_000_000,
+        added_at: 1_700_000_001,
+        media,
+      })
+    })
+
+    it('carries the issuance fields into metadata (snake_case, no media)', async () => {
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: {} }),
+        issueAssetNia: () => ({
+          asset_id: 'rgb:SNAKE',
+          ticker: 'SNK',
+          issued_supply: '42',
+          timestamp: 1_700_000_000,
+          added_at: 1_700_000_002,
+          media: null,
+        }),
+      })
+      const asset = await adapter.issueAssetNia({ ticker: 'SNK', name: 'Snake', amounts: [42] })
+      expect(asset.metadata).toEqual({ issued_supply: 42, timestamp: 1_700_000_000, added_at: 1_700_000_002 })
+    })
+
+    it('leaves metadata unset when the binding reports no issuance fields', async () => {
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: {} }),
+        issueAssetNia: () => ({ assetId: 'rgb:BARE', ticker: 'BARE' }),
+      })
+      const asset = await adapter.issueAssetNia({ ticker: 'BARE', name: 'Bare', amounts: [1] })
+      expect(asset.metadata).toBeUndefined()
+    })
+
+    it('wraps a wasm throw (a bare string) into a ProtocolError with a stable code', async () => {
+      let flushed = false
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: {} }),
+        issueAssetNia: () => {
+          throw 'InsufficientAllocationSlots'
+        },
+        flush: async () => {
+          flushed = true
+        },
+      })
+      const err = await adapter.issueAssetNia({ ticker: 'X', name: 'X', amounts: [1] }).catch((e) => e)
+      expect(err).toMatchObject({
+        name: 'ProtocolError',
+        protocol: 'RGB_L1',
+        code: 'ISSUANCE_FAILED',
+        details: { message: 'InsufficientAllocationSlots' },
+      })
+      expect(err.message).toMatch(/NIA issuance failed: InsufficientAllocationSlots/)
+      // Nothing was issued, so there is no state worth flushing.
+      expect(flushed).toBe(false)
+    })
+
+    it('wraps an Error thrown by the binding the same way', async () => {
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: {} }),
+        issueAssetNia: () => {
+          throw new Error('wallet is offline')
+        },
+      })
+      const err = await adapter.issueAssetNia({ ticker: 'X', name: 'X', amounts: [1] }).catch((e) => e)
+      expect(err).toMatchObject({ code: 'ISSUANCE_FAILED', details: { message: 'wallet is offline' } })
+    })
+
+    it.each([[0], [-1], [1.5], [Number.NaN], [Number.MAX_SAFE_INTEGER + 1], [10, 0]])(
+      'rejects amounts %j before calling into wasm',
+      async (...amounts) => {
+        let called = false
+        const adapter = connected({
+          getBtcBalance: () => ({ vanilla: {} }),
+          issueAssetNia: () => {
+            called = true
+            return { assetId: 'rgb:NO' }
+          },
+        })
+        const err = await adapter.issueAssetNia({ ticker: 'X', name: 'X', amounts }).catch((e) => e)
+        expect(err).toMatchObject({ name: 'ProtocolError', protocol: 'RGB_L1', code: 'BAD_REQUEST' })
+        expect(err.message).toMatch(/positive safe integers/i)
+        expect(called).toBe(false)
+      }
+    )
+
+    it('accepts amounts up to MAX_SAFE_INTEGER', async () => {
+      const adapter = connected({
+        getBtcBalance: () => ({ vanilla: {} }),
+        issueAssetNia: (_t: string, _n: string, _p: number, amounts: number[]) => ({
+          assetId: 'rgb:MAX',
+          issuedSupply: amounts.reduce((a, b) => a + b, 0),
+        }),
+      })
+      const asset = await adapter.issueAssetNia({ ticker: 'MAX', name: 'Max', amounts: [Number.MAX_SAFE_INTEGER] })
+      expect(asset.metadata?.issued_supply).toBe(Number.MAX_SAFE_INTEGER)
     })
   })
 })
