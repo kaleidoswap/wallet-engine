@@ -31,6 +31,26 @@ Without `ALICE_MNEMONIC` + `BOB_MNEMONIC`, every suite reports as skipped.
 - **Send paths (opt-in):** Alice→Bob transfers move real test-network funds and
   are OFF unless you set `RUN_SEND_TESTS=1`.
 
+### When a wallet runs dry
+
+A send test whose wallet cannot cover the amount plus a fee buffer **skips**,
+printing the wallet, the shortfall and what to do about it. It does not fail.
+
+These wallets drain — that is what spending from them means — and a drained
+wallet is a funding fact, not a regression. Failing on it made `Live
+integration` red on `main` for three days and red on every PR touching
+`src/**` whatever the diff (#77); a check that is always red is a check nobody
+reads. The read-only assertions still run, so drift still turns the job red on
+its own.
+
+Set `REQUIRE_FUNDED_WALLETS=1` when the funding level is the thing you are
+checking, and a short wallet fails again. The Integration workflow exposes it
+as the `require_funded` dispatch input.
+
+Note that a zero **spendable** balance is not always an empty wallet: on Arkade,
+boarding UTXOs that were never onboarded read as 0 spendable while the funds are
+there. Check before sending sats — the fix may be an onboard, not a faucet.
+
 ### Skipping a protocol
 
 Set `SKIP_SPARK=1`, `SKIP_LIQUID=1`, `SKIP_ARKADE=1`, or `SKIP_RGB_L1=1` to skip

@@ -45,6 +45,23 @@ export const HAVE_WALLETS = Boolean(ALICE.mnemonic && BOB.mnemonic)
  */
 export const RUN_SEND_TESTS = flag('RUN_SEND_TESTS')
 
+/**
+ * Treat an underfunded wallet as a failure rather than a skip.
+ *
+ * The send tests spend from shared wallets that drain, and a drained wallet is
+ * not a regression — but it used to fail the job exactly as loudly as a broken
+ * transfer, which left `Live integration` red on `main` from 2026-09-08 and on
+ * every PR touching `src/**` regardless of its diff (#77). A check that is
+ * always red reports nothing, and the drift this suite exists to catch gets
+ * waved through with it.
+ *
+ * So the default is: skip the send, say why, and let the rest of the suite
+ * speak. Set this when the answer to "are the wallets funded?" is the question
+ * being asked — a deliberate dispatch before a release, or a funding check —
+ * and a short wallet fails the job again.
+ */
+export const REQUIRE_FUNDED_WALLETS = flag('REQUIRE_FUNDED_WALLETS')
+
 // Per-protocol network + endpoint config. Endpoints default to public servers for
 // the target test network; override any of them via env.
 
