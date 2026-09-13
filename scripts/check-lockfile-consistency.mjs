@@ -1,24 +1,26 @@
-import fs from 'node:fs';
-import path from 'node:path';
+import fs from "node:fs";
+import path from "node:path";
 
 const root = process.cwd();
-const packageJsonPath = path.join(root, 'package.json');
-const npmLockPath = path.join(root, 'package-lock.json');
-const pnpmLockPath = path.join(root, 'pnpm-lock.yaml');
+const packageJsonPath = path.join(root, "package.json");
+const npmLockPath = path.join(root, "package-lock.json");
+const pnpmLockPath = path.join(root, "pnpm-lock.yaml");
 
 const regeneration = [
-  'Regenerate package-lock.json (pnpm-lock.yaml is authoritative):',
-  '  npm install --package-lock-only --ignore-scripts --no-audit --no-fund',
-].join('\n');
+  "Regenerate package-lock.json (pnpm-lock.yaml is authoritative):",
+  "  npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
+].join("\n");
 
 function fail(message) {
-  console.error(`Lockfile consistency check failed:\n${message}\n\n${regeneration}`);
+  console.error(
+    `Lockfile consistency check failed:\n${message}\n\n${regeneration}`,
+  );
   process.exit(1);
 }
 
 function readJson(file, label) {
   try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
+    return JSON.parse(fs.readFileSync(file, "utf8"));
   } catch (error) {
     fail(`Cannot read ${label}: ${error.message}`);
   }
@@ -26,7 +28,7 @@ function readJson(file, label) {
 
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
-  if (value && typeof value === 'object') {
+  if (value && typeof value === "object") {
     return Object.fromEntries(
       Object.entries(value)
         .sort(([left], [right]) => left.localeCompare(right))
@@ -51,67 +53,158 @@ function pnpmVersions(source) {
   let inPackages = false;
 
   for (const line of source.split(/\r?\n/)) {
-    if (line === 'packages:') {
+    if (line === "packages:") {
       inPackages = true;
       continue;
     }
-    if (inPackages && line === 'snapshots:') break;
+    if (inPackages && line === "snapshots:") break;
     if (!inPackages) continue;
 
     const match = line.match(/^  (?:'([^']+)'|"([^"]+)"|([^\s'"][^:]*)):\s*$/);
     if (!match) continue;
 
     const locator = match[1] ?? match[2] ?? match[3];
-    const separator = locator.lastIndexOf('@');
+    const separator = locator.lastIndexOf("@");
     if (separator <= 0) fail(`Cannot parse pnpm package locator: ${locator}`);
-    addVersion(versions, locator.slice(0, separator), locator.slice(separator + 1));
+    addVersion(
+      versions,
+      locator.slice(0, separator),
+      locator.slice(separator + 1),
+    );
   }
 
   if (!inPackages || versions.size === 0) {
-    fail('Cannot find package resolutions in pnpm-lock.yaml.');
+    fail("Cannot find package resolutions in pnpm-lock.yaml.");
   }
   return versions;
+}
+
+/**
+ * Which edge types lead into each node of the npm tree: prod, dev, optional,
+ * peer. Derived from the dependency fields npm records per node, resolved
+ * the way Node does (nearest `node_modules/<name>` walking up), because the
+ * `peer` flag npm writes is not usable for this. arborist sets it on any node
+ * it first reached through a peer edge and clears it only along peer edges
+ * (calc-dep-flags.js), so the flag flips with traversal order: a package
+ * straight out of `dependencies` gains it when a transitive dependency starts
+ * declaring it as a peer, and a genuine peer-only node loses it. Both happened
+ * in the same bump.
+ */
+function npmIncomingEdges(packages) {
+  const incoming = new Map();
+  const resolveFrom = (fromPath, name) => {
+    let base = fromPath;
+    for (;;) {
+      const candidate = base
+        ? `${base}/node_modules/${name}`
+        : `node_modules/${name}`;
+      if (packages[candidate]) return candidate;
+      if (!base) return null;
+      const marker = base.lastIndexOf("/node_modules/");
+      base = marker === -1 ? "" : base.slice(0, marker);
+    }
+  };
+  const fields = [
+    ["dependencies", "prod"],
+    ["optionalDependencies", "optional"],
+    ["peerDependencies", "peer"],
+    ["devDependencies", "dev"],
+  ];
+  for (const [packagePath, metadata] of Object.entries(packages)) {
+    for (const [field, type] of fields) {
+      for (const name of Object.keys(metadata[field] ?? {})) {
+        const to = resolveFrom(packagePath, name);
+        if (!to) continue;
+        if (!incoming.has(to)) incoming.set(to, []);
+        incoming.get(to).push({ type, from: packagePath });
+      }
+    }
+  }
+  return incoming;
+}
+
+/**
+ * Nodes that exist only to satisfy peer ranges: every path from the root to
+ * them crosses a peer edge. That includes the regular dependencies of such a
+ * node — npm installs them, pnpm never resolved the peer, so neither side has
+ * anything to compare. A node with no incoming edge at all is kept; whatever
+ * left it there, it is not a peer artefact.
+ */
+function npmPeerOnlyNodes(packages, incoming) {
+  const peerOnly = new Set();
+  for (;;) {
+    let changed = false;
+    for (const packagePath of Object.keys(packages)) {
+      if (!packagePath || peerOnly.has(packagePath)) continue;
+      const edges = incoming.get(packagePath) ?? [];
+      const isPeerOnly =
+        edges.length > 0 &&
+        edges.every(({ type, from }) => type === "peer" || peerOnly.has(from));
+      if (isPeerOnly) {
+        peerOnly.add(packagePath);
+        changed = true;
+      }
+    }
+    if (!changed) return peerOnly;
+  }
 }
 
 function npmVersions(packages) {
+  const peerOnlyNodes = npmPeerOnlyNodes(packages, npmIncomingEdges(packages));
   const versions = new Map();
+  const peerOnly = new Map();
 
   for (const [packagePath, metadata] of Object.entries(packages)) {
-    // npm materializes optional peer-only nodes that have no pnpm graph entry.
-    if (!packagePath || !metadata.version || metadata.peer) continue;
-    const marker = packagePath.lastIndexOf('node_modules/');
+    if (!packagePath || !metadata.version) continue;
+    const marker = packagePath.lastIndexOf("node_modules/");
     if (marker === -1) continue;
-    addVersion(versions, packagePath.slice(marker + 'node_modules/'.length), metadata.version);
+    const name = packagePath.slice(marker + "node_modules/".length);
+    const key = `${name}@${metadata.version}`;
+    peerOnly.set(
+      key,
+      (peerOnly.get(key) ?? true) && peerOnlyNodes.has(packagePath),
+    );
+    addVersion(versions, name, metadata.version);
+  }
+
+  // npm materializes optional peer-only nodes that have no pnpm graph entry.
+  for (const [name, resolved] of versions) {
+    for (const version of resolved) {
+      if (peerOnly.get(`${name}@${version}`)) resolved.delete(version);
+    }
+    if (resolved.size === 0) versions.delete(name);
   }
 
   return versions;
 }
 
-const packageJson = readJson(packageJsonPath, 'package.json');
-const npmLock = readJson(npmLockPath, 'package-lock.json');
-const npmRoot = npmLock.packages?.[''];
+const packageJson = readJson(packageJsonPath, "package.json");
+const npmLock = readJson(npmLockPath, "package-lock.json");
+const npmRoot = npmLock.packages?.[""];
 
-if (!npmRoot) fail('package-lock.json has no root package entry.');
+if (!npmRoot) fail("package-lock.json has no root package entry.");
 
 const rootFields = [
-  'name',
-  'version',
-  'dependencies',
-  'devDependencies',
-  'optionalDependencies',
-  'peerDependencies',
-  'peerDependenciesMeta',
+  "name",
+  "version",
+  "dependencies",
+  "devDependencies",
+  "optionalDependencies",
+  "peerDependencies",
+  "peerDependenciesMeta",
 ];
 const rootDrift = rootFields.filter(
   (field) => !equal(packageJson[field] ?? {}, npmRoot[field] ?? {}),
 );
 if (rootDrift.length > 0) {
-  fail(`package-lock.json is out of sync with package.json: ${rootDrift.join(', ')}`);
+  fail(
+    `package-lock.json is out of sync with package.json: ${rootDrift.join(", ")}`,
+  );
 }
 
 let pnpmSource;
 try {
-  pnpmSource = fs.readFileSync(pnpmLockPath, 'utf8');
+  pnpmSource = fs.readFileSync(pnpmLockPath, "utf8");
 } catch (error) {
   fail(`Cannot read pnpm-lock.yaml: ${error.message}`);
 }
@@ -124,10 +217,12 @@ const drift = sharedNames.flatMap((name) => {
   const npmResolved = [...npm.get(name)].sort();
   return equal(pnpmResolved, npmResolved)
     ? []
-    : [`${name}: pnpm-lock.yaml=${pnpmResolved.join(', ')}; package-lock.json=${npmResolved.join(', ')}`];
+    : [
+        `${name}: pnpm-lock.yaml=${pnpmResolved.join(", ")}; package-lock.json=${npmResolved.join(", ")}`,
+      ];
 });
 
-if (drift.length > 0) fail(`Resolved version drift:\n- ${drift.join('\n- ')}`);
+if (drift.length > 0) fail(`Resolved version drift:\n- ${drift.join("\n- ")}`);
 
 console.log(
   `Lockfiles agree on ${sharedNames.length} shared packages; package-lock.json matches package.json.`,
