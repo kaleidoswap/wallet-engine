@@ -63,10 +63,10 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
     expect(a.address.startsWith('tlq') || a.address.startsWith('lq')).toBe(true)
   }, 120_000)
 
-  it('sends L-BTC Alice → Bob', async () => {
+  it('sends L-BTC Alice → Bob', async (ctx) => {
     const to = await bob.getReceiveAddress()
     const bal = await withRetry('Alice/Liquid balance (send)', () => alice.getBtcBalance())
-    const amount = spendableSend(bal.total, 'Alice/Liquid')
+    const amount = spendableSend(ctx, bal.total, 'Alice/Liquid')
     const res = await alice.sendPayment({ invoice: to.address, amount })
     expect(res.paymentHash).toBeTruthy()
     expect(res.status).toBe('pending')

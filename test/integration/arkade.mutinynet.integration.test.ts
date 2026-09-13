@@ -47,13 +47,17 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
     expect(ark.address).not.toBe(boarding.address)
   }, 120_000)
 
-  it('sends an Arkade transfer Alice → Bob', async () => {
+  it('sends an Arkade transfer Alice → Bob', async (ctx) => {
     const to = await bob.getReceiveAddress()
     // Send from Alice's SPENDABLE VTXO balance (settled + preconfirmed). If her
     // funds are still in on-chain boarding (total > 0 but confirmed == 0) this fails
     // with an actionable message — boarding UTXOs must be onboarded first.
     const spendable = (await alice.getBtcBalance()).confirmed
-    const amount = spendableSend(spendable, 'Alice/Arkade (spendable VTXOs — onboard boarding funds if 0)')
+    const amount = spendableSend(
+      ctx,
+      spendable,
+      'Alice/Arkade (spendable VTXOs — onboard boarding funds if 0)',
+    )
     const res = await alice.sendPayment({ invoice: to.address, amount })
     expect(res.status).toMatch(/pending|confirmed/)
   }, 180_000)
