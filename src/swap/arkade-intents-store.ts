@@ -28,7 +28,7 @@ const PENDING_PHASES = new Set(['prepared', 'funded'])
 export interface ArkadeIntentsRecord {
   /** The rfq_id — the record key. */
   id: string
-  /** Venue phase: prepared | funded | settled | refunded | cancelled | needs_recovery. */
+  /** Venue phase: prepared | funded | settled | refunded | cancelled | failed | needs_recovery. */
   phase: string
   [key: string]: unknown
 }
