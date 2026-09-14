@@ -20,6 +20,13 @@ export interface ArkadeConfig extends Omit<BaseProtocolConfig, 'network'> {
    * mnemonic; nsec/hex secrets stay single-key.
    */
   walletMode?: 'static' | 'hd'
+  /**
+   * Start the Boltz swaps client on connect. Off by default: the client opens a
+   * WebSocket to the Boltz Ark endpoint and reconnects for the life of the
+   * session, which is pure background noise for a host that reaches Lightning
+   * some other way. Set it only when you call into `arkadeSwapsClientManager`.
+   */
+  boltzSwapsEnabled?: boolean
 }
 
 export interface ArkadeVtxo {
