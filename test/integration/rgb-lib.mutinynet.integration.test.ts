@@ -23,6 +23,7 @@ import {
   safeDisconnect,
   sendOrSkip,
   skipWhenUnavailable,
+  waitForSpendableAsset,
 } from './helpers'
 import type { UnifiedAsset } from '../../src/types/base'
 import type { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
@@ -241,11 +242,20 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       // Holding an asset and being able to spend it are different things: after
       // a transfer the sender's change allocation is unconfirmed, so
-      // `available` reads 0 against a `total` of nearly the whole supply. That
-      // is a fact about confirmations, not a broken adapter.
-      const spendable = (await from.getAssetBalance!(asset!.id)).available
+      // `available` reads 0 against a `total` of nearly the whole supply.
+      //
+      // Wait for it rather than skipping on it. The mode that runs second was
+      // otherwise guaranteed to find 0 spendable — the first transfer having
+      // just consumed it — so witness receive never executed at all, which
+      // makes for a case that reports nothing while looking covered. The wait
+      // also exercises spending the change from a previous transfer, which is
+      // worth a check of its own.
+      let spendable = (await from.getAssetBalance!(asset!.id)).available
       if (spendable < amount) {
-        const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change has not settled yet`
+        spendable = await waitForSpendableAsset(from, asset!.id, amount, `${holder}/${mode}`)
+      }
+      if (spendable < amount) {
+        const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change did not settle in time`
         console.warn(`⚠ SKIPPED — ${reason}`)
         ctx.skip(reason)
         return
@@ -297,6 +307,7 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       const after = (await to.getAssetBalance!(asset!.id)).total
       console.log(`[RGB_L1] ${label} ${amount} of ${asset!.id} — txid ${txid}, recipient total ${before} → ${after}`)
-    }, 300_000)
+      // Room for the settle wait above (180s) plus two live sends.
+    }, 420_000)
   }
 })

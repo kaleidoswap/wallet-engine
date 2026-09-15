@@ -396,3 +396,51 @@ export async function ensureColorableSlots(
   console.log(`[rgb] ${label}: ${have}/${want} free colorable slot(s)`)
   return have
 }
+
+/**
+ * Wait for a wallet's spendable balance of an asset to reach `want`.
+ *
+ * An RGB send leaves the sender's change in an unconfirmed allocation, so
+ * `available` reads 0 against a `total` of nearly the whole supply until the
+ * transfer settles. A second send in the same run therefore has nothing to
+ * spend — which is how the witness-receive case ended up skipping every run
+ * behind the blinded one, never executing at all.
+ *
+ * Polling costs a minute of wall-clock and buys a real second transfer, plus
+ * coverage of something that matters on its own: spending the change from a
+ * previous transfer. `refreshBalances` drives rgb-lib's own refresh, which is
+ * what advances a transfer's state.
+ *
+ * Returns the balance it ends with, so the caller skips on a real number.
+ */
+export async function waitForSpendableAsset(
+  wallet: {
+    getAssetBalance?: (assetId: string) => Promise<{ available: number; total: number }>
+    refreshBalances?: () => Promise<unknown>
+  },
+  assetId: string,
+  want: number,
+  label: string,
+  { timeoutMs = 180_000, pollMs = 10_000 }: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<number> {
+  const read = async (): Promise<number> => {
+    try {
+      await wallet.refreshBalances?.()
+    } catch {
+      /* a refresh that fails is not the answer; the balance below is */
+    }
+    return (await wallet.getAssetBalance?.(assetId))?.available ?? 0
+  }
+
+  let available = await read()
+  if (available >= want) return available
+
+  const deadline = Date.now() + timeoutMs
+  console.log(`[rgb] ${label}: waiting for ${want} spendable of ${assetId} (have ${available})`)
+  while (available < want && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs))
+    available = await read()
+  }
+  console.log(`[rgb] ${label}: ${available} spendable after waiting`)
+  return available
+}

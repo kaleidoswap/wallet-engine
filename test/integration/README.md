@@ -174,6 +174,13 @@ transfer and means "the UTXO I just asked for has not arrived". `ensureColorable
 creates and then polls until the slots are real, and the suite prepares both
 wallets early so confirmation has the rest of the file to happen in.
 
+A second send in the same run has to **wait**: the first one's change is an
+unconfirmed allocation, so the sender's `available` reads 0 against a `total`
+of nearly the whole supply until it settles. Without waiting, whichever receive
+mode runs second always skips and never executes — covered on paper, reporting
+nothing. `waitForSpendableAsset` polls for it, which also exercises spending
+the change from a previous transfer.
+
 This is the failure mode to expect from RGB tests generally: whether a wallet
 has a spare slot depends on what earlier runs left **on-chain**, which outlives
 the ephemeral rgb-lib database. The same commit can pass or fail depending on
