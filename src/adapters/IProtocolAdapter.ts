@@ -251,8 +251,22 @@ export interface ISparkOperations {
     txids?: string[]
     error?: string
   }>
-  /** Sweep every previously-generated single-use Spark deposit address with unclaimed UTXOs. */
-  sweepSparkL1Deposits(): Promise<{ addressesChecked: number; claimedTxids: string[]; errors: string[] }>
+  /**
+   * Sweep previously-generated single-use Spark deposit addresses with unclaimed
+   * UTXOs. Costs one UTXO lookup per address scanned, and the address set only
+   * grows, so a caller on a timer should window it: pass `limit` (and the
+   * previous result's `nextOffset`) to walk the set a slice at a time. Unbounded
+   * when no `limit` is given.
+   */
+  sweepSparkL1Deposits(options?: { limit?: number; offset?: number }): Promise<{
+    addressesChecked: number
+    /** Size of the full unused-address set, whether or not this call scanned it all. */
+    addressesTotal: number
+    /** Offset to resume from, wrapping to 0 once the set has been walked. */
+    nextOffset: number
+    claimedTxids: string[]
+    errors: string[]
+  }>
 }
 
 /** Arkade-specific operations. */

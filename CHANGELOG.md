@@ -7,6 +7,26 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+- **BREAKING: the Arkade adapter no longer starts the Boltz swaps client on
+  connect.** `ArkadeSwaps.create({ swapManager: true })` opens a WebSocket to the
+  Boltz Ark endpoint and reconnects for the life of the session; a host that
+  reaches Lightning another way paid for that loop just by connecting, filling
+  the console with `WebSocket connection timeout`. Set `boltzSwapsEnabled: true`
+  on `ArkadeConfig` to keep the old behaviour — everything that calls into
+  `arkadeSwapsClientManager` needs it. Hosts that never touch that client need
+  no change.
+
+### Changed
+- **`sweepSparkL1Deposits()` takes an optional window.** It costs one
+  `get_utxos_for_address` per unused single-use deposit address, and Spark issues
+  a new address on every receive, so a host sweeping on a timer paid for the
+  whole (growing) set every tick. Pass `{ limit }` — and the previous result's
+  `nextOffset` — to walk the set a slice per sweep; the window wraps, so a
+  rotating caller still covers every address. The result gains `addressesTotal`
+  and `nextOffset`. Calling it with no options is unchanged: full scan,
+  `nextOffset: 0`.
+
 ## [1.0.0-beta.66] - 2026-09-13
 
 Security audit remediation (#71). Items marked **BREAKING** change behaviour a

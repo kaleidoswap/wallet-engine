@@ -23,6 +23,7 @@ import {
   saveSentTokenRecord,
 } from "../lib/spark-sent-token-records";
 import { sparkClientManager } from "../lib/spark-client-manager";
+import { sweepWindow } from "../lib/spark-deposit-sweep-window";
 import { SparkConfig, SparkTransfer } from "../types/spark";
 import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import {
@@ -918,8 +919,10 @@ export class SparkAdapter implements IProtocolAdapter {
    * otherwise stay stranded — the deposit-screen poller only watches the current
    * one. Run on unlock and when the deposit screen opens.
    */
-  async sweepSparkL1Deposits(): Promise<{
+  async sweepSparkL1Deposits(options?: { limit?: number; offset?: number }): Promise<{
     addressesChecked: number;
+    addressesTotal: number;
+    nextOffset: number;
     claimedTxids: string[];
     errors: string[];
   }> {
@@ -934,17 +937,30 @@ export class SparkAdapter implements IProtocolAdapter {
     } catch (error: unknown) {
       return {
         addressesChecked: 0,
+        addressesTotal: 0,
+        nextOffset: 0,
         claimedTxids: [],
         errors: [error instanceof Error ? error.message : "getUnusedDepositAddresses failed"],
       };
     }
     if (!unused || unused.length === 0) {
-      return { addressesChecked: 0, claimedTxids: [], errors: [] };
+      return {
+        addressesChecked: 0,
+        addressesTotal: 0,
+        nextOffset: 0,
+        claimedTxids: [],
+        errors: [],
+      };
     }
 
+    // One UTXO lookup per address, against a set that grows with every receive.
+    // A windowed caller walks it a slice at a time instead of paying for the
+    // whole set on every tick; `nextOffset` wraps so nothing is skipped forever.
+    const total = unused.length;
+    const window = sweepWindow(unused, options);
     const claimedTxids: string[] = [];
     const errors: string[] = [];
-    for (const addr of unused) {
+    for (const addr of window.addresses) {
       try {
         const utxos = await wallet.getUtxosForDepositAddress(addr, 10, 0, true);
         if (!utxos || utxos.length === 0) continue;
@@ -961,7 +977,13 @@ export class SparkAdapter implements IProtocolAdapter {
       }
     }
 
-    return { addressesChecked: unused.length, claimedTxids, errors };
+    return {
+      addressesChecked: window.addresses.length,
+      addressesTotal: total,
+      nextOffset: window.nextOffset,
+      claimedTxids,
+      errors,
+    };
   }
 
   // ========================================================================
