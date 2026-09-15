@@ -167,10 +167,8 @@
   "publishConfig": {
     "access": "public"
   },
-  "pnpm": {
-    "overrides": {
-      "postcss": "8.5.25"
-    }
+  "overrides": {
+    "postcss": "8.5.25"
   },
   "license": "MIT"
 }

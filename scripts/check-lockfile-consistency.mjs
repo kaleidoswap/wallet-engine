@@ -224,6 +224,80 @@ const drift = sharedNames.flatMap((name) => {
 
 if (drift.length > 0) fail(`Resolved version drift:\n- ${drift.join("\n- ")}`);
 
+// --- Overrides: declared in two places, and actually applied ----------------
+//
+// A pin has to be declared once per package manager. npm reads the top-level
+// `overrides` in package.json and ignores everything else; pnpm reads
+// `overrides` from pnpm-workspace.yaml, ignores npm's top-level field, and
+// ignores package.json's `pnpm.overrides` from v11. Both install paths are in
+// CI (`pnpm install --frozen-lockfile` in ci/publish, `npm ci` in
+// integration), so a pin declared in only one place holds for only one of
+// them — silently, because the other resolves something valid and carries on.
+//
+// That is #61: the override was declared where neither CI install could read
+// it. Declaring it twice is the fix; checking it is what keeps it fixed, so
+// this asserts the two declarations agree AND that each lockfile resolved
+// every overridden package to exactly the pinned version. A pin that is
+// declared and not applied is worth no more than no pin at all.
+const declaredNpm = packageJson.overrides ?? {};
+
+let workspaceSource = "";
+try {
+  workspaceSource = fs.readFileSync(path.join(root, "pnpm-workspace.yaml"), "utf8");
+} catch (error) {
+  // A missing file is a real state — no pnpm overrides declared — and the
+  // comparison below reports it. Anything else (a permission error, a typo in
+  // this path) must not be swallowed into "declares nothing", which reads as a
+  // passing check with the override silently unenforced.
+  if (error.code !== "ENOENT") {
+    fail(`Cannot read pnpm-workspace.yaml: ${error.message}`);
+  }
+}
+// The file is ours and tiny: a flat `overrides:` block of `name: version`.
+const declaredPnpm = {};
+const overridesBlock = workspaceSource.match(/^overrides:\n((?:[ \t]+.*\n?)*)/m);
+if (overridesBlock) {
+  for (const line of overridesBlock[1].split("\n")) {
+    const entry = line.match(/^\s+'?([^':\s]+)'?:\s*'?([^'\s]+)'?\s*$/);
+    if (entry) declaredPnpm[entry[1]] = entry[2];
+  }
+}
+
+if (!equal(declaredNpm, declaredPnpm)) {
+  fail(
+    "Override declarations disagree — npm reads package.json `overrides`, " +
+      "pnpm reads pnpm-workspace.yaml `overrides`, and both run in CI.\n" +
+      `  package.json:        ${JSON.stringify(declaredNpm)}\n` +
+      `  pnpm-workspace.yaml: ${JSON.stringify(declaredPnpm)}`,
+  );
+}
+
+const unapplied = Object.entries(declaredNpm).flatMap(([name, version]) => {
+  const problems = [];
+  for (const [label, resolved] of [
+    ["pnpm-lock.yaml", pnpm.get(name)],
+    ["package-lock.json", npm.get(name)],
+  ]) {
+    if (!resolved) continue; // not in that tree at all
+    const versions = [...resolved].sort();
+    if (versions.length !== 1 || versions[0] !== version) {
+      problems.push(`${name}: ${label} has ${versions.join(", ")}, override pins ${version}`);
+    }
+  }
+  return problems;
+});
+
+if (unapplied.length > 0) {
+  fail(
+    `Overrides declared but not applied:\n- ${unapplied.join("\n- ")}\n\n` +
+      "Regenerate both lockfiles:\n" +
+      "  pnpm install --lockfile-only --no-frozen-lockfile\n" +
+      "  npm install --package-lock-only --ignore-scripts --no-audit --no-fund",
+  );
+}
+
+const overrideCount = Object.keys(declaredNpm).length;
 console.log(
-  `Lockfiles agree on ${sharedNames.length} shared packages; package-lock.json matches package.json.`,
+  `Lockfiles agree on ${sharedNames.length} shared packages; package-lock.json matches package.json; ` +
+    `${overrideCount} override${overrideCount === 1 ? "" : "s"} applied in both.`,
 );
