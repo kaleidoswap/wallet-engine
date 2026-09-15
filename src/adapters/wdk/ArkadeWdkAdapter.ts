@@ -36,6 +36,8 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { ensureEventSource, EVENT_SOURCE_MISSING_REASON } from '../../lib/arkade-eventsource'
+import { NON_PERSISTENT_STORAGE_REASON, resolveArkadeStorage } from '../../lib/arkade-storage'
+import { runArkadeVtxoLifecycle } from '../../lib/arkade-vtxo-lifecycle'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
@@ -119,6 +121,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       esploraUrl?: string
       swapProviderUrl?: string
       eventSource?: unknown
+      delegatorUrl?: string
+      delegationEnabled?: boolean
+      storage?: { walletRepository: unknown; contractRepository: unknown }
     }
     if (!cfg.mnemonic) throw new ProtocolError('ArkadeWdkAdapter requires a mnemonic', 'ARKADE', 'CONFIG')
     await this.releasePreviousConnection()
@@ -134,6 +139,33 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         ...(cfg.esploraUrl ? { esploraUrl: cfg.esploraUrl } : {}),
         ...(cfg.swapProviderUrl ? { swapProviderUrl: cfg.swapProviderUrl } : {}),
       } as Record<string, any>)
+    // Load the SDK first: the WDK spreads this config straight into
+    // `Wallet.create`, so anything we add here reaches the SDK wallet — which is
+    // the only way to give a WDK-built wallet a delegator or real storage.
+    // @ts-ignore — resolved at runtime; a transitive dep of the WDK Arkade module.
+    this.arkSdk = await loadWdkModule('@arkade-os/sdk', () => import('@arkade-os/sdk'))
+
+    // Persistent repositories where the runtime has them. The WDK substitutes
+    // in-memory ones whenever `storage` is absent, which wipes the contract
+    // rows the signer-rotation migration reads. See `lib/arkade-storage`.
+    const resolved = resolveArkadeStorage(this.arkSdk, cfg.storage)
+    arkadeConfig.storage = resolved.storage
+    this.storagePersistent = resolved.persistent
+    if (!resolved.persistent) console.warn(`[ArkadeWdkAdapter] ${NON_PERSISTENT_STORAGE_REASON}`)
+
+    // Delegation: the delegator settles on the wallet's behalf, so VTXOs are
+    // renewed even when this process is not around to join a round. On by
+    // default once a URL is configured — the failure mode of NOT delegating is
+    // funds expiring, which is worse than the failure mode of delegating.
+    const delegatorUrl = cfg.delegatorUrl
+    this.delegationEnabled = Boolean(delegatorUrl) && cfg.delegationEnabled !== false
+    this.delegatorUrl = delegatorUrl
+    if (this.delegationEnabled && delegatorUrl) {
+      // `delegateProvider` is canonical; `delegatorProvider` is its deprecated
+      // alias. The SDK reads both, so set the one that is not deprecated.
+      arkadeConfig.delegateProvider = new this.arkSdk.RestDelegatorProvider(delegatorUrl)
+    }
+
     // @ts-ignore — external module, resolved at runtime in the consuming app.
     const mod = await loadWdkModule('@arkade-os/wdk', () => import('@arkade-os/wdk'))
     const WalletManagerArkade = mod.default ?? mod.WalletManagerArkade ?? mod
@@ -141,9 +173,6 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // BIP-39 string validation (which throws "The seed phrase is invalid").
     this.manager = new WalletManagerArkade(resolveWalletSeed(cfg.mnemonic), arkadeConfig)
     this.account = await this.manager.getAccount(cfg.accountIndex ?? 0)
-    // Lazy-load the SDK for Ramps (onboard/offboard). Off the static import graph.
-    // @ts-ignore — resolved at runtime; a transitive dep of the WDK Arkade module.
-    this.arkSdk = await loadWdkModule('@arkade-os/sdk', () => import('@arkade-os/sdk'))
     // The SDK settles through the server's event stream, so a runtime without
     // `EventSource` cannot renew a VTXO at all — it expires and is swept. Said
     // once here rather than 57 times a poll from inside the SDK.
@@ -155,6 +184,56 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   /** False when the runtime has no `EventSource`; see `lib/arkade-eventsource`. */
   private eventSourceAvailable = true
 
+  /** False when VTXO/contract rows are in-memory; see `lib/arkade-storage`. */
+  private storagePersistent = true
+
+  /** True when a delegator is wired and will settle on this wallet's behalf. */
+  private delegationEnabled = false
+
+  /**
+   * Everything this connection cannot do that a host would assume it can, and
+   * that no call will fail to report. All three are silent by nature: the
+   * wallet keeps answering, and the consequence arrives weeks later as funds
+   * that are simply gone.
+   */
+  private degradations(): string[] {
+    const reasons: string[] = []
+    if (!this.eventSourceAvailable) reasons.push(EVENT_SOURCE_MISSING_REASON)
+    if (!this.storagePersistent) reasons.push(NON_PERSISTENT_STORAGE_REASON)
+    // Not delegating is not itself a fault — a host may settle on its own — but
+    // with no delegator AND no event stream nothing can renew a VTXO at all.
+    if (!this.delegationEnabled && !this.eventSourceAvailable) {
+      reasons.push(
+        'No delegator is configured and this runtime cannot settle for itself, so nothing will renew a VTXO before its batch expires. ' +
+          'Set ArkadeConfig.delegatorUrl.',
+      )
+    }
+    return reasons
+  }
+
+  /**
+   * Run one VTXO-lifecycle pass: renew expiring VTXOs, report recoverable and
+   * expired-boarding balances, and delegate spendable VTXOs when a delegator is
+   * configured. Every stage is best-effort and isolated.
+   *
+   * Exposed because nothing else drives it on this adapter. The SDK's own
+   * periodic settle covers the common case, and a host that wants to force a
+   * pass — on resume, before a withdrawal, on a schedule it controls — had no
+   * way to ask for one.
+   */
+  async runVtxoLifecycle(): Promise<Awaited<ReturnType<typeof runArkadeVtxoLifecycle>>> {
+    this.assertConnected()
+    const wallet = this.rawWallet
+    return runArkadeVtxoLifecycle({
+      vtxoManager: await wallet.getVtxoManager(),
+      wallet,
+      config: { delegationEnabled: this.delegationEnabled, delegatorUrl: this.delegatorUrl },
+    })
+  }
+
+  /** Delegator endpoint in use, when delegation is on. */
+  private delegatorUrl: string | undefined
+
   async getConnectionInfo(): Promise<ConnectionInfo> {
     this.assertConnected()
     return {
@@ -164,7 +243,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       syncStatus: { synced: true, progress: 100 },
       // `connected` on its own would let a host believe its funds are safe
       // while settlement is impossible and the batch expiry runs down.
-      ...(this.eventSourceAvailable ? {} : { degraded: [EVENT_SOURCE_MISSING_REASON] }),
+      ...(this.degradations().length ? { degraded: this.degradations() } : {}),
     }
   }
 

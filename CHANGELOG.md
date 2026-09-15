@@ -8,6 +8,45 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 ## [Unreleased]
 
 ### Fixed
+- **Arkade VTXOs are renewed again, and the funds that had already expired came
+  back.** `ArkadeWdkAdapter` declared `delegatorUrl` and `delegationEnabled` in
+  its config type and read neither — the live suite had been passing a delegator
+  URL on every connect for months and the adapter dropped it. The delegator
+  settles on the wallet's behalf, so VTXOs are renewed whether or not this
+  process is around to join a round; that is the durable answer to #83, and a
+  better one than the `EventSource` flag alone.
+  - The delegator is wired through `Wallet.create` (the WDK spreads its config
+    straight through), using the canonical `delegateProvider` rather than the
+    deprecated `delegatorProvider` alias. On by default once a URL is set: the
+    failure mode of not delegating is funds expiring.
+  - **`ArkadeConfig.storage`** — the WDK substitutes in-memory repositories
+    whenever `storage` is absent and we never passed any, so every wallet
+    rebuilt its wallet *and contract* rows on each connect. The contract rows
+    are what the deprecated-signer migration reads. Now IndexedDB where the
+    runtime has it, in-memory with a stated warning where it does not.
+  - **`runVtxoLifecycle()`** on the adapter drives the existing
+    `runArkadeVtxoLifecycle` — renew, recover, boarding-expiry, delegate —
+    which nothing had been calling on this path.
+  - `getConnectionInfo().degraded` now covers storage and "no delegator and no
+    way to settle for yourself" alongside the missing `EventSource`.
+
+  Measured on the live mutinynet wallets: Bob's 76 stranded VTXOs renewed in one
+  transaction and his balance went from **0 spendable of 1,596,449 to fully
+  spendable**; the Arkade suite went from a permanently skipped send to 5/5
+  passing.
+
+### Added
+- **`lib/arkade-identity`** names the two incompatible Arkade derivations the
+  engine already shipped. `ArkadeAdapter` derives `m/86'/{coin}'/0'/0/0` and
+  `ArkadeWdkAdapter` derives `m/86'/{coin}/0'/0/{index}` — the coin-type level
+  is hardened in one and not the other, so the same mnemonic opens two
+  different wallets with two different address sets and nothing says so. A host
+  that switched adapters would find an empty wallet and its funds in the
+  derivation it left. The choice is now explicit (`WDK_COMPAT` /
+  `BIP86_HARDENED`) and the WDK values are frozen in tests, verified
+  byte-identical against the live wallets.
+
+### Fixed
 - **Arkade settlement now works on Node, which means VTXOs stop expiring.**
   `@arkade-os/sdk` reaches the Ark server's event stream through the global
   `EventSource`, and it needs that stream to *complete a settle*, not merely to
