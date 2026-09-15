@@ -334,3 +334,65 @@ export async function returnFunds(label: string, send: () => Promise<unknown>): 
     console.warn(`\u21a9 return leg did not go through (not a test failure) — ${label}: ${messageOf(error)}`)
   }
 }
+
+/**
+ * Make sure a wallet has `want` colorable UTXOs carrying no allocation, and
+ * wait until they are actually usable.
+ *
+ * `createRgbUtxos` broadcasts a transaction. The outputs it creates do not
+ * exist for the wallet until that transaction confirms, so a test that creates
+ * and immediately sends gets `InsufficientAllocationSlots` — which reads as a
+ * broken transfer and means "the UTXO I just asked for has not arrived". The
+ * first version of this suite did exactly that, and passed or failed depending
+ * on whether an earlier run happened to leave a spare slot on-chain: the
+ * rgb-lib database is ephemeral per runner, but its UTXOs are not.
+ *
+ * So: create, then poll until the slots appear. Returns what it ended up with,
+ * so a caller can skip with a real number instead of an assumption.
+ *
+ * Slots are per-UTXO because rgb-lib runs `maxAllocationsPerUtxo: 1` here. A
+ * sender needs two — one holds the asset, one takes the change — and a blinded
+ * recipient needs one. A witness recipient needs none, which is the point of
+ * witness receive.
+ */
+export async function ensureColorableSlots(
+  wallet: {
+    countFreeColorableSlots?: () => Promise<number>
+    createRgbUtxos?: (p: { num?: number; upTo?: boolean }) => Promise<unknown>
+    refreshBalances?: () => Promise<unknown>
+  },
+  want: number,
+  label: string,
+  { timeoutMs = 120_000, pollMs = 5_000 }: { timeoutMs?: number; pollMs?: number } = {},
+): Promise<number> {
+  const count = async (): Promise<number> => {
+    try {
+      await wallet.refreshBalances?.()
+    } catch {
+      /* a refresh that fails is not itself the answer; the count below is */
+    }
+    return (await wallet.countFreeColorableSlots?.()) ?? 0
+  }
+
+  let have = await count()
+  if (have >= want) return have
+
+  try {
+    await wallet.createRgbUtxos?.({ num: want, upTo: true })
+  } catch (error) {
+    // `AllocationsAlreadyAvailable` is the postcondition already met, stated as
+    // an error. Anything else is worth seeing, but not worth failing on here —
+    // the poll below decides, and the caller skips on the number it gets.
+    if (!/AllocationsAlreadyAvailable/.test(describeError(error))) {
+      console.warn(`[rgb] ${label}: createRgbUtxos(${want}) — ${describeError(error)}`)
+    }
+  }
+
+  const deadline = Date.now() + timeoutMs
+  while (have < want && Date.now() < deadline) {
+    await new Promise((r) => setTimeout(r, pollMs))
+    have = await count()
+  }
+  console.log(`[rgb] ${label}: ${have}/${want} free colorable slot(s)`)
+  return have
+}

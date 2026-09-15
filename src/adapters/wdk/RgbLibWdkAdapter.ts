@@ -256,6 +256,26 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return { psbt: signed ?? psbtHex, unchanged: !signed || signed === psbtHex }
   }
 
+  /**
+   * Unspent outputs with their RGB allocations.
+   *
+   * The only way to answer "can this wallet receive or spend an RGB allocation
+   * right now", which `createRgbUtxos` cannot: creating a colorable UTXO
+   * broadcasts a transaction, and the output is unusable until it confirms. A
+   * caller that treats creation as instantaneous gets
+   * `InsufficientAllocationSlots` from the send instead.
+   */
+  async listUnspents(): Promise<Array<{ utxo: { outpoint: { txid: string; vout: number }; btcAmount: number; colorable: boolean }; rgbAllocations: unknown[] }>> {
+    this.assertConnected()
+    return (await this.account.listUnspents()) ?? []
+  }
+
+  /** Colorable UTXOs carrying no allocation — the slots a receive or a change output can use. */
+  async countFreeColorableSlots(): Promise<number> {
+    const unspents = await this.listUnspents()
+    return unspents.filter((u) => u?.utxo?.colorable && (u.rgbAllocations?.length ?? 0) === 0).length
+  }
+
   async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }): Promise<{ success: boolean }> {
     this.assertConnected()
     await this.account.createUtxos(params)

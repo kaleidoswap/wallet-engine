@@ -17,6 +17,7 @@ import {
   assertFunded,
   connectRgbL1,
   describeError,
+  ensureColorableSlots,
   liveSetup,
   returnFunds,
   safeDisconnect,
@@ -103,17 +104,28 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
     expect(addr.address.length).toBeGreaterThan(0)
   }, 120_000)
 
-  it('ensures colorable UTXOs exist for receiving RGB', async () => {
-    // `upTo` = "make sure at least N colorable UTXOs exist". If the wallet
-    // already has them, rgb-lib throws AllocationsAlreadyAvailable — that's the
-    // postcondition already met, not a failure, so treat it as success.
-    try {
-      const res = await alice.createRgbUtxos!({ num: 1, upTo: true })
-      expect(res.success).toBe(true)
-    } catch (err) {
-      expect(String(err)).toMatch(/AllocationsAlreadyAvailable/)
-    }
-  }, 180_000)
+  /**
+   * Prepare colorable UTXOs on BOTH wallets, and wait for them.
+   *
+   * Early on purpose. `createRgbUtxos` broadcasts a transaction and its outputs
+   * are unusable until it confirms, so doing this immediately before a send
+   * fails with `InsufficientAllocationSlots` — which is what happened, and it
+   * passed or failed depending on what an earlier run left on-chain.
+   *
+   * Two slots each: a sender needs one for the asset it holds and one for the
+   * change, and either wallet may end up being the sender. It does not assert a
+   * count — mutinynet decides when a transaction confirms — it just gets the
+   * work started as early as the file allows, and the transfer tests skip with
+   * a real number if the slots have not landed by then.
+   */
+  it('prepares colorable UTXOs on both wallets', async () => {
+    const [aliceSlots, bobSlots] = await Promise.all([
+      ensureColorableSlots(alice, 2, 'alice', { timeoutMs: 60_000 }),
+      ensureColorableSlots(bob, 2, 'bob', { timeoutMs: 60_000 }),
+    ])
+    expect(aliceSlots).toBeGreaterThanOrEqual(0)
+    expect(bobSlots).toBeGreaterThanOrEqual(0)
+  }, 240_000)
 
   /**
    * Reuse a NIA asset either wallet already holds, and issue one only when
@@ -198,89 +210,93 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
   }, 300_000)
 
   /**
-   * Move the asset between the wallets: a blinded receive on one side, a
-   * consignment through the RGB proxy, a witness transaction on the other.
+   * Move the asset between the wallets, once per receive mode.
    *
-   * Direction follows whoever holds it, so the suite stays runnable whichever
-   * way the last run left the balance — and does not need a fresh issuance to
-   * have something to send.
+   * The two modes differ in who supplies the output the asset lands on, which
+   * is the whole reason to cover both:
    *
-   * What this asserts is the send: an RGB transfer built, signed and broadcast,
-   * with a txid to reconcile. Arrival is reported, not asserted — the recipient
-   * cannot see a spendable allocation until the transfer confirms and both
-   * wallets refresh, and a test that waited on mutinynet confirmations would be
-   * a flake generator rather than a check.
+   * - **blinded** — the recipient reserves one of its own colorable UTXOs and
+   *   hands back a blinded outpoint. Needs a free slot on the receiving side.
+   * - **witness** — the sender creates the output in the transfer itself. The
+   *   recipient needs no colorable UTXO at all, which makes it the mode that
+   *   works for a wallet that has never held RGB.
+   *
+   * Direction follows whoever holds the asset, so the suite stays runnable
+   * whichever way the last run left the balance.
+   *
+   * Each asserts the send: a transfer built, signed and broadcast, with a txid
+   * to reconcile. Arrival is reported, not asserted — the recipient cannot see
+   * a spendable allocation until the transfer confirms and both wallets
+   * refresh, and waiting on mutinynet confirmations would make a flake
+   * generator rather than a check.
    */
-  it.skipIf(!RUN_SEND_TESTS)('transfers the asset between Alice and Bob', async (ctx) => {
-    if (!asset || !holder) ctx.skip('no NIA asset available to transfer')
+  for (const mode of ['blinded', 'witness'] as const) {
+    it.skipIf(!RUN_SEND_TESTS)(`transfers the asset by ${mode} receive`, async (ctx) => {
+      if (!asset || !holder) ctx.skip('no NIA asset available to transfer')
 
-    const from = holder === 'alice' ? alice : bob
-    const to = holder === 'alice' ? bob : alice
-    const label = holder === 'alice' ? 'Alice → Bob' : 'Bob → Alice'
-    const amount = 10
+      const from = holder === 'alice' ? alice : bob
+      const to = holder === 'alice' ? bob : alice
+      const label = `${holder === 'alice' ? 'Alice → Bob' : 'Bob → Alice'} (${mode})`
+      const amount = 10
 
-    // Holding an asset and being able to spend it are different things: after a
-    // transfer the sender's change allocation is unconfirmed, so `available`
-    // reads 0 against a `total` of nearly the whole supply until it settles.
-    // That is a fact about confirmations, not a broken adapter — the same trade
-    // `spendableSend` makes for BTC, and `sendOrSkip` catches rgb-lib's own
-    // `InsufficientAssignments` refusal if this precondition is too optimistic.
-    const spendable = (await from.getAssetBalance!(asset!.id)).available
-    if (spendable < amount) {
-      const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change has not settled yet`
-      console.warn(`⚠ SKIPPED — ${reason}`)
-      ctx.skip(reason)
-      return
-    }
-
-    // Both sides need colorable UTXOs, and for different reasons.
-    //
-    // The recipient needs one to receive into. The SENDER needs two: rgb-lib
-    // here runs `maxAllocationsPerUtxo: 1`, so the allocation it already holds
-    // occupies one UTXO and the change allocation the send creates needs
-    // another. Preparing only the recipient left the sender to fail in
-    // `quoteTransfer` with `InsufficientAllocationSlots` — which reads like a
-    // broken transfer and is really "nowhere to put the change".
-    //
-    // `upTo` means "ensure at least N exist"; rgb-lib throws
-    // `AllocationsAlreadyAvailable` when the postcondition is already met,
-    // which is success stated as an error.
-    for (const [wallet, num] of [
-      [from, 2],
-      [to, 1],
-    ] as const) {
-      try {
-        await wallet.createRgbUtxos!({ num, upTo: true })
-      } catch (err) {
-        expect(String(err)).toMatch(/AllocationsAlreadyAvailable/)
+      // Holding an asset and being able to spend it are different things: after
+      // a transfer the sender's change allocation is unconfirmed, so
+      // `available` reads 0 against a `total` of nearly the whole supply. That
+      // is a fact about confirmations, not a broken adapter.
+      const spendable = (await from.getAssetBalance!(asset!.id)).available
+      if (spendable < amount) {
+        const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change has not settled yet`
+        console.warn(`⚠ SKIPPED — ${reason}`)
+        ctx.skip(reason)
+        return
       }
-    }
 
-    // Name the asset in the invoice only when the recipient already knows it.
-    // rgb-lib answers `AssetNotFound` for an asset id its wallet has never seen,
-    // and a first-time recipient by definition has not: the asset reaches it
-    // through the sender's consignment, not through the invoice. So the first
-    // transfer asks for a bare blinded UTXO, and later ones can bind to the
-    // asset. (This is what the first CI run of this test taught us.)
-    const recipientKnowsAsset = (await to.listAssets()).some((a) => a.id === asset!.id)
-    const invoice: any = await to.createRgbInvoice!(
-      recipientKnowsAsset ? { assetId: asset!.id, amount } : { amount },
-    )
-    const recipient: string = invoice?.invoice ?? invoice
-    expect(typeof recipient).toBe('string')
-    expect(recipient.startsWith('rgb:')).toBe(true)
+      // The sender always needs a slot for its change. A blinded recipient
+      // needs one to receive into; a witness recipient needs none, and asking
+      // for one anyway would hide the difference this test exists to cover.
+      const senderSlots = await ensureColorableSlots(from, 1, `${holder}/sender`)
+      if (senderSlots < 1) {
+        const reason = `${holder}/RGB-L1 has no free colorable UTXO for the change output — createRgbUtxos has not confirmed yet`
+        console.warn(`⚠ SKIPPED — ${reason}`)
+        ctx.skip(reason)
+        return
+      }
+      if (mode === 'blinded') {
+        const recipientSlots = await ensureColorableSlots(to, 1, `${holder === 'alice' ? 'bob' : 'alice'}/recipient`)
+        if (recipientSlots < 1) {
+          const reason = `the ${mode} recipient has no free colorable UTXO to receive into — createRgbUtxos has not confirmed yet`
+          console.warn(`⚠ SKIPPED — ${reason}`)
+          ctx.skip(reason)
+          return
+        }
+      }
 
-    const before = (await to.getAssetBalance!(asset!.id)).total
+      // Name the asset in the invoice only when the recipient already knows it.
+      // rgb-lib answers `AssetNotFound` for an asset id its wallet has never
+      // seen, and a first-time recipient by definition has not: the asset
+      // reaches it through the sender's consignment, not through the invoice.
+      const recipientKnowsAsset = (await to.listAssets()).some((a) => a.id === asset!.id)
+      const invoice: any = await to.createRgbInvoice!({
+        ...(recipientKnowsAsset ? { assetId: asset!.id } : {}),
+        amount,
+        ...(mode === 'witness' ? { witness: true } : {}),
+      })
+      const recipient: string = invoice?.invoice ?? invoice
+      expect(typeof recipient).toBe('string')
+      expect(recipient.startsWith('rgb:')).toBe(true)
 
-    const res: any = await sendOrSkip(ctx, `RGB-L1 ${label}`, () =>
-      from.sendAsset!({ token: asset!.id, recipient, amount }),
-    )
-    const txid = res?.hash ?? res?.txid ?? ''
-    expect(txid).toBeTruthy()
-    expect(txid).not.toBe('unknown')
-    sentAmount = amount
+      const before = (await to.getAssetBalance!(asset!.id)).total
 
-    const after = (await to.getAssetBalance!(asset!.id)).total
-    console.log(`[RGB_L1] ${label} ${amount} of ${asset!.id} — txid ${txid}, recipient total ${before} → ${after}`)
-  }, 300_000)
+      const res: any = await sendOrSkip(ctx, `RGB-L1 ${label}`, () =>
+        from.sendAsset!({ token: asset!.id, recipient, amount }),
+      )
+      const txid = res?.hash ?? res?.txid ?? ''
+      expect(txid).toBeTruthy()
+      expect(txid).not.toBe('unknown')
+      sentAmount = amount
+
+      const after = (await to.getAssetBalance!(asset!.id)).total
+      console.log(`[RGB_L1] ${label} ${amount} of ${asset!.id} — txid ${txid}, recipient total ${before} → ${after}`)
+    }, 300_000)
+  }
 })
