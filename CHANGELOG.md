@@ -7,6 +7,40 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+- **BREAKING (peer): the Arkade adapter is built on `@arkade-os/sdk` directly.**
+  `@arkade-os/wdk` is no longer used by any code path. It hard-pins
+  `@arkade-os/sdk` at exactly `0.4.35`, which held the Arkade path behind
+  everything the SDK learned since — including per-connection `EventSource`
+  injection, which is what settlement needs. `arkade-os/wallet`, the reference
+  wallet, uses the SDK directly too.
+  - **The `@arkade-os/sdk` peer floor rises to `^0.4.72`.** Below it,
+    `RestArkProvider`'s `eventSource` option does not exist and is silently
+    ignored — and silently ignored here means settlement stops and VTXOs
+    expire, which is the failure this change exists to end. `@arkade-os/wdk` is
+    no longer a peer at all; hosts can drop it.
+  - **Addresses do not change.** Identities derive `WDK_COMPAT`
+    (`lib/arkade-identity`), verified byte-identical to what the WDK built for
+    the live wallets — same `tark1…`, same `tb1p…` boarding address.
+  - Providers are explicit (`arkProvider`, `indexerProvider`, `onchainProvider`)
+    rather than the deprecated URL fields, which is also the only way to pass an
+    SSE transport per connection instead of mutating a global.
+  - Boltz swaps are constructed by the adapter, so the opt-in from #81 finally
+    applies here: the swap manager's reconnecting WebSocket starts only when
+    `boltzSwapsEnabled` is set. The WDK always started one.
+  - `onboard`/`offboard` no longer mix versions — they handed a 0.4.35 `Wallet`
+    to a `Ramps` resolved from the top-level 0.4.72, 37 patch releases apart, on
+    the path that moves funds on-chain.
+  - `executeProtocolOperation` routes its own allowlist, split by owner: the
+    Lightning operations belong to the swaps client, the rest to the wallet.
+  - The class name and import path are unchanged. A rename is a migration hosts
+    would make for no behavioural gain.
+
+  Measured on the live wallets: `invalid scalar: out of range` — the
+  two-wallet-per-process SDK bug tracked in #74, which 0.4.35 still had —
+  **drops to zero**, and Alice's Arkade spendable balance went from 1,422,628 to
+  3,010,524 as her boarding funds finally settled.
+
 ### Fixed
 - **Arkade VTXOs are renewed again, and the funds that had already expired came
   back.** `ArkadeWdkAdapter` declared `delegatorUrl` and `delegationEnabled` in

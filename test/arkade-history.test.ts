@@ -17,7 +17,7 @@ function adapterWith(history: any[]): ArkadeWdkAdapter {
   const adapter = new ArkadeWdkAdapter()
   Object.assign(adapter as any, {
     connected: true,
-    account: { getTransactionHistory: async () => history },
+    wallet: { getTransactionHistory: async () => history },
   })
   return adapter
 }

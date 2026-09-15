@@ -145,9 +145,12 @@ describe('escape-hatch hardening checks (extends M3 verification)', () => {
     Object.assign(adapter as any, { connected: true, account })
     return adapter
   }
-  function connectedArkade(account: Record<string, unknown>) {
+  function connectedArkade(surface: Record<string, unknown>) {
     const adapter = new ArkadeWdkAdapter()
-    Object.assign(adapter as any, { connected: true, account })
+    // The Arkade path builds its SDK wallet directly, so the hatch dispatches
+    // against `wallet`/`swaps` rather than a WDK account. The property the
+    // allowlist protects moved; what it must refuse did not.
+    Object.assign(adapter as any, { connected: true, wallet: surface, swaps: surface })
     return adapter
   }
 
@@ -216,7 +219,7 @@ describe('F8: ARKADE declares lightning-receive but core createInvoice returns a
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
-      account: { getAddress: async () => 'ark1qreceiver…' },
+      wallet: { getAddress: async () => 'ark1qreceiver…' },
     })
     const inv = await adapter.createInvoice({ amount: 5000 })
     expect(inv.invoice).toBe('ark1qreceiver…') // NOT lnbc…
@@ -230,9 +233,11 @@ describe('F8: ARKADE declares lightning-receive but core createInvoice returns a
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
-      account: {
-        getAddress: async () => 'ark1qreceiver…',
-        createLightningInvoice: async (amount: number) => ({
+      wallet: { getAddress: async () => 'ark1qreceiver…' },
+      // Lightning receive is the Boltz swaps client's, not the wallet's, since
+      // the Arkade path builds on the SDK directly.
+      swaps: {
+        createLightningInvoice: async ({ amount }: { amount: number }) => ({
           invoice: `lnbc${amount}1pboltz`,
           paymentHash: 'ph-boltz',
         }),
@@ -249,7 +254,7 @@ describe('F8: ARKADE declares lightning-receive but core createInvoice returns a
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
-      account: { getAddress: async () => 'ark1qreceiver…' },
+      wallet: { getAddress: async () => 'ark1qreceiver…' },
     })
     expect((await adapter.createInvoice({ amount: 5000 })).invoice).toBe('ark1qreceiver…')
   })
