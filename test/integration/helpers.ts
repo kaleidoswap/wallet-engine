@@ -148,24 +148,12 @@ export function assertFunded(label: string, balance: { total: number }): void {
 }
 
 /**
- * Pick a small, safe send amount from a wallet's spendable balance, or skip the
- * test when the wallet cannot cover one.
+ * A small send amount, or skip when the wallet cannot cover one.
  *
- * These run against shared test wallets that drain, so a hardcoded amount
- * eventually exceeds the balance. The question is what an empty wallet should
- * do to the job. It used to fail it, identically to a broken transfer — and
- * because these wallets do drain, `Live integration` sat red on `main` for
- * three days and on every PR touching `src/**` whatever the diff (#77). A
- * permanently red check is read and dismissed by hand, which is how a real
- * drift failure gets waved through.
- *
- * A skip states the same fact without destroying the signal: the read-only
- * contract assertions still run and still fail on drift, and the one thing
- * that cannot run says so by name. `REQUIRE_FUNDED_WALLETS=1` restores the
- * failure for the run that is actually asking whether the wallets are funded.
- *
- * Pass the test's own context so the skip lands on the test that needed the
- * funds, not on the file.
+ * These wallets drain, and a drained one is a funding fact rather than a
+ * regression — failing on it left `Live integration` permanently red, which is
+ * the same as having no check (#77). `REQUIRE_FUNDED_WALLETS=1` fails instead.
+ * Takes the test's context so the skip lands on the test, not the file.
  */
 export function spendableSend(
   ctx: TestContext,
@@ -192,16 +180,10 @@ export function spendableSend(
 
 
 /**
- * Read a thrown value's message without assuming it is an Error, following the
- * `cause` chain to the end.
- *
- * The outer message is usually the useless half. `@utexo/rgb-sdk` wraps every
- * `goOnline` failure as `Failed to establish online connection` and hangs the
- * reason rgb-lib actually gave off `cause`, so a suite that printed only the
- * message reported an unreachable network whatever the truth was — a wrong
- * indexer kind, a mismatched network, a rejected wallet — and got read as "the
- * endpoint is flapping again" every time. It cost this suite a diagnosis more
- * than once.
+ * A thrown value's message, following the `cause` chain — the outer message is
+ * usually the useless half. `@utexo/rgb-sdk` reports every `goOnline` failure
+ * as "Failed to establish online connection" and hangs the real reason off
+ * `cause`, so printing only the message reports an outage whatever the truth.
  */
 function messageOf(error: unknown): string {
   if (!(error instanceof Error)) return typeof error === 'string' ? error : JSON.stringify(error)
@@ -223,22 +205,10 @@ function messageOf(error: unknown): string {
 export const describeError = messageOf
 
 /**
- * Run a suite's live setup, returning the reason it could not connect instead
- * of throwing.
- *
- * A `beforeAll` that throws fails every test in the file, which is the right
- * answer when the adapter is broken and the wrong one when the network it
- * talks to is simply down. These suites connect to public mutinynet,
- * liquidtestnet and regtest services; when one is unreachable the resulting
- * red says "adapter broken" and no diff can clear it — the same signal-
- * destroying failure the drained wallets caused (#77).
- *
- * So the reason is captured and handed to `skipWhenUnavailable`, and the other
- * suites carry on reporting. `REQUIRE_LIVE_ENDPOINTS=1` rethrows instead, for
- * the run that is asking whether the endpoints are up.
- *
- * Only setup is covered. An error inside a test is still a failure: by then
- * the connection worked, and what broke is what the test was exercising.
+ * Run a suite's setup, returning the reason it could not connect rather than
+ * throwing — an unreachable public endpoint reads as "adapter broken" and no
+ * diff can clear it. `REQUIRE_LIVE_ENDPOINTS=1` rethrows. Only setup is
+ * covered; an error inside a test is still a failure.
  */
 export async function liveSetup(label: string, connect: () => Promise<void>): Promise<string | undefined> {
   try {
@@ -264,56 +234,29 @@ export function skipWhenUnavailable(ctx: TestContext, reason: string | undefined
 }
 
 /**
- * Errors the underlying SDKs raise when coin selection cannot cover a send.
- *
- * Each protocol has its own word for it. rgb-lib says `InsufficientAssignments`
- * when a wallet owns an asset but has no spendable allocation of it yet —
- * the same fact as an Arkade wallet whose VTXOs will not assemble, and it
- * deserves the same skip rather than a red job.
+ * Coin selection cannot cover a send. Each protocol words it differently:
+ * rgb-lib's `InsufficientAssignments` is the same fact as Arkade's VTXOs
+ * failing to assemble.
  */
 const INSUFFICIENT_FUNDS =
   /insufficient\s?(funds|balance|assignments|allocationslots|allocation slots)|not enough/i
 
 /**
- * A recipient id this wallet has already used against the transport proxy.
- *
- * Kept out of `INSUFFICIENT_FUNDS` because it is not a resource shortfall, and
- * it does not clear on its own: the proxy retains `recipient id → consignment`
- * indefinitely, and a WITNESS recipient id is derived from the wallet's
- * keychain with no outpoint to vary it — so an ephemeral rgb-lib database
- * regenerates the same id on every run and the proxy rejects it forever after
- * the first use.
- *
- * I first read this as invoice expiry and shortened `durationSeconds` to 120s.
- * That was wrong: a run more than an hour after the last invoice was created,
- * with every window long past, still collided. Whatever fixes this, it is not
- * time.
- *
- * Practical consequence: witness receive can be verified exactly once per
- * (wallet, proxy). A blinded id derives from a real outpoint, differs each run,
- * and is unaffected.
+ * A recipient id already used against the transport proxy. Not a resource
+ * shortfall and it never clears: the proxy keeps `recipient id → consignment`
+ * indefinitely, and a witness id derives from the keychain with no outpoint to
+ * vary it, so an ephemeral database regenerates the same one every run.
+ * Witness receive verifies once per (wallet, proxy). See the README.
  */
 const RECIPIENT_ID_REUSED = /RecipientIDAlreadyUsed/i
 
 /**
- * Perform a send, skipping when the wallet turns out not to afford it after
- * all.
+ * Send, skipping when the wallet turns out not to afford it after all.
  *
- * `spendableSend` asks the adapter for a balance and decides from that, but
- * the balance a wallet reports and the amount its coin selection can actually
- * assemble are different numbers. Alice's Arkade wallet proved it: she passed
- * the 300-sat precondition and the send still died inside
- * `selectVirtualCoins` with `Insufficient funds`, because VTXO granularity,
- * preconfirmed outputs and the real fee are not visible in a total.
- *
- * A pre-check that can be wrong in this direction has to treat the SDK's own
- * refusal as the same fact it was guarding against, or the guard just moves
- * the red three lines down.
- *
- * The cost is honest and worth naming: a genuine bug that manifests as
- * `Insufficient funds` — an adapter sending the wrong amount, say — now skips
- * instead of failing. That is the same trade `spendableSend` already makes,
- * and `REQUIRE_FUNDED_WALLETS=1` reverses both together.
+ * A reported balance and what coin selection can assemble are different
+ * numbers — VTXO granularity, preconfirmed outputs and the real fee are
+ * invisible in a total — so the SDK's own refusal is treated as the fact the
+ * precondition was guarding against. `REQUIRE_FUNDED_WALLETS=1` fails instead.
  */
 export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () => Promise<T>): Promise<T> {
   try {
@@ -336,21 +279,9 @@ export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () =>
 }
 
 /**
- * Send a test amount back to the wallet it came from, in teardown.
- *
- * The send tests only ever run Alice → Bob, so every run leaves Alice poorer
- * by the amount plus a fee and Bob richer by the amount. Nothing in the suite
- * puts it back, so Alice is always the wallet that hits zero, and the read
- * assertions she fronts are the ones that stop running. Returning the amount
- * leaves a run costing the two fees it genuinely spent, and the wallets where
- * the next run needs them.
- *
- * Teardown, so the assertions on the outbound send have already reported and
- * this cannot change their verdict. And it never throws: Bob being short, or
- * the return itself being refused, is a fact about funding for the next run to
- * surface — it is not evidence about the adapter under test, and a teardown
- * that fails a green suite would be the #77 mistake with the direction
- * reversed.
+ * Send a test amount back in teardown, so a run costs two fees instead of a
+ * wallet — the send tests only ever run one way, so one wallet drained.
+ * Never throws: a failed return is a funding fact for the next run.
  */
 export async function returnFunds(label: string, send: () => Promise<unknown>): Promise<void> {
   if (!RETURN_TEST_FUNDS) return
@@ -363,24 +294,11 @@ export async function returnFunds(label: string, send: () => Promise<unknown>): 
 }
 
 /**
- * Make sure a wallet has `want` colorable UTXOs carrying no allocation, and
- * wait until they are actually usable.
- *
- * `createRgbUtxos` broadcasts a transaction. The outputs it creates do not
- * exist for the wallet until that transaction confirms, so a test that creates
- * and immediately sends gets `InsufficientAllocationSlots` — which reads as a
- * broken transfer and means "the UTXO I just asked for has not arrived". The
- * first version of this suite did exactly that, and passed or failed depending
- * on whether an earlier run happened to leave a spare slot on-chain: the
- * rgb-lib database is ephemeral per runner, but its UTXOs are not.
- *
- * So: create, then poll until the slots appear. Returns what it ended up with,
- * so a caller can skip with a real number instead of an assumption.
- *
- * Slots are per-UTXO because rgb-lib runs `maxAllocationsPerUtxo: 1` here. A
- * sender needs two — one holds the asset, one takes the change — and a blinded
- * recipient needs one. A witness recipient needs none, which is the point of
- * witness receive.
+ * Ensure `want` colorable UTXOs with no allocation, and wait until they are
+ * usable — `createRgbUtxos` broadcasts a transaction whose outputs do not
+ * exist until it confirms. Returns what it got, so a caller skips on a real
+ * number. One allocation per UTXO here: a sender needs two (asset + change),
+ * a blinded recipient one, a witness recipient none.
  */
 export async function ensureColorableSlots(
   wallet: {
@@ -407,9 +325,8 @@ export async function ensureColorableSlots(
   try {
     await wallet.createRgbUtxos?.({ num: want, upTo: true })
   } catch (error) {
-    // `AllocationsAlreadyAvailable` is the postcondition already met, stated as
-    // an error. Anything else is worth seeing, but not worth failing on here —
-    // the poll below decides, and the caller skips on the number it gets.
+    // `AllocationsAlreadyAvailable` is the postcondition met, stated as an
+    // error. The poll below decides either way.
     if (!/AllocationsAlreadyAvailable/.test(describeError(error))) {
       console.warn(`[rgb] ${label}: createRgbUtxos(${want}) — ${describeError(error)}`)
     }
@@ -424,25 +341,14 @@ export async function ensureColorableSlots(
   return have
 }
 
-/** rgb-lib's transfer states, for a log line that explains itself. */
+/** rgb-lib's transfer states. */
 const TRANSFER_STATUS = ['WAITING_COUNTERPARTY', 'WAITING_CONFIRMATIONS', 'SETTLED'] as const
 
 /**
- * Wait for a wallet's spendable balance of an asset to reach `want`.
- *
- * An RGB send leaves the sender's change in an unconfirmed allocation, so
- * `available` reads 0 against a `total` of nearly the whole supply until the
- * transfer settles.
- *
- * Settling takes BOTH sides. A transfer goes
- * `WAITING_COUNTERPARTY → WAITING_CONFIRMATIONS → SETTLED`, and the first step
- * is the recipient refreshing and accepting the consignment — nothing the
- * sender does moves it. Polling only the sender waits forever on a state
- * machine that cannot advance, which is exactly what the first version of this
- * helper did: three minutes of asking, `0 spendable after waiting`, every run.
- *
- * So `refreshAlso` takes the counterparties whose refresh the sender is waiting
- * on, and the poll drives all of them.
+ * Wait for a wallet's spendable balance of an asset to reach `want`. An RGB
+ * send leaves the change unconfirmed, and settling takes BOTH sides —
+ * `WAITING_COUNTERPARTY` only advances when the recipient refreshes — so
+ * `refreshAlso` takes the counterparties and the poll drives all of them.
  */
 export async function waitForSpendableAsset(
   wallet: {
@@ -464,8 +370,6 @@ export async function waitForSpendableAsset(
   } = {},
 ): Promise<number> {
   const refreshAll = async (): Promise<void> => {
-    // Both sides, always: the sender's change cannot settle until the recipient
-    // has accepted, and a refresh that throws is not the answer either way.
     await Promise.allSettled(
       [wallet, ...refreshAlso].map((w) => Promise.resolve().then(() => w.refreshBalances?.())),
     )
@@ -476,7 +380,7 @@ export async function waitForSpendableAsset(
     return (await wallet.getAssetBalance?.(assetId))?.available ?? 0
   }
 
-  /** Best-effort: the transfer's state, so a timeout says where it got stuck. */
+  /** The transfer's state, so a timeout says where it stuck. */
   const statuses = async (): Promise<string> => {
     try {
       const transfers = (await wallet.listTransfers?.({ asset_id: assetId })) as
