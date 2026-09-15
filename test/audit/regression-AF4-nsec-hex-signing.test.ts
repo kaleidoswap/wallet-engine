@@ -125,7 +125,7 @@ describe('A-F4: every wallet-secret shape can sign', () => {
     ['SparkAdapter', (secret) => Object.assign(new SparkAdapter() as any, { config: { protocol: 'SPARK', mnemonic: secret } })],
     ['ArkadeAdapter', (secret) => Object.assign(new ArkadeAdapter() as any, { config: { protocol: 'ARKADE', mnemonic: secret } })],
     ['SparkWdkAdapter', (secret) => Object.assign(new SparkWdkAdapter() as any, { connected: true, account: {}, mnemonic: secret })],
-    ['ArkadeWdkAdapter', (secret) => Object.assign(new ArkadeWdkAdapter() as any, { connected: true, account: {}, mnemonic: secret })],
+    ['ArkadeWdkAdapter', (secret) => Object.assign(new ArkadeWdkAdapter() as any, { connected: true, wallet: {}, mnemonic: secret })],
   ]
 
   for (const [name, make] of ADAPTERS) {

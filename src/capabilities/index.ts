@@ -86,7 +86,9 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     boarding: true,
     invoiceExpiry: true,
     needsChannelLiquidity: false,
-    wdkModule: '@arkade-os/wdk',
+    // The Arkade adapter builds on `@arkade-os/sdk` directly; `@arkade-os/wdk`
+    // is no longer a dependency of this path and installing it buys nothing.
+    wdkModule: '@arkade-os/sdk',
     maturity: 'beta',
   },
   RGB_LN: {

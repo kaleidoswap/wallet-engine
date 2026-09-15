@@ -7,7 +7,10 @@ import { RgbLibWdkAdapter } from '../src/adapters/wdk/RgbLibWdkAdapter'
 import { RlnWdkAdapter } from '../src/adapters/wdk/RlnWdkAdapter'
 
 function connected(adapter: IProtocolAdapter, account: Record<string, unknown>): IProtocolAdapter {
-  Object.assign(adapter as unknown as Record<string, unknown>, { connected: true, account })
+  // `wallet` alongside `account`: the Arkade adapter builds its SDK wallet
+  // directly now, while the RLN and RGB adapters still go through a WDK
+  // account. One helper serves both rather than splitting the table.
+  Object.assign(adapter as unknown as Record<string, unknown>, { connected: true, account, wallet: account })
   return adapter
 }
 

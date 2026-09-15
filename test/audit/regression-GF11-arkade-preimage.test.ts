@@ -47,9 +47,10 @@ function wdkAdapter() {
   const adapter = new ArkadeWdkAdapter()
   Object.assign(adapter as never, {
     connected: true,
-    account: {
-      arkadeSwaps: { sendLightningPayment: async () => swapsState.result },
-    },
+    wallet: {},
+    // The swaps client is the adapter's own since the Arkade path moved to the
+    // SDK directly; it used to hang off the WDK account as `arkadeSwaps`.
+    swaps: { sendLightningPayment: async () => swapsState.result },
   })
   return adapter
 }
