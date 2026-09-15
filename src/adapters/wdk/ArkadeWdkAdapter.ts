@@ -47,7 +47,7 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { ensureEventSource, EVENT_SOURCE_MISSING_REASON } from '../../lib/arkade-eventsource'
-import { createArkadeSdkWallet } from '../../lib/arkade-sdk-wallet'
+import { createArkadeSdkWallet, flattenArkadeConfig } from '../../lib/arkade-sdk-wallet'
 import { NON_PERSISTENT_STORAGE_REASON } from '../../lib/arkade-storage'
 import { runArkadeVtxoLifecycle } from '../../lib/arkade-vtxo-lifecycle'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
@@ -211,10 +211,14 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.network = cfg.network ?? 'mainnet'
     // Accept an explicit `arkadeConfig` passthrough OR the native adapter's flat
     // fields, so hosts can switch adapters without reshaping their connect config.
-    const flat = (cfg.arkadeConfig ?? {}) as Record<string, any>
-    const arkServerUrl = cfg.arkServerUrl ?? flat.arkServerUrl
-    const esploraUrl = cfg.esploraUrl ?? flat.esploraUrl
-    const swapProviderUrl = cfg.swapProviderUrl ?? flat.swapProviderUrl
+    // Settings may arrive at the top level or nested under `arkadeConfig`;
+    // hosts use both. See `flattenArkadeConfig`.
+    const flat = flattenArkadeConfig(cfg as Record<string, any>)
+    const { arkServerUrl, esploraUrl, swapProviderUrl } = flat as {
+      arkServerUrl?: string
+      esploraUrl?: string
+      swapProviderUrl?: string
+    }
 
     // @ts-ignore — optional peer, resolved at runtime in the consuming app.
     this.arkSdk = await loadWdkModule('@arkade-os/sdk', () => import('@arkade-os/sdk'))
@@ -229,16 +233,16 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       derivation: 'WDK_COMPAT',
       arkServerUrl,
       esploraUrl,
-      indexerUrl: cfg.indexerUrl ?? flat.indexerUrl,
-      delegatorUrl: cfg.delegatorUrl,
-      delegationEnabled: cfg.delegationEnabled,
-      storage: cfg.storage,
-      eventSource: cfg.eventSource,
+      indexerUrl: flat.indexerUrl as string | undefined,
+      delegatorUrl: flat.delegatorUrl as string | undefined,
+      delegationEnabled: flat.delegationEnabled as boolean | undefined,
+      storage: flat.storage as { walletRepository: unknown; contractRepository: unknown } | undefined,
+      eventSource: flat.eventSource,
     })
     this.wallet = created.wallet
     this.storagePersistent = created.storagePersistent
     this.delegationEnabled = created.delegationEnabled
-    this.delegatorUrl = cfg.delegatorUrl
+    this.delegatorUrl = flat.delegatorUrl as string | undefined
     this.eventSourceAvailable = created.eventSourceAvailable
     if (!this.eventSourceAvailable) console.warn(`[ArkadeWdkAdapter] ${EVENT_SOURCE_MISSING_REASON}`)
 
@@ -260,7 +264,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       this.swaps = await boltz.ArkadeSwaps.create({
         wallet: this.wallet,
         swapProvider,
-        ...(cfg.boltzSwapsEnabled ? { swapManager: { autoStart: true, pollInterval: 5_000 } } : {}),
+        ...(flat.boltzSwapsEnabled ? { swapManager: { autoStart: true, pollInterval: 5_000 } } : {}),
       })
     }
     this.connected = true
