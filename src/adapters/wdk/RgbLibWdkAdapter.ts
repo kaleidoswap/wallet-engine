@@ -341,7 +341,27 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return rgbNiaAsset(normalized, RGB_L1_PROFILE)
   }
 
-  async sendAsset(params: { token: string; recipient: string; amount: number; feeRate?: number; minConfirmations?: number }): Promise<any> {
+  /**
+   * Send an RGB asset to an invoice.
+   *
+   * `witnessData` is required when the invoice is a **witness** receive: there
+   * the sender creates the output the asset lands on, so it has to say how many
+   * sats to put in it — rgb-lib refuses with `InvalidRecipientData { "missing
+   * witness data for a witness recipient" }` otherwise. A blinded invoice
+   * carries its own outpoint and needs none.
+   *
+   * `amountSat` is a real on-chain output and must clear dust; rgb-lib's own
+   * colorable UTXOs are 1000 sat, which is the sane default for a caller that
+   * has no reason to prefer another.
+   */
+  async sendAsset(params: {
+    token: string
+    recipient: string
+    amount: number
+    feeRate?: number
+    minConfirmations?: number
+    witnessData?: { amountSat: number; blinding?: number }
+  }): Promise<any> {
     this.assertConnected()
     return this.account.transfer(params)
   }

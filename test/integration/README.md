@@ -167,12 +167,31 @@ whole colorable UTXO. Who needs one depends on the receive mode:
 Witness receive is therefore the mode that works for a wallet that has never
 held RGB, and the suite covers both.
 
+A witness send also needs `witnessData: { amountSat }` from the **sender** — it
+is creating the output, so it has to say how many sats go in it. Without it
+rgb-lib refuses with `InvalidRecipientData { "missing witness data for a
+witness recipient" }`. A blinded invoice carries its own outpoint and needs
+none. 1000 sat matches rgb-lib's own colorable UTXOs and clears dust.
+
 `createRgbUtxos` **broadcasts a transaction**, and its outputs do not exist for
 the wallet until that transaction confirms. Creating one and immediately
 sending fails with `InsufficientAllocationSlots` — which reads like a broken
 transfer and means "the UTXO I just asked for has not arrived". `ensureColorableSlots`
 creates and then polls until the slots are real, and the suite prepares both
 wallets early so confirmation has the rest of the file to happen in.
+
+A second send in the same run has to **wait**: the first one's change is an
+unconfirmed allocation, so the sender's `available` reads 0 against a `total`
+of nearly the whole supply until it settles. Without waiting, whichever receive
+mode runs second always skips and never executes — covered on paper, reporting
+nothing.
+
+Settling takes **both sides**. A transfer goes `WAITING_COUNTERPARTY →
+WAITING_CONFIRMATIONS → SETTLED`, and the first step is the *recipient*
+refreshing and accepting the consignment — nothing the sender does moves it. So
+`waitForSpendableAsset` refreshes the counterparty too, and reports the
+transfer's state, so a timeout says where it got stuck instead of just that it
+did.
 
 This is the failure mode to expect from RGB tests generally: whether a wallet
 has a spare slot depends on what earlier runs left **on-chain**, which outlives

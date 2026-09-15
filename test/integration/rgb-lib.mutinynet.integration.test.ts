@@ -23,6 +23,7 @@ import {
   safeDisconnect,
   sendOrSkip,
   skipWhenUnavailable,
+  waitForSpendableAsset,
 } from './helpers'
 import type { UnifiedAsset } from '../../src/types/base'
 import type { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
@@ -241,11 +242,25 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       // Holding an asset and being able to spend it are different things: after
       // a transfer the sender's change allocation is unconfirmed, so
-      // `available` reads 0 against a `total` of nearly the whole supply. That
-      // is a fact about confirmations, not a broken adapter.
-      const spendable = (await from.getAssetBalance!(asset!.id)).available
+      // `available` reads 0 against a `total` of nearly the whole supply.
+      //
+      // Wait for it rather than skipping on it. The mode that runs second was
+      // otherwise guaranteed to find 0 spendable — the first transfer having
+      // just consumed it — so witness receive never executed at all, which
+      // makes for a case that reports nothing while looking covered. The wait
+      // also exercises spending the change from a previous transfer, which is
+      // worth a check of its own.
+      let spendable = (await from.getAssetBalance!(asset!.id)).available
       if (spendable < amount) {
-        const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change has not settled yet`
+        // `to` as well: the sender's change settles only after the recipient
+        // refreshes and accepts the consignment, so waiting without driving
+        // the counterparty waits on a state machine that cannot advance.
+        spendable = await waitForSpendableAsset(from, asset!.id, amount, `${holder}/${mode}`, {
+          refreshAlso: [to],
+        })
+      }
+      if (spendable < amount) {
+        const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change did not settle in time`
         console.warn(`⚠ SKIPPED — ${reason}`)
         ctx.skip(reason)
         return
@@ -287,8 +302,19 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       const before = (await to.getAssetBalance!(asset!.id)).total
 
+      // A witness recipient has no outpoint of its own: the SENDER creates the
+      // output, so it must say how many sats go in it. rgb-lib refuses with
+      // `InvalidRecipientData { "missing witness data for a witness
+      // recipient" }` without this, and a blinded invoice needs none because it
+      // carries its own outpoint. 1000 sat matches rgb-lib's own colorable
+      // UTXOs and clears dust.
       const res: any = await sendOrSkip(ctx, `RGB-L1 ${label}`, () =>
-        from.sendAsset!({ token: asset!.id, recipient, amount }),
+        from.sendAsset!({
+          token: asset!.id,
+          recipient,
+          amount,
+          ...(mode === 'witness' ? { witnessData: { amountSat: 1000 } } : {}),
+        }),
       )
       const txid = res?.hash ?? res?.txid ?? ''
       expect(txid).toBeTruthy()
@@ -297,6 +323,7 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       const after = (await to.getAssetBalance!(asset!.id)).total
       console.log(`[RGB_L1] ${label} ${amount} of ${asset!.id} — txid ${txid}, recipient total ${before} → ${after}`)
-    }, 300_000)
+      // Room for the settle wait above (180s) plus two live sends.
+    }, 420_000)
   }
 })
