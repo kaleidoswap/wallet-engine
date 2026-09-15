@@ -154,12 +154,30 @@ hiding a real accounting disagreement about spent coins.
 
 `RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
 
-Both sides of a transfer need colorable UTXOs, and for different reasons. The
-recipient needs one to receive into; the **sender needs two**, because rgb-lib
-runs `maxAllocationsPerUtxo: 1` here — the allocation it already holds occupies
-one UTXO and the change allocation the send creates needs another. A sender
-short of slots fails in `quoteTransfer` with `InsufficientAllocationSlots`,
-which reads like a broken transfer and means "nowhere to put the change".
+### Colorable UTXOs, and the two receive modes
+
+rgb-lib runs `maxAllocationsPerUtxo: 1` here, so each allocation occupies a
+whole colorable UTXO. Who needs one depends on the receive mode:
+
+| | sender | recipient |
+|---|---|---|
+| **blinded** receive | 1 (for the change) | 1 (to receive into) |
+| **witness** receive | 1 (for the change) | **0** — the sender creates the output |
+
+Witness receive is therefore the mode that works for a wallet that has never
+held RGB, and the suite covers both.
+
+`createRgbUtxos` **broadcasts a transaction**, and its outputs do not exist for
+the wallet until that transaction confirms. Creating one and immediately
+sending fails with `InsufficientAllocationSlots` — which reads like a broken
+transfer and means "the UTXO I just asked for has not arrived". `ensureColorableSlots`
+creates and then polls until the slots are real, and the suite prepares both
+wallets early so confirmation has the rest of the file to happen in.
+
+This is the failure mode to expect from RGB tests generally: whether a wallet
+has a spare slot depends on what earlier runs left **on-chain**, which outlives
+the ephemeral rgb-lib database. The same commit can pass or fail depending on
+which run went first, so preconditions here wait rather than assume.
 
 Reuse keys off what a wallet **holds** (`total`), not what it can spend
 (`available`). They differ: after a transfer the sender's change allocation is

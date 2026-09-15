@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- **`RgbLibWdkAdapter.listUnspents()` and `countFreeColorableSlots()`** — the
+  only way to answer "can this wallet receive or spend an RGB allocation right
+  now". `createRgbUtxos` cannot: it broadcasts a transaction whose outputs are
+  unusable until they confirm.
+
+### Tests
+- **The RGB-L1 suite covers both receive modes and stops guessing about
+  colorable UTXOs.** A blinded recipient needs a free colorable UTXO; a witness
+  recipient needs none, because the sender creates the output — so witness is
+  the mode that works for a wallet that has never held RGB, and both are now
+  exercised. Preconditions wait for `createRgbUtxos` to confirm instead of
+  assuming it is instant, which is what left the transfer test passing or
+  failing on what earlier runs happened to leave on-chain.
+
 ## [1.0.0-beta.67] - 2026-09-15
 
 Arkade settlement. VTXOs were never being renewed on any Node host, so they
