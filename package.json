@@ -72,6 +72,8 @@
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "test:integration:watch": "vitest --config vitest.integration.config.ts",
+    "audit:index": "node scripts/audit-index.mjs",
+    "check:audit-index": "node scripts/audit-index.mjs --check",
     "check:lockfiles": "node scripts/check-lockfile-consistency.mjs",
     "example:tour": "tsx examples/tour/tour.ts",
     "clean": "rm -rf dist",

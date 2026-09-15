@@ -34,6 +34,13 @@ jobs:
       - name: Test
         run: pnpm test
 
+      # The audit tests are named after finding IDs whose reports were never
+      # committed, so the index is the only thing that resolves them. It is
+      # generated from the tests themselves, which means it silently goes stale
+      # the moment one is added or renamed — hence a check rather than trust.
+      - name: Check audit findings index
+        run: npm run check:audit-index
+
       # The tour is the front door for anyone evaluating the engine, and it
       # drives the real router and manifest rather than a transcript. Running it
       # here means a change to those internals cannot quietly break the first
