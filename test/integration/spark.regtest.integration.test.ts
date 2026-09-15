@@ -12,6 +12,7 @@ import {
   assertFunded,
   connectSpark,
   liveSetup,
+  returnFunds,
   safeDisconnect,
   sendOrSkip,
   skipWhenUnavailable,
@@ -24,6 +25,8 @@ describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
   let bob: SparkWdkAdapter
 
   let unavailable: string | undefined
+  /** Amount the send test moved to Bob, for teardown to send back. */
+  let sentToBob = 0
 
   beforeAll(async () => {
     unavailable = await liveSetup('Spark regtest', async () => {
@@ -36,6 +39,12 @@ describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
   beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
+    if (sentToBob) {
+      const back = await alice.getReceiveAddress('SPARK')
+      await returnFunds('Spark Bob → Alice', () =>
+        bob.sendPayment({ invoice: back.address, amount: sentToBob }),
+      )
+    }
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
   })
 
@@ -83,5 +92,6 @@ describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
       after = (await bob.getBtcBalance()).total
     }
     expect(after).toBeGreaterThan(before)
+    sentToBob = amount
   }, 120_000)
 })

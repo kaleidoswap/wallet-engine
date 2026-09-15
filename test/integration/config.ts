@@ -25,6 +25,11 @@ function flag(name: string): boolean {
   return /^(1|true|yes)$/i.test(process.env[name]?.trim() ?? '')
 }
 
+/** True unless an env var is explicitly set to a falsy value ('0', 'false', 'no'). */
+function flagUnlessOff(name: string): boolean {
+  return !/^(0|false|no)$/i.test(process.env[name]?.trim() ?? '')
+}
+
 /** A pre-funded test wallet. */
 export interface WalletFixture {
   readonly name: 'alice' | 'bob'
@@ -44,6 +49,28 @@ export const HAVE_WALLETS = Boolean(ALICE.mnemonic && BOB.mnemonic)
  * they stay OFF unless opted in with `RUN_SEND_TESTS=1`.
  */
 export const RUN_SEND_TESTS = flag('RUN_SEND_TESTS')
+
+/**
+ * After a send test, send the same amount back the way it came.
+ *
+ * Every send test is one-directional — Alice pays Bob — so each run moves sats
+ * that never come back. Alice is the only wallet that ever pays, so Alice is
+ * the only wallet that ever empties, and she empties on a schedule set by how
+ * often CI runs. That is the drain behind #77: the suite spent its own
+ * preconditions, and the skips and dispatch inputs added since report the
+ * shortfall honestly without slowing it down.
+ *
+ * A return leg makes a run cost two fees instead of a hundred sats, which is
+ * the difference between a wallet that needs a faucet every few weeks and one
+ * that lasts. It runs in `afterAll`, only when a send actually happened, and
+ * never fails the suite: a failed return is a funding fact for the next run,
+ * not a broken adapter.
+ *
+ * Set `RETURN_TEST_FUNDS=0` to keep the sats where the test left them — when
+ * you are deliberately moving balance from one wallet to the other, or
+ * debugging a send and want its effect to persist.
+ */
+export const RETURN_TEST_FUNDS = flagUnlessOff('RETURN_TEST_FUNDS')
 
 /**
  * Treat an underfunded wallet as a failure rather than a skip.
@@ -99,11 +126,33 @@ export const LIQUID = {
   enabled: HAVE_WALLETS && !flag('SKIP_LIQUID'),
 }
 
+/**
+ * Mutinynet indexer, shared by the Arkade and RGB-L1 suites.
+ *
+ * Ours, not the public `https://mutinynet.com/api`, which answers CI with a
+ * plain nginx 429: our GitLab and GitHub runners share one box, so a single
+ * egress IP makes everyone's requests and the limit arrives long before any one
+ * suite is unreasonable. It reads as an outage — `@utexo/rgb-sdk` reports every
+ * `goOnline` failure as "Failed to establish online connection" — and the RGB-L1
+ * red went unread for weeks on that description while the endpoint answered in
+ * 240ms from anywhere else.
+ *
+ * `esplora.signet.kaleidoswap.com` is the same chain, not a similar one: it is
+ * MutinyWallet/electrs `new-index` with `--signet-magic`, the only esplora build
+ * that indexes Mutinynet's custom signet, and it tracks the public one tip for
+ * tip and hash for hash. Same reasoning as the Liquid waterfalls default above:
+ * an endpoint someone else rate-limits is not a dependency a suite can hold.
+ *
+ * Override per consumer with `ARKADE_ESPLORA_URL` / `RGB_INDEXER_URL`.
+ */
+const MUTINYNET_ESPLORA = env('MUTINYNET_ESPLORA_URL', 'https://esplora.signet.kaleidoswap.com')!
+
 export const ARKADE = {
   /** Mutinynet is a custom signet — the adapter's network key is 'signet'. */
   network: 'signet' as const,
   arkServerUrl: env('ARKADE_SERVER_URL', 'https://mutinynet.arkade.sh')!,
-  esploraUrl: env('ARKADE_ESPLORA_URL', 'https://mutinynet.com/api')!,
+  /** Ours — see MUTINYNET_ESPLORA. */
+  esploraUrl: env('ARKADE_ESPLORA_URL', MUTINYNET_ESPLORA)!,
   delegatorUrl: env('ARKADE_DELEGATOR_URL', 'https://delegator.mutinynet.arkade.sh')!,
   enabled: HAVE_WALLETS && !flag('SKIP_ARKADE'),
 }
@@ -111,8 +160,8 @@ export const ARKADE = {
 export const RGB_L1 = {
   /** rgb-lib on mutinynet — surfaced to rgb-lib as its custom signet. */
   network: 'signet' as const,
-  /** Electrum/Esplora indexer rgb-lib syncs against. */
-  indexerUrl: env('RGB_INDEXER_URL', 'https://mutinynet.com/api')!,
+  /** Electrum/Esplora indexer rgb-lib syncs against — ours, see MUTINYNET_ESPLORA. */
+  indexerUrl: env('RGB_INDEXER_URL', MUTINYNET_ESPLORA)!,
   /** RGB proxy (RGB HTTP JSON-RPC transport) for consignment exchange. */
   transportEndpoint: env('RGB_TRANSPORT_ENDPOINT', 'rpcs://proxy.iriswallet.com/0.2/json-rpc')!,
   enabled: HAVE_WALLETS && !flag('SKIP_RGB_L1'),

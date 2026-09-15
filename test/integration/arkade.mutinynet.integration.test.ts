@@ -12,6 +12,7 @@ import {
   assertFunded,
   connectArkade,
   liveSetup,
+  returnFunds,
   safeDisconnect,
   sendOrSkip,
   skipWhenUnavailable,
@@ -24,6 +25,8 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
   let bob: ArkadeWdkAdapter
 
   let unavailable: string | undefined
+  /** Amount the send test moved to Bob, for teardown to send back. */
+  let sentToBob = 0
 
   beforeAll(async () => {
     unavailable = await liveSetup('Arkade mutinynet', async () => {
@@ -36,6 +39,12 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
   beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
+    if (sentToBob) {
+      const back = await alice.getReceiveAddress()
+      await returnFunds('Arkade Bob → Alice', () =>
+        bob.sendPayment({ invoice: back.address, amount: sentToBob }),
+      )
+    }
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
   })
 
@@ -78,5 +87,6 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
       alice.sendPayment({ invoice: to.address, amount }),
     )
     expect(res.status).toMatch(/pending|confirmed/)
+    sentToBob = amount
   }, 180_000)
 })

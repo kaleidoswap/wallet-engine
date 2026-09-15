@@ -15,6 +15,7 @@ import {
   LIQUID,
   REQUIRE_FUNDED_WALLETS,
   REQUIRE_LIVE_ENDPOINTS,
+  RETURN_TEST_FUNDS,
   RGB_L1,
   SPARK,
   rgbDataDir,
@@ -106,18 +107,26 @@ export async function connectArkade(wallet: WalletFixture): Promise<ArkadeWdkAda
   return adapter
 }
 
-/** Connect a local rgb-lib (RGB_L1, mutinynet/signet) adapter for the given wallet. */
+/**
+ * Connect a local rgb-lib (RGB_L1, mutinynet/signet) adapter for the given wallet.
+ *
+ * Retried like Spark and Liquid: `goOnline` syncs the wallet on connect and both
+ * Alice and Bob do it, which makes this the suite's heaviest burst at the
+ * indexer and the first thing a rate limit refuses.
+ */
 export async function connectRgbL1(wallet: WalletFixture): Promise<RgbLibWdkAdapter> {
-  const adapter = new RgbLibWdkAdapter()
-  await adapter.connect({
-    protocol: 'RGB_L1',
-    network: RGB_L1.network,
-    mnemonic: wallet.mnemonic!,
-    dataDir: rgbDataDir(wallet),
-    indexerUrl: RGB_L1.indexerUrl,
-    transportEndpoint: RGB_L1.transportEndpoint,
-  } as any)
-  return adapter
+  return withRetry(`connectRgbL1(${wallet.name})`, async () => {
+    const adapter = new RgbLibWdkAdapter()
+    await adapter.connect({
+      protocol: 'RGB_L1',
+      network: RGB_L1.network,
+      mnemonic: wallet.mnemonic!,
+      dataDir: rgbDataDir(wallet),
+      indexerUrl: RGB_L1.indexerUrl,
+      transportEndpoint: RGB_L1.transportEndpoint,
+    } as any)
+    return adapter
+  })
 }
 
 /** Best-effort disconnect; never throws (used in afterAll cleanup). */
@@ -182,11 +191,36 @@ export function spendableSend(
 }
 
 
-/** Read a thrown value's message without assuming it is an Error. */
+/**
+ * Read a thrown value's message without assuming it is an Error, following the
+ * `cause` chain to the end.
+ *
+ * The outer message is usually the useless half. `@utexo/rgb-sdk` wraps every
+ * `goOnline` failure as `Failed to establish online connection` and hangs the
+ * reason rgb-lib actually gave off `cause`, so a suite that printed only the
+ * message reported an unreachable network whatever the truth was — a wrong
+ * indexer kind, a mismatched network, a rejected wallet — and got read as "the
+ * endpoint is flapping again" every time. It cost this suite a diagnosis more
+ * than once.
+ */
 function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return typeof error === 'string' ? error : JSON.stringify(error)
+  if (!(error instanceof Error)) return typeof error === 'string' ? error : JSON.stringify(error)
+  const chain: string[] = []
+  let current: unknown = error
+  // Bounded: a cause chain is short, and a cyclic one must not hang the suite.
+  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
+    if (current.message && !chain.includes(current.message)) chain.push(current.message)
+    current = current.cause
+  }
+  if (current !== undefined && !(current instanceof Error)) {
+    const tail = typeof current === 'string' ? current : JSON.stringify(current)
+    if (tail && !chain.includes(tail)) chain.push(tail)
+  }
+  return chain.join(' ← ')
 }
+
+/** `messageOf` for call sites outside this module (the address printer). */
+export const describeError = messageOf
 
 /**
  * Run a suite's live setup, returning the reason it could not connect instead
@@ -263,5 +297,32 @@ export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () =>
     ctx.skip(reason)
     // Unreachable: `ctx.skip()` aborts the test.
     throw error
+  }
+}
+
+/**
+ * Send a test amount back to the wallet it came from, in teardown.
+ *
+ * The send tests only ever run Alice → Bob, so every run leaves Alice poorer
+ * by the amount plus a fee and Bob richer by the amount. Nothing in the suite
+ * puts it back, so Alice is always the wallet that hits zero, and the read
+ * assertions she fronts are the ones that stop running. Returning the amount
+ * leaves a run costing the two fees it genuinely spent, and the wallets where
+ * the next run needs them.
+ *
+ * Teardown, so the assertions on the outbound send have already reported and
+ * this cannot change their verdict. And it never throws: Bob being short, or
+ * the return itself being refused, is a fact about funding for the next run to
+ * surface — it is not evidence about the adapter under test, and a teardown
+ * that fails a green suite would be the #77 mistake with the direction
+ * reversed.
+ */
+export async function returnFunds(label: string, send: () => Promise<unknown>): Promise<void> {
+  if (!RETURN_TEST_FUNDS) return
+  try {
+    await send()
+    console.log(`\u21a9 returned — ${label}`)
+  } catch (error) {
+    console.warn(`\u21a9 return leg did not go through (not a test failure) — ${label}: ${messageOf(error)}`)
   }
 }

@@ -27,6 +27,32 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   and `nextOffset`. Calling it with no options is unchanged: full scan,
   `nextOffset: 0`.
 
+### Tests
+- **The live send tests put the sats back.** Every send test ran one way, Alice
+  to Bob, so each run left Alice short by the amount and a fee and nothing ever
+  returned it — she was the only wallet that paid and so the only wallet that
+  emptied, on a schedule set by how often CI ran. Teardown now sends the amount
+  back, only when a send happened and never failing the suite, which makes a run
+  cost its two fees instead of a wallet. `RETURN_TEST_FUNDS=0` opts out.
+- **The Arkade and RGB-L1 suites use our own Mutinynet indexer.** The public
+  `mutinynet.com/api` answers CI with a plain nginx 429 — our GitLab and GitHub
+  runners share one box, so one egress IP carries everyone's requests — and
+  `@utexo/rgb-sdk` renders that as "Failed to establish online connection",
+  which is how the RGB-L1 red went unread for weeks. `esplora.signet.kaleidoswap.com`
+  is the same chain (MutinyWallet/electrs `--signet-magic`), tip for tip.
+  `connectRgbL1` also gained the `withRetry` that Spark and Liquid already had.
+  Override with `MUTINYNET_ESPLORA_URL`, `ARKADE_ESPLORA_URL` or `RGB_INDEXER_URL`.
+- **Live-suite failures print their whole `cause` chain.** `@utexo/rgb-sdk`
+  wraps every `goOnline` failure as `Failed to establish online connection` and
+  hangs rgb-lib's actual reason off `cause`, so the suite reported an
+  unreachable network whatever the truth was — and that is how the RGB-L1 red
+  kept getting waved through as "mutinynet is flapping again" while the
+  endpoint was answering in 240ms.
+- **`print-funding-addresses` prints balances next to the addresses**, which is
+  the half that says whether a top-up is needed at all. It also documents
+  `--silent=false`: vitest hides console output from passing tests, and every
+  test in that file passes by design.
+
 ## [1.0.0-beta.66] - 2026-09-13
 
 Security audit remediation (#71). Items marked **BREAKING** change behaviour a
