@@ -7,6 +7,26 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- **`RgbLibWdkAdapter.issueAssetNia`**, matching the contract
+  `RgbLibWasmAdapter` shipped in #76 — same parameters, same guarantees, so a
+  host feature-detecting one API gets the same behaviour from either backing.
+  The bindings underneath disagree (the native one takes an options object, the
+  wasm one positional arguments), which is why the difference belongs in the
+  adapter rather than at every call site. An answer with no asset id is a
+  failure, not a hollow success: rgb-lib can return one when the wallet has
+  nothing to colour.
+- **Live RGB-L1 issuance and transfer tests** (#88). The suite's header had
+  claimed transfers were gated behind `RUN_SEND_TESTS` for months while no such
+  test existed and the flag was never read there, so NIA issuance and the
+  consignment exchange — the part that actually breaks — had no coverage at all.
+  The issuance test reuses an asset either wallet already holds and issues only
+  when neither does, because issuing on every PR run would consume a colorable
+  UTXO and a fee each time until the wallet ran out; `RGB_FORCE_ISSUANCE=1`
+  forces the issuing path. The transfer follows whoever holds the asset and
+  returns it in teardown, so the suite stays runnable whichever way the last run
+  left the balance.
+
 ### Changed
 - **BREAKING (peer): the Arkade adapter is built on `@arkade-os/sdk` directly.**
   `@arkade-os/wdk` is no longer used by any code path. It hard-pins

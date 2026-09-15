@@ -262,6 +262,65 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return { success: true }
   }
 
+  /**
+   * Issue a NIA (Non-Inflatable Asset).
+   *
+   * Parity with `RgbLibWasmAdapter.issueAssetNia`, which shipped first (#76) —
+   * same parameters, same guarantees — so a host can feature-detect one API and
+   * get the same contract from either backing. The call shapes underneath do
+   * not match (this one takes an options object, the wasm binding takes
+   * positional arguments), which is exactly why the difference belongs here
+   * rather than at every call site.
+   *
+   * Not part of `IProtocolAdapter`: only the RGB-L1 adapters can issue, so
+   * callers feature-detect with `typeof adapter.issueAssetNia === 'function'`.
+   */
+  async issueAssetNia(params: {
+    ticker: string
+    name: string
+    precision?: number
+    amounts: number[]
+  }): Promise<UnifiedAsset> {
+    this.assertConnected()
+    if (!Array.isArray(params.amounts) || params.amounts.length === 0) {
+      throw new ProtocolError('At least one issuance amount is required', 'RGB_L1', 'BAD_REQUEST')
+    }
+    const amounts = params.amounts.map(Number)
+    // Amounts cross into rgb-lib as u64; a non-integer or negative would be
+    // truncated or rejected with an opaque binding error further down.
+    if (!amounts.every((n) => Number.isSafeInteger(n) && n > 0)) {
+      throw new ProtocolError('Issuance amounts must be positive safe integers', 'RGB_L1', 'BAD_REQUEST', {
+        amounts: params.amounts,
+      })
+    }
+
+    let issued: any
+    try {
+      issued = await this.account.issueAssetNia({
+        ticker: params.ticker,
+        name: params.name,
+        precision: Number(params.precision ?? 0),
+        amounts,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new ProtocolError(`NIA issuance failed: ${msg}`, 'RGB_L1', 'ISSUANCE_FAILED', { message: msg })
+    }
+
+    const normalized = normalizeAsset(issued)
+    // Issuance needs a colorable UTXO. Without one rgb-lib can answer without
+    // an asset id, and a hollow success here would be reported as an issued
+    // asset that does not exist.
+    if (!normalized.asset_id) {
+      throw new ProtocolError(
+        'NIA issuance returned no asset id — the wallet may have no colorable UTXO',
+        'RGB_L1',
+        'ISSUANCE_FAILED',
+      )
+    }
+    return rgbNiaAsset(normalized, RGB_L1_PROFILE)
+  }
+
   async sendAsset(params: { token: string; recipient: string; amount: number; feeRate?: number; minConfirmations?: number }): Promise<any> {
     this.assertConnected()
     return this.account.transfer(params)
