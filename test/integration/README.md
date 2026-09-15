@@ -31,6 +31,41 @@ Without `ALICE_MNEMONIC` + `BOB_MNEMONIC`, every suite reports as skipped.
 - **Send paths (opt-in):** Alice→Bob transfers move real test-network funds and
   are OFF unless you set `RUN_SEND_TESTS=1`.
 
+### The sats come back
+
+Every send test runs one way — Alice pays Bob — so before this each run left
+Alice short by the amount plus a fee and Bob up by the amount. Alice is the only
+wallet that ever pays, so Alice is the only wallet that ever empties, on a
+schedule set by how often CI runs. The suite was spending its own preconditions.
+
+Teardown now sends the same amount back, which makes a run cost the two fees it
+genuinely spent rather than a wallet. It runs only when a send actually
+happened, after the assertions have reported, and it never fails the suite: a
+return that does not go through is a funding fact for the next run to surface,
+not evidence about the adapter. `RETURN_TEST_FUNDS=0` leaves the balance where
+the test put it.
+
+The return leg is not enough on Arkade on its own — see below.
+
+### Arkade: settle before the batch expires
+
+Arkade VTXOs live in a batch with an expiry, and a VTXO that is not settled
+before it lapses is swept by the server. On 2026-09-08 that is what happened to
+these wallets: Bob's Arkade balance was 76 VTXOs of 100 sat — one per send test
+ever run — and every one of them reads `swept`, which is why his spendable
+balance is 0 while his total is not. Alice's single 1,422,628-sat VTXO passed
+the same expiry.
+
+The SDK settles periodically by itself, and for these wallets that settle is
+throwing (`Error during periodic settle: invalid scalar: out of range`, visible
+in any run's stderr) so nothing is renewed. Until that is fixed, Arkade funds
+here have a shelf life, and a returned 100 sat expires as surely as a sent one.
+
+Both wallets also hold ~1.59M sat in **confirmed boarding UTXOs that were never
+onboarded**. Those are on-chain and safe, and they are also invisible to
+`spendable` — which is the other reason a send can report `Insufficient funds`
+against a healthy-looking total.
+
 ### When a wallet runs dry
 
 A send test whose wallet cannot cover the amount plus a fee buffer **skips**,

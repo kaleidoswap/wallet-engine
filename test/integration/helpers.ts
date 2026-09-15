@@ -15,6 +15,7 @@ import {
   LIQUID,
   REQUIRE_FUNDED_WALLETS,
   REQUIRE_LIVE_ENDPOINTS,
+  RETURN_TEST_FUNDS,
   RGB_L1,
   SPARK,
   rgbDataDir,
@@ -263,5 +264,32 @@ export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () =>
     ctx.skip(reason)
     // Unreachable: `ctx.skip()` aborts the test.
     throw error
+  }
+}
+
+/**
+ * Send a test amount back to the wallet it came from, in teardown.
+ *
+ * The send tests only ever run Alice → Bob, so every run leaves Alice poorer
+ * by the amount plus a fee and Bob richer by the amount. Nothing in the suite
+ * puts it back, so Alice is always the wallet that hits zero, and the read
+ * assertions she fronts are the ones that stop running. Returning the amount
+ * leaves a run costing the two fees it genuinely spent, and the wallets where
+ * the next run needs them.
+ *
+ * Teardown, so the assertions on the outbound send have already reported and
+ * this cannot change their verdict. And it never throws: Bob being short, or
+ * the return itself being refused, is a fact about funding for the next run to
+ * surface — it is not evidence about the adapter under test, and a teardown
+ * that fails a green suite would be the #77 mistake with the direction
+ * reversed.
+ */
+export async function returnFunds(label: string, send: () => Promise<unknown>): Promise<void> {
+  if (!RETURN_TEST_FUNDS) return
+  try {
+    await send()
+    console.log(`\u21a9 returned — ${label}`)
+  } catch (error) {
+    console.warn(`\u21a9 return leg did not go through (not a test failure) — ${label}: ${messageOf(error)}`)
   }
 }

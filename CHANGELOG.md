@@ -27,6 +27,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   and `nextOffset`. Calling it with no options is unchanged: full scan,
   `nextOffset: 0`.
 
+### Tests
+- **The live send tests put the sats back.** Every send test ran one way, Alice
+  to Bob, so each run left Alice short by the amount and a fee and nothing ever
+  returned it — she was the only wallet that paid and so the only wallet that
+  emptied, on a schedule set by how often CI ran. Teardown now sends the amount
+  back, only when a send happened and never failing the suite, which makes a run
+  cost its two fees instead of a wallet. `RETURN_TEST_FUNDS=0` opts out.
+- **`print-funding-addresses` prints balances next to the addresses**, which is
+  the half that says whether a top-up is needed at all. It also documents
+  `--silent=false`: vitest hides console output from passing tests, and every
+  test in that file passes by design.
+
 ## [1.0.0-beta.66] - 2026-09-13
 
 Security audit remediation (#71). Items marked **BREAKING** change behaviour a

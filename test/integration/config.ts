@@ -25,6 +25,11 @@ function flag(name: string): boolean {
   return /^(1|true|yes)$/i.test(process.env[name]?.trim() ?? '')
 }
 
+/** True unless an env var is explicitly set to a falsy value ('0', 'false', 'no'). */
+function flagUnlessOff(name: string): boolean {
+  return !/^(0|false|no)$/i.test(process.env[name]?.trim() ?? '')
+}
+
 /** A pre-funded test wallet. */
 export interface WalletFixture {
   readonly name: 'alice' | 'bob'
@@ -44,6 +49,28 @@ export const HAVE_WALLETS = Boolean(ALICE.mnemonic && BOB.mnemonic)
  * they stay OFF unless opted in with `RUN_SEND_TESTS=1`.
  */
 export const RUN_SEND_TESTS = flag('RUN_SEND_TESTS')
+
+/**
+ * After a send test, send the same amount back the way it came.
+ *
+ * Every send test is one-directional — Alice pays Bob — so each run moves sats
+ * that never come back. Alice is the only wallet that ever pays, so Alice is
+ * the only wallet that ever empties, and she empties on a schedule set by how
+ * often CI runs. That is the drain behind #77: the suite spent its own
+ * preconditions, and the skips and dispatch inputs added since report the
+ * shortfall honestly without slowing it down.
+ *
+ * A return leg makes a run cost two fees instead of a hundred sats, which is
+ * the difference between a wallet that needs a faucet every few weeks and one
+ * that lasts. It runs in `afterAll`, only when a send actually happened, and
+ * never fails the suite: a failed return is a funding fact for the next run,
+ * not a broken adapter.
+ *
+ * Set `RETURN_TEST_FUNDS=0` to keep the sats where the test left them — when
+ * you are deliberately moving balance from one wallet to the other, or
+ * debugging a send and want its effect to persist.
+ */
+export const RETURN_TEST_FUNDS = flagUnlessOff('RETURN_TEST_FUNDS')
 
 /**
  * Treat an underfunded wallet as a failure rather than a skip.

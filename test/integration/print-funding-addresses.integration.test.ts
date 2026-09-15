@@ -1,8 +1,12 @@
 /**
  * Prints the funding addresses for Alice & Bob on every network, so you know where
- * to send test coins before running the funded assertions.
+ * to send test coins before running the funded assertions — and what each wallet
+ * already holds, which is the half that says whether a top-up is needed at all.
  *
- *   npm run test:integration -- print-funding-addresses
+ *   npm run test:integration -- print-funding-addresses --silent=false
+ *
+ * `--silent=false` matters: vitest hides console output from passing tests, and
+ * every test here passes by design.
  *
  * Each protocol logs independently and never fails the run.
  */
@@ -26,7 +30,12 @@ import {
   safeDisconnect,
 } from './helpers'
 
-type Row = { wallet: string; fund: string; address: string }
+type Row = { wallet: string; fund: string; balance: string; address: string }
+
+/** A wallet's balance as one cell: what it holds, and what it can actually spend. */
+function held(balance: { confirmed: number; total: number }): string {
+  return `${balance.total} sat (${balance.confirmed} spendable)`
+}
 
 async function collect(
   label: string,
@@ -58,9 +67,10 @@ describe.skipIf(!HAVE_WALLETS)('funding addresses (Alice & Bob)', () => {
       try {
         const spark = await a.getReceiveAddress('SPARK')
         const btc = await a.getReceiveAddress('btc') // single-use L1 deposit
+        const balance = held(await a.getBtcBalance())
         return [
-          { wallet: w.name, fund: 'Spark (native)', address: spark.address },
-          { wallet: w.name, fund: 'Spark L1 deposit (BTC)', address: btc.address },
+          { wallet: w.name, fund: 'Spark (native)', balance, address: spark.address },
+          { wallet: w.name, fund: 'Spark L1 deposit (BTC)', balance: '↑ same wallet', address: btc.address },
         ]
       } finally {
         await safeDisconnect(a)
@@ -73,7 +83,8 @@ describe.skipIf(!HAVE_WALLETS)('funding addresses (Alice & Bob)', () => {
       const a = await connectLiquid(w)
       try {
         const addr = await a.getReceiveAddress()
-        return [{ wallet: w.name, fund: 'Liquid L-BTC (testnet)', address: addr.address }]
+        const balance = held(await a.getBtcBalance())
+        return [{ wallet: w.name, fund: 'Liquid L-BTC (testnet)', balance, address: addr.address }]
       } finally {
         await safeDisconnect(a)
       }
@@ -86,9 +97,12 @@ describe.skipIf(!HAVE_WALLETS)('funding addresses (Alice & Bob)', () => {
       try {
         const ark = await a.getReceiveAddress()
         const boarding = await a.getBoardingAddress()
+        // `spendable` here is settled + preconfirmed VTXOs. Boarding UTXOs that
+        // were never onboarded sit outside it — a 0 that a faucet will not fix.
+        const balance = held(await a.getBtcBalance())
         return [
-          { wallet: w.name, fund: 'Arkade (Ark address)', address: ark.address },
-          { wallet: w.name, fund: 'Arkade boarding (on-chain BTC)', address: boarding.address },
+          { wallet: w.name, fund: 'Arkade (Ark address)', balance, address: ark.address },
+          { wallet: w.name, fund: 'Arkade boarding (on-chain BTC)', balance: '↑ same wallet', address: boarding.address },
         ]
       } finally {
         await safeDisconnect(a)
@@ -101,7 +115,8 @@ describe.skipIf(!HAVE_WALLETS)('funding addresses (Alice & Bob)', () => {
       const a = await connectRgbL1(w)
       try {
         const addr = await a.getReceiveAddress() // BTC on-chain (vanilla)
-        return [{ wallet: w.name, fund: 'RGB-L1 on-chain BTC', address: addr.address }]
+        const balance = held(await a.getBtcBalance())
+        return [{ wallet: w.name, fund: 'RGB-L1 on-chain BTC', balance, address: addr.address }]
       } finally {
         await safeDisconnect(a)
       }
