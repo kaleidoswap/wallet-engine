@@ -40,19 +40,18 @@ vi.mock('../../src/lib/spark-client-manager', () => ({
 }))
 
 import { SparkAdapter } from '../../src/adapters/SparkAdapter'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
 describe('G: SparkAdapter must not sign while isConnected() is false', () => {
   it('a failed re-connect leaves the adapter disconnected AND unable to sign', async () => {
     const a = new SparkAdapter()
-    await a.connect({ protocol: 'SPARK', mnemonic: MNEMONIC } as any)
+    await a.connect({ protocol: 'SPARK', mnemonic: BIP39_TEST_VECTOR_MNEMONIC } as any)
     expect(a.isConnected()).toBe(true)
 
     // Wallet switch: the second connect fails after tearing down wallet A.
     state.failNext = true
-    await expect(a.connect({ protocol: 'SPARK', mnemonic: MNEMONIC } as any)).rejects.toThrow()
+    await expect(a.connect({ protocol: 'SPARK', mnemonic: BIP39_TEST_VECTOR_MNEMONIC } as any)).rejects.toThrow()
     expect(a.isConnected(), 'wallet was torn down by the failed re-init').toBe(false)
 
     // The signing surface must be closed too — currently it still signs.

@@ -13,6 +13,7 @@ import { RlnWdkAdapter } from '../../src/adapters/wdk/RlnWdkAdapter'
 import { RgbLibWasmAdapter } from '../../src/adapters/wdk/RgbLibWasmAdapter'
 import { registerWdkModule } from '../../src/adapters/wdk/moduleLoader'
 import { MAINNET_FEE_FLOOR } from '../../src/lib/rgb-fee-policy'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
 /**
  * AUDIT C-F6 — the mainnet fee floor (rgb-fee-policy, [GL #26]) is only wired
@@ -60,7 +61,7 @@ describe('AUDIT C-F6: mainnet fee floor bypass', () => {
     registerWdkModule('@utexo/rgb-lib-wasm', () => ({
       init: () => {},
       restoreKeys: () => ({
-        mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        mnemonic: BIP39_TEST_VECTOR_MNEMONIC,
         masterFingerprint: 'aa',
         accountXpubVanilla: 'xpub1',
         accountXpubColored: 'xpub2',
@@ -72,7 +73,7 @@ describe('AUDIT C-F6: mainnet fee floor bypass', () => {
     await adapter.connect({
       protocol: 'RGB_L1',
       network: 'mainnet',
-      mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      mnemonic: BIP39_TEST_VECTOR_MNEMONIC,
       indexerUrl: 'http://indexer',
     } as any)
     await adapter.sendAsset({ token: 'rgb:asset', recipient: 'utxob:rcpt', amount: 5 })

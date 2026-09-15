@@ -4,6 +4,7 @@ import { HDKey } from '@scure/bip32'
 import { mnemonicToSeedSync } from '@scure/bip39'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 import { signPsbt } from '../src/lib/psbt-signer'
+import { BIP39_TEST_VECTOR_MNEMONIC } from './fixtures/mnemonics'
 
 /**
  * The dApp-facing PSBT signer must sign a normal owned input, but must NOT sign an
@@ -11,13 +12,11 @@ import { signPsbt } from '../src/lib/psbt-signer'
  * (SIGHASH_NONE/SINGLE/ANYONECANPAY). @scure/btc-signer enforces this by default;
  * these tests lock it in.
  */
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const PATH = "m/84'/0'/0'/0/0"
 
-/** Build a single-input, single-output PSBT owned by MNEMONIC's PATH key. */
+/** Build a single-input, single-output PSBT owned by BIP39_TEST_VECTOR_MNEMONIC's PATH key. */
 function buildOwnedPsbt(sighashType?: number): string {
-  const root = HDKey.fromMasterSeed(mnemonicToSeedSync(MNEMONIC))
+  const root = HDKey.fromMasterSeed(mnemonicToSeedSync(BIP39_TEST_VECTOR_MNEMONIC))
   const child = root.derive(PATH)
   const pub = child.publicKey!
   const spk = p2wpkh(pub).script
@@ -36,24 +35,24 @@ function buildOwnedPsbt(sighashType?: number): string {
 
 describe('signPsbt', () => {
   it('signs an owned input with the default (SIGHASH_ALL) sighash', () => {
-    const res = signPsbt(buildOwnedPsbt(), MNEMONIC)
+    const res = signPsbt(buildOwnedPsbt(), BIP39_TEST_VECTOR_MNEMONIC)
     expect(res.signedCount).toBe(1)
     expect(res.unchanged).toBe(false)
   })
 
   it('refuses to sign an owned input flagged SIGHASH_NONE (output-rewrite risk)', () => {
-    const res = signPsbt(buildOwnedPsbt(SigHash.NONE), MNEMONIC)
+    const res = signPsbt(buildOwnedPsbt(SigHash.NONE), BIP39_TEST_VECTOR_MNEMONIC)
     expect(res.signedCount).toBe(0)
     expect(res.unchanged).toBe(true)
   })
 
   it('refuses SIGHASH_SINGLE | ANYONECANPAY too', () => {
-    const res = signPsbt(buildOwnedPsbt(SigHash.SINGLE_ANYONECANPAY), MNEMONIC)
+    const res = signPsbt(buildOwnedPsbt(SigHash.SINGLE_ANYONECANPAY), BIP39_TEST_VECTOR_MNEMONIC)
     expect(res.signedCount).toBe(0)
     expect(res.unchanged).toBe(true)
   })
 
   it('throws on non-PSBT input', () => {
-    expect(() => signPsbt('deadbeef', MNEMONIC)).toThrow(/not a valid PSBT/i)
+    expect(() => signPsbt('deadbeef', BIP39_TEST_VECTOR_MNEMONIC)).toThrow(/not a valid PSBT/i)
   })
 })

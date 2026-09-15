@@ -11,12 +11,13 @@ import { HDKey } from '@scure/bip32'
 import { mnemonicToSeedSync } from '@scure/bip39'
 import { hexToBytes, bytesToHex } from '@noble/hashes/utils.js'
 import { decodePsbtMeta } from '../../src/lib/psbt-signer'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
 describe('decodePsbtMeta confirmation surface', () => {
   it('F7: a 100k-sat drain to an attacker script is indistinguishable from a 1-in-1-out self-transfer', () => {
     const root = HDKey.fromMasterSeed(
       mnemonicToSeedSync(
-        'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+        BIP39_TEST_VECTOR_MNEMONIC,
       ),
     )
     const own = p2wpkh(root.derive("m/84'/0'/0'/0/0").publicKey!).script

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { SparkWdkAdapter } from '../../src/adapters/wdk/SparkWdkAdapter'
 import { sparkClientManager } from '../../src/lib/spark-client-manager'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
 /**
  * Audit finding A5 — `SparkWdkAdapter.connect()` adopts its raw SparkWallet into
@@ -17,7 +18,7 @@ function connectedAdapter(rawWallet: object): SparkWdkAdapter {
   Object.assign(a as any, {
     manager: { dispose: async () => {} },
     account: { dispose: async () => {}, _wallet: rawWallet },
-    mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+    mnemonic: BIP39_TEST_VECTOR_MNEMONIC,
     connected: true,
   })
   sparkClientManager.adoptExternalWallet(rawWallet, 'regtest')
