@@ -33,13 +33,11 @@ import { resolveWalletSeed } from '../../src/lib/wallet-seed'
 import { verifyLnMessage } from '../../src/lib/ln-message-sign'
 
 // The three supported wallet-secret shapes.
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const HEX = '11'.repeat(32)
 const NSEC = bech32.encode('nsec', bech32.toWords(hexToBytes(HEX)))
 
 const SECRETS: ReadonlyArray<[string, string]> = [
-  ['mnemonic', MNEMONIC],
+  ['mnemonic', BIP39_TEST_VECTOR_MNEMONIC],
   ['nsec', NSEC],
   ['hex', HEX],
 ]
@@ -102,6 +100,7 @@ import { SparkAdapter } from '../../src/adapters/SparkAdapter'
 import { ArkadeAdapter } from '../../src/adapters/ArkadeAdapter'
 import { SparkWdkAdapter } from '../../src/adapters/wdk/SparkWdkAdapter'
 import { ArkadeWdkAdapter } from '../../src/adapters/wdk/ArkadeWdkAdapter'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
 describe('A-F4: every wallet-secret shape can sign', () => {
   describe('signPsbt (src/lib/psbt-signer.ts) — shared by both Spark signPsbt paths', () => {
@@ -115,7 +114,7 @@ describe('A-F4: every wallet-secret shape can sign', () => {
 
     it('still refuses a secret that is none of the three shapes', () => {
       // Fail loud rather than PBKDF2 a typo into a different, empty wallet.
-      expect(() => signPsbt(buildOwnedPsbt(MNEMONIC), 'not a real secret at all')).toThrow(
+      expect(() => signPsbt(buildOwnedPsbt(BIP39_TEST_VECTOR_MNEMONIC), 'not a real secret at all')).toThrow(
         /invalid wallet secret/i,
       )
     })

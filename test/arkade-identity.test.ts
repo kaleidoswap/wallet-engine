@@ -6,8 +6,8 @@ import {
   deriveArkadeIdentityKey,
   type ArkadeDerivation,
 } from '../src/lib/arkade-identity'
+import { BIP39_TEST_VECTOR_MNEMONIC } from './fixtures/mnemonics'
 
-const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const xonly = (secret: string, derivation: ArkadeDerivation, network?: string, index?: number) =>
   hex.encode(schnorr.getPublicKey(deriveArkadeIdentityKey(secret, { derivation, network, index })))
 
@@ -36,26 +36,26 @@ describe('arkade identity derivation', () => {
   // values that keep existing wallets reachable; if one changes, every address
   // that adapter ever handed out changes with it.
   it('derives the frozen WDK_COMPAT keys', () => {
-    expect(xonly(MNEMONIC, 'WDK_COMPAT', 'mainnet', 0)).toBe(
+    expect(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'mainnet', 0)).toBe(
       '508540e92ece36148463bacdd289402dd5b174435aa5ea53081d327277923933',
     )
-    expect(xonly(MNEMONIC, 'WDK_COMPAT', 'signet', 0)).toBe(
+    expect(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'signet', 0)).toBe(
       '017618eea82a30e95579d6f60cd99b8e8be874d368425c571d244e8bb6c1f0a9',
     )
-    expect(xonly(MNEMONIC, 'WDK_COMPAT', 'signet', 3)).toBe(
+    expect(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'signet', 3)).toBe(
       '0b7001a4db7475cbb3a64da71906fa5523c74b9c91aebd5902086858d1e49109',
     )
   })
 
   it('the two derivations disagree — which is the whole reason to name them', () => {
-    expect(xonly(MNEMONIC, 'WDK_COMPAT', 'signet')).not.toBe(xonly(MNEMONIC, 'BIP86_HARDENED', 'signet'))
-    expect(xonly(MNEMONIC, 'WDK_COMPAT', 'mainnet')).not.toBe(xonly(MNEMONIC, 'BIP86_HARDENED', 'mainnet'))
+    expect(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'signet')).not.toBe(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'BIP86_HARDENED', 'signet'))
+    expect(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'mainnet')).not.toBe(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'BIP86_HARDENED', 'mainnet'))
   })
 
   it('separates accounts by index and by network', () => {
-    const a = xonly(MNEMONIC, 'WDK_COMPAT', 'signet', 0)
-    expect(a).not.toBe(xonly(MNEMONIC, 'WDK_COMPAT', 'signet', 1))
-    expect(a).not.toBe(xonly(MNEMONIC, 'WDK_COMPAT', 'mainnet', 0))
+    const a = xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'signet', 0)
+    expect(a).not.toBe(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'signet', 1))
+    expect(a).not.toBe(xonly(BIP39_TEST_VECTOR_MNEMONIC, 'WDK_COMPAT', 'mainnet', 0))
   })
 
   it('accepts the non-mnemonic secrets the existing wallets were built with', () => {

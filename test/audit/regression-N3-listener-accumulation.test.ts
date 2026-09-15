@@ -68,9 +68,8 @@ vi.mock('@arkade-os/sdk', () => {
 })
 
 import { arkadeClientManager } from '../../src/lib/arkade-client-manager'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const MNEMONIC_B =
   'legal winner thank year wave sausage worth useful legal winner thank yellow'
 
@@ -121,7 +120,7 @@ afterEach(() => {
 
 describe('N3: arkade incoming-funds listener lifecycle', () => {
   it('a) two starts before the first subscribe resolves must not create two subscriptions', async () => {
-    await connect(MNEMONIC, 'ARK_A')
+    await connect(BIP39_TEST_VECTOR_MNEMONIC, 'ARK_A')
 
     arkadeClientManager.startIncomingFundsListener(() => {})
     arkadeClientManager.startIncomingFundsListener(() => {})
@@ -131,7 +130,7 @@ describe('N3: arkade incoming-funds listener lifecycle', () => {
   })
 
   it('b) a disconnect() racing the subscribe must not leave a live listener behind', async () => {
-    await connect(MNEMONIC, 'ARK_A')
+    await connect(BIP39_TEST_VECTOR_MNEMONIC, 'ARK_A')
 
     const seen: unknown[] = []
     arkadeClientManager.startIncomingFundsListener((n) => seen.push(n))
@@ -152,7 +151,7 @@ describe('N3: arkade incoming-funds listener lifecycle', () => {
   })
 
   it('c) after a teardown race, the NEXT wallet still gets its own listener', async () => {
-    await connect(MNEMONIC, 'ARK_A')
+    await connect(BIP39_TEST_VECTOR_MNEMONIC, 'ARK_A')
 
     const seenA: unknown[] = []
     arkadeClientManager.startIncomingFundsListener((n) => seenA.push(n))

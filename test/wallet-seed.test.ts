@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { resolveWalletSeed } from '../src/lib/wallet-seed'
+import { BIP39_TEST_VECTOR_MNEMONIC } from './fixtures/mnemonics'
 
 /**
  * resolveWalletSeed is the single choke point turning a stored wallet secret into HD
@@ -8,12 +9,9 @@ import { resolveWalletSeed } from '../src/lib/wallet-seed'
  * valid-but-different (empty) wallet.
  */
 describe('resolveWalletSeed', () => {
-  // BIP-39 test vector (valid English mnemonic).
-  const VALID_MNEMONIC =
-    'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
   it('derives a 64-byte seed from a valid BIP-39 mnemonic', () => {
-    const seed = resolveWalletSeed(VALID_MNEMONIC)
+    const seed = resolveWalletSeed(BIP39_TEST_VECTOR_MNEMONIC)
     expect(seed).toBeInstanceOf(Uint8Array)
     expect(seed.length).toBe(64)
   })
@@ -26,7 +24,7 @@ describe('resolveWalletSeed', () => {
 
   it('throws on an invalid/typo\'d mnemonic instead of silently deriving a wrong wallet', () => {
     // Same phrase with the last word swapped for one that breaks the checksum.
-    const bad = VALID_MNEMONIC.replace(/about$/, 'zoo')
+    const bad = BIP39_TEST_VECTOR_MNEMONIC.replace(/about$/, 'zoo')
     expect(() => resolveWalletSeed(bad)).toThrow(/invalid wallet secret/i)
   })
 
