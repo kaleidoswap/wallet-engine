@@ -20,10 +20,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   claimed transfers were gated behind `RUN_SEND_TESTS` for months while no such
   test existed and the flag was never read there, so NIA issuance and the
   consignment exchange — the part that actually breaks — had no coverage at all.
-  The issuance test reuses an asset either wallet already holds and issues only
-  when neither does, because issuing on every PR run would consume a colorable
-  UTXO and a fee each time until the wallet ran out; `RGB_FORCE_ISSUANCE=1`
-  forces the issuing path. The transfer follows whoever holds the asset and
+  The issuance test reuses an asset either wallet already holds — keyed on
+  `total`, since a sender's unconfirmed change reads `available: 0` while it
+  still owns nearly the whole supply — and issues when neither does, which is
+  every run on CI's ephemeral data directory and rarely on a persistent local
+  one. `RGB_FORCE_ISSUANCE=1` forces the issuing path. A shortfall in spendable
+  assignments skips the way a drained wallet does, including rgb-lib's own
+  `InsufficientAssignments` refusal. The transfer follows whoever holds the asset and
   returns it in teardown, so the suite stays runnable whichever way the last run
   left the balance.
 

@@ -131,10 +131,26 @@ it. Delete the directory and the wallet forgets its assets, though the coins
 themselves are still on-chain.
 
 That matters for the issuance test, which reuses an asset either wallet already
-holds and issues only when neither does. On a fresh data directory it finds
-nothing and issues, so a CI runner with no persisted state would mint a new
-asset on every run, each one consuming a colorable UTXO and an on-chain fee.
-The Integration workflow therefore caches `.rgb-data` between runs.
+holds and issues only when neither does. A local run with a persistent
+`RGB_DATA_DIR` reuses; CI, whose data directory is ephemeral, issues a fresh
+asset each run. That costs one colorable UTXO and an on-chain fee per run —
+a few hundred signet sats against the ~1.59M each wallet holds, so thousands
+of runs — and the assets do not accumulate anywhere, because the database they
+are recorded in does not survive the runner.
+
+**Do not cache the CI data directory to avoid that.** It was tried, and it
+breaks the suite outright: the cached database is authoritative about which
+UTXOs the wallet owns, any other instance of the same seed spends some of
+them, and the next restore fails `goOnline` with
+
+```
+RgbLib(Inconsistency { details: "spent bitcoins with another wallet: [...]" })
+```
+
+An RGB database can only be shared by instances that are the sole users of
+their seed, which a test wallet run from CI and from laptops is not. `goOnline`
+takes a skip-consistency-check flag; suppressing this particular check would be
+hiding a real accounting disagreement about spent coins.
 
 `RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
 
