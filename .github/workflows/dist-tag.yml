@@ -1,29 +1,36 @@
-name: Move an npm dist-tag
+name: Set npm dist-tag
 
-# Repoints an npm dist-tag at an ALREADY PUBLISHED version. Separate from
-# publish.yml because that workflow can only publish: `npm publish` on a version
-# that already exists fails, so it cannot be reused to fix a tag after the fact.
+# Moves an npm dist-tag for @kaleidorg/wallet-engine to an ALREADY-PUBLISHED
+# version. Separate from publish.yml because it is not a publish: npm refuses to
+# republish an existing version, so `npm publish --tag` cannot move a tag after
+# the fact and the only route is `npm dist-tag add`.
 #
-# This exists because `latest` sat on 1.0.0-beta.4 for months while real releases
-# went out under `beta`, so a plain `npm i @kaleidorg/wallet-engine` handed
-# consumers a stale build.
+# This exists because `latest` drifts. It sat on 1.0.0-beta.4 for months, then
+# on beta.63 while `beta` moved on — and every fix needed someone with npm
+# credentials at a keyboard, which is why it kept not happening. The token is
+# already in this repo for publish.yml; this makes using it a dispatch.
 #
-# Requires the same NPM_TOKEN secret as publish.yml. The token stays in CI — the
-# point is that nobody has to hold it locally to move a tag.
+# `latest` is what a bare `npm install` resolves to. This package has no stable
+# release yet, so `latest` legitimately points at a prerelease — but it should
+# point at the CURRENT one.
 
 on:
   workflow_dispatch:
     inputs:
       version:
-        description: 'Published version to point at (e.g. 1.0.0-beta.62)'
+        description: 'Published version to point at (e.g. 1.0.0-beta.68)'
         required: true
-      dist_tag:
-        description: 'Tag to move (e.g. latest)'
+      tag:
+        description: 'dist-tag to move'
         required: true
         default: latest
 
+concurrency:
+  group: npm-dist-tag
+  cancel-in-progress: false
+
 jobs:
-  dist-tag:
+  set-tag:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/setup-node@v4
@@ -31,24 +38,27 @@ jobs:
           node-version: 20
           registry-url: 'https://registry.npmjs.org'
 
-      - name: Move the tag
+      # Fail here rather than half-way through `dist-tag add`: a typo'd version
+      # produces a clearer error than npm's, and a tag is never moved to
+      # something that does not exist.
+      - name: Verify the version is published
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          if ! npm view "@kaleidorg/wallet-engine@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::@kaleidorg/wallet-engine@$VERSION is not published"
+            exit 1
+          fi
+          echo "Found @kaleidorg/wallet-engine@$VERSION"
+
+      - name: Move the dist-tag
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           VERSION: ${{ inputs.version }}
-          DIST_TAG: ${{ inputs.dist_tag }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          PKG="@kaleidorg/wallet-engine"
-          # Inputs reach a shell, so constrain their shape before use. They come
-          # from a maintainer dispatch rather than an untrusted event, but a typo
-          # should fail here rather than turn into an argument to npm.
-          printf '%s' "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$' \
-            || { echo "Refusing: '$VERSION' is not a plain semver version." >&2; exit 64; }
-          printf '%s' "$DIST_TAG" | grep -qE '^[a-z][a-z0-9-]*$' \
-            || { echo "Refusing: '$DIST_TAG' is not a simple dist-tag name." >&2; exit 64; }
-          # Refuse to point a tag at something that was never published, which
-          # would otherwise leave the tag dangling.
-          npm view "$PKG@$VERSION" version > /dev/null
-          npm dist-tag add "$PKG@$VERSION" "$DIST_TAG"
-          echo "Tags now:"
-          npm dist-tag ls "$PKG"
+          echo "Before:"; npm view @kaleidorg/wallet-engine dist-tags --json
+          npm dist-tag add "@kaleidorg/wallet-engine@$VERSION" "$TAG"
+          echo "After:"; npm view @kaleidorg/wallet-engine dist-tags --json

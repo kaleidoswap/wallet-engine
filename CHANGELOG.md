@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Build
+- **A dispatchable workflow moves npm dist-tags** (`.github/workflows/dist-tag.yml`).
+  `latest` is what a bare `npm install` resolves to, and it drifts: it sat on
+  `1.0.0-beta.4` for months, then on `beta.63` while `beta` moved on. Fixing it
+  needed someone with npm credentials at a keyboard, which is why it kept not
+  happening. The token is already here for `publish.yml`; this makes using it a
+  dispatch. It refuses a version that is not published, and cannot publish
+  anything — `npm publish --tag` can only set a tag at publish time, so moving
+  one afterwards is `npm dist-tag add` or nothing.
+
 ### Added
 - **`RgbLibWdkAdapter.listUnspents()` and `countFreeColorableSlots()`** — the
   only way to answer "can this wallet receive or spend an RGB allocation right
