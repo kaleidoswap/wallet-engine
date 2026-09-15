@@ -173,14 +173,26 @@ rgb-lib refuses with `InvalidRecipientData { "missing witness data for a
 witness recipient" }`. A blinded invoice carries its own outpoint and needs
 none. 1000 sat matches rgb-lib's own colorable UTXOs and clears dust.
 
+**Witness receive can be verified once per (wallet, proxy), and then reports
+`RecipientIDAlreadyUsed` forever.** A witness recipient id is derived from the
+wallet's keychain with no outpoint to vary it, and this database is ephemeral
+per runner, so every run regenerates the same id. The transport proxy retains
+`recipient id → consignment` indefinitely, so the second use is rejected and
+stays rejected.
+
+That is why witness receive passed on the run that introduced it and has
+skipped on every run since. A **blinded** id derives from a real outpoint, which
+differs each run, and is unaffected.
+
 The suite's invoices use `durationSeconds: 120` rather than rgb-lib's 2000s
-default. A **witness** recipient id is derived from the wallet's keychain with
-no outpoint to vary it, and this database is ephemeral per runner, so every run
-regenerates the same id — the transport proxy then answers
-`RecipientIDAlreadyUsed` for as long as the previous run's invoice is live.
-With a ~33 minute default and runs minutes apart, witness receive worked
-exactly once and collided every run after. A **blinded** id derives from a real
-outpoint, which differs each run, so it never had the problem.
+default, which is good hygiene but is **not** the fix — expiry was the first
+theory and it was wrong: a run more than an hour later, with every window long
+past, still collided.
+
+Genuinely fixing it needs the recipient id to differ across runs — a proxy we
+control and can reset, or rgb-lib state that advances the keychain without
+reintroducing the `goOnline` inconsistency that killed caching. Until then the
+skip states the constraint rather than implying it is transient.
 
 `createRgbUtxos` **broadcasts a transaction**, and its outputs do not exist for
 the wallet until that transaction confirms. Creating one and immediately
