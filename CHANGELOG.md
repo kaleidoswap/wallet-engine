@@ -18,6 +18,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   lockfiles resolved to them, because a pin that is declared and not applied is
   worth no more than no pin at all.
 
+### Fixed
+- **`listTransactions({ asset: 'BTC' })` answers the same on Liquid whether or
+  not the policy asset is known** (#73). Every adapter but Liquid labels its
+  bitcoin row `id: 'BTC'`; Liquid labels L-BTC with the policy-asset hex, which
+  is the better answer and stays. But the filter compared ids exactly, so a
+  BTC-scoped query returned L-BTC rows only while the adapter could *not*
+  identify the policy asset — its fallback labels them `'BTC'` — and dropped
+  them once it could. The same wallet, the same rows, a different answer
+  depending on adapter state.
+
+  `'BTC'` is the engine's protocol-neutral bitcoin id (`isBtcAssetId`), so it
+  now matches any row on a bitcoin layer as well as an exact id. Filtering on
+  the policy asset itself is unchanged, and a BTC filter still does not sweep
+  up L-USDT.
+
 ### Added
 - **`RgbLibWdkAdapter.issueAssetNia`**, matching the contract
   `RgbLibWasmAdapter` shipped in #76 — same parameters, same guarantees, so a
