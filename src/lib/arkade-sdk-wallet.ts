@@ -1,21 +1,10 @@
 /**
- * Build an Arkade wallet on `@arkade-os/sdk` directly, with no `@arkade-os/wdk`.
+ * Build an Arkade wallet on `@arkade-os/sdk` directly.
  *
- * `@arkade-os/wdk@0.1.4` — the latest published — hard-pins `@arkade-os/sdk` at
- * exactly `0.4.35`, so everything the SDK has learned since is out of reach
- * behind it: per-connection `EventSource` injection, the delegator fixes, and
- * whatever fixes the two-wallet scalar bug that 0.4.35 still has. The reference
- * wallet (`arkade-os/wallet`) uses the SDK directly and no WDK at all.
- *
- * Going direct also ends a version mix we were living with: the WDK built the
- * `Wallet` from its own 0.4.35, while `onboard`/`offboard` handed that instance
- * to a `Ramps` resolved from the top-level 0.4.72 — 37 patch releases apart,
- * on the path that moves funds on-chain.
- *
- * The identity is derived `WDK_COMPAT` (see `arkade-identity`), so **every
- * existing wallet keeps its addresses**. That equivalence is verified
- * byte-for-byte against the live mutinynet wallets; it is the whole reason this
- * move is safe to make at all.
+ * `@arkade-os/wdk` hard-pinned the SDK at 0.4.35, which held this path behind
+ * per-connection `EventSource` injection and the fixes since. Identities derive
+ * `WDK_COMPAT` (see `arkade-identity`), so existing wallets keep their
+ * addresses — verified byte-identical against the live wallets.
  */
 
 import { ensureEventSource } from './arkade-eventsource'
@@ -66,13 +55,7 @@ export interface CreatedArkadeWallet {
   eventSourceAvailable: boolean
 }
 
-/**
- * Resolve how this connection opens an SSE stream.
- *
- * Injected implementation first, then the runtime's global. Returning
- * `undefined` is a real answer — the caller reports it rather than letting the
- * SDK discover it one failed settle at a time.
- */
+/** Injected implementation first, then the global. `undefined` is an answer. */
 export function resolveEventSourceFactory(injected?: unknown): EventSourceFactory | undefined {
   if (typeof injected === 'function') {
     const Impl = injected as new (url: string) => unknown
@@ -88,11 +71,8 @@ export function resolveEventSourceFactory(injected?: unknown): EventSourceFactor
 
 /**
  * Create the SDK wallet, its providers, its storage and its delegator.
- *
- * `eventSource` is handed to each provider rather than assigned onto
- * `globalThis`: 0.4.72 takes it per connection, which is both cleaner than
- * mutating a global and correct for a process holding two wallets that need
- * different transports.
+ * `eventSource` goes to each provider rather than onto `globalThis`, which is
+ * also correct for a process holding two wallets on different transports.
  */
 export async function createArkadeSdkWallet(
   sdk: ArkadeWalletSdk,
@@ -100,16 +80,11 @@ export async function createArkadeSdkWallet(
 ): Promise<CreatedArkadeWallet> {
   const eventSource = resolveEventSourceFactory(options.eventSource)
   const sse = eventSource ? { eventSource } : undefined
-  // Belt and braces. Per-provider injection is the mechanism, but the option is
-  // silently ignored by an SDK older than the peer floor — and "silently
-  // ignored" on this path means settlement stops and VTXOs expire, which is the
-  // exact failure this whole change exists to end. Installing on the global
-  // too costs nothing and never overwrites an implementation already there.
+  // Backstop: an SDK below the peer floor ignores the per-provider option
+  // silently, and silently here means VTXOs expire.
   if (options.eventSource) ensureEventSource(options.eventSource)
 
   const identityKey = deriveArkadeIdentityKey(options.secret, {
-    // Never defaulted at the call site by accident: the two derivations open
-    // two different wallets. See `arkade-identity`.
     derivation: options.derivation ?? 'WDK_COMPAT',
     network: options.network,
     index: options.accountIndex ?? 0,
@@ -120,8 +95,7 @@ export async function createArkadeSdkWallet(
   const config: Record<string, unknown> = {
     identity: sdk.SingleKey.fromPrivateKey(identityKey),
     storage,
-    // Explicit providers, not the deprecated URL fields — and the only way to
-    // pass an SSE transport per connection.
+    // Explicit providers: the deprecated URL fields cannot carry `eventSource`.
     arkProvider: new sdk.RestArkProvider(options.arkServerUrl, sse),
   }
   if (options.indexerUrl && sdk.RestIndexerProvider) {
@@ -131,9 +105,8 @@ export async function createArkadeSdkWallet(
     config.onchainProvider = new sdk.EsploraProvider(options.esploraUrl)
   }
 
-  // On by default once a URL is configured: the failure mode of not delegating
-  // is funds expiring. `delegateProvider` is canonical — `delegatorProvider` is
-  // its deprecated alias.
+  // On by default once configured; not delegating means funds expiring.
+  // `delegateProvider` is canonical, `delegatorProvider` its deprecated alias.
   const delegationEnabled = Boolean(options.delegatorUrl) && options.delegationEnabled !== false
   if (delegationEnabled && options.delegatorUrl && sdk.RestDelegatorProvider) {
     config.delegateProvider = new sdk.RestDelegatorProvider(options.delegatorUrl)

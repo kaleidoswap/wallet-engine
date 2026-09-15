@@ -55,16 +55,12 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
   afterAll(async () => {
     if (asset && sentAmount && holder) {
-      // Send it back, so the suite does not migrate the asset one run at a time
-      // and force a fresh issuance once the sender runs out. Best-effort by
-      // design: an RGB transfer the recipient cannot yet spend (the incoming
-      // allocation is unconfirmed) is a fact about timing, not a regression —
-      // and the next run picks whichever wallet holds it anyway.
+      // Send it back so the asset does not migrate one run at a time.
+      // Best-effort: an unconfirmed incoming allocation cannot be spent yet.
       const back = holder === 'alice' ? bob : alice
       const to = holder === 'alice' ? alice : bob
       await returnFunds(`RGB-L1 ${holder === 'alice' ? 'Bob → Alice' : 'Alice → Bob'}`, async () => {
-        // Same constraint as the outbound leg: bind the invoice to the asset
-        // only when this wallet already knows it.
+        // Same constraint as the outbound leg.
         const knows = (await to.listAssets()).some((a) => a.id === asset!.id)
         const invoice: any = await to.createRgbInvoice!(
           knows ? { assetId: asset!.id, amount: sentAmount } : { amount: sentAmount },
@@ -106,18 +102,10 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
   }, 120_000)
 
   /**
-   * Prepare colorable UTXOs on BOTH wallets, and wait for them.
-   *
-   * Early on purpose. `createRgbUtxos` broadcasts a transaction and its outputs
-   * are unusable until it confirms, so doing this immediately before a send
-   * fails with `InsufficientAllocationSlots` — which is what happened, and it
-   * passed or failed depending on what an earlier run left on-chain.
-   *
-   * Two slots each: a sender needs one for the asset it holds and one for the
-   * change, and either wallet may end up being the sender. It does not assert a
-   * count — mutinynet decides when a transaction confirms — it just gets the
-   * work started as early as the file allows, and the transfer tests skip with
-   * a real number if the slots have not landed by then.
+   * Prepare colorable UTXOs on both wallets, early on purpose: `createRgbUtxos`
+   * broadcasts a transaction whose outputs are unusable until it confirms. Two
+   * slots each, since either wallet may end up the sender (asset + change).
+   * Asserts no count — mutinynet decides when a transaction confirms.
    */
   it('prepares colorable UTXOs on both wallets', async () => {
     const [aliceSlots, bobSlots] = await Promise.all([
@@ -129,28 +117,15 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
   }, 240_000)
 
   /**
-   * Reuse a NIA asset either wallet already holds, and issue one only when
-   * neither does.
-   *
-   * Issuing every run would be the obvious thing and the wrong one: each
-   * issuance consumes a colorable UTXO and an on-chain fee, and this suite runs
-   * on every PR touching `src/**`, so it would mint assets until the wallet ran
-   * out of UTXOs to colour. Reuse keeps the transfer test supplied without that.
-   *
-   * `RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose purpose is to
-   * exercise issuance itself.
+   * Reuse a NIA asset either wallet holds, issuing only when neither does —
+   * each issuance costs a colorable UTXO and a fee, and this suite runs on
+   * every PR. `RGB_FORCE_ISSUANCE=1` issues regardless.
    */
   it.skipIf(!RUN_SEND_TESTS)('holds a NIA asset, issuing one if neither wallet does', async (ctx) => {
     /**
-     * Any NIA asset this wallet **holds** — `total`, not `available`.
-     *
-     * `available` is the spendable figure, and after a transfer the sender's
-     * change allocation is unconfirmed, so spendable reads 0 while the wallet
-     * still owns the asset. Keying reuse off it meant every run decided it had
-     * nothing and issued again — caching the rgb-lib database fixed the wallet
-     * forgetting its assets, and this was the second reason the reuse never
-     * fired. Whether the asset can be spent *right now* is the transfer test's
-     * problem, and `sendOrSkip` already answers it honestly.
+     * Any NIA asset this wallet HOLDS — `total`, not `available`: after a
+     * transfer the change is unconfirmed, so spendable reads 0 while the wallet
+     * still owns the asset. Spendability is the transfer test's problem.
      */
     const niaHeld = async (w: RgbLibWdkAdapter) => {
       const assets = (await w.listAssets()).filter((a) => a.id !== 'BTC')
@@ -211,25 +186,14 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
   }, 300_000)
 
   /**
-   * Move the asset between the wallets, once per receive mode.
+   * Move the asset between the wallets, once per receive mode. They differ in
+   * who supplies the output: **blinded** needs a free slot on the recipient,
+   * **witness** needs none because the sender creates it — which makes witness
+   * the mode that works for a wallet that has never held RGB.
    *
-   * The two modes differ in who supplies the output the asset lands on, which
-   * is the whole reason to cover both:
-   *
-   * - **blinded** — the recipient reserves one of its own colorable UTXOs and
-   *   hands back a blinded outpoint. Needs a free slot on the receiving side.
-   * - **witness** — the sender creates the output in the transfer itself. The
-   *   recipient needs no colorable UTXO at all, which makes it the mode that
-   *   works for a wallet that has never held RGB.
-   *
-   * Direction follows whoever holds the asset, so the suite stays runnable
-   * whichever way the last run left the balance.
-   *
-   * Each asserts the send: a transfer built, signed and broadcast, with a txid
-   * to reconcile. Arrival is reported, not asserted — the recipient cannot see
-   * a spendable allocation until the transfer confirms and both wallets
-   * refresh, and waiting on mutinynet confirmations would make a flake
-   * generator rather than a check.
+   * Direction follows whoever holds the asset. Asserts the send, not arrival:
+   * an allocation is not spendable until the transfer confirms, and waiting on
+   * that would generate flakes rather than signal.
    */
   for (const mode of ['blinded', 'witness'] as const) {
     it.skipIf(!RUN_SEND_TESTS)(`transfers the asset by ${mode} receive`, async (ctx) => {
@@ -240,21 +204,12 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
       const label = `${holder === 'alice' ? 'Alice → Bob' : 'Bob → Alice'} (${mode})`
       const amount = 10
 
-      // Holding an asset and being able to spend it are different things: after
-      // a transfer the sender's change allocation is unconfirmed, so
-      // `available` reads 0 against a `total` of nearly the whole supply.
-      //
-      // Wait for it rather than skipping on it. The mode that runs second was
-      // otherwise guaranteed to find 0 spendable — the first transfer having
-      // just consumed it — so witness receive never executed at all, which
-      // makes for a case that reports nothing while looking covered. The wait
-      // also exercises spending the change from a previous transfer, which is
-      // worth a check of its own.
+      // Wait rather than skip: the mode that runs second would otherwise always
+      // find 0 spendable, so it would never execute. The wait also covers
+      // spending the change from a previous transfer.
       let spendable = (await from.getAssetBalance!(asset!.id)).available
       if (spendable < amount) {
-        // `to` as well: the sender's change settles only after the recipient
-        // refreshes and accepts the consignment, so waiting without driving
-        // the counterparty waits on a state machine that cannot advance.
+        // `to` as well: the change settles only once the recipient accepts.
         spendable = await waitForSpendableAsset(from, asset!.id, amount, `${holder}/${mode}`, {
           refreshAlso: [to],
         })
@@ -266,9 +221,8 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
         return
       }
 
-      // The sender always needs a slot for its change. A blinded recipient
-      // needs one to receive into; a witness recipient needs none, and asking
-      // for one anyway would hide the difference this test exists to cover.
+      // The sender always needs a slot for its change; only a blinded recipient
+      // needs one to receive into.
       const senderSlots = await ensureColorableSlots(from, 1, `${holder}/sender`)
       if (senderSlots < 1) {
         const reason = `${holder}/RGB-L1 has no free colorable UTXO for the change output — createRgbUtxos has not confirmed yet`
@@ -286,25 +240,13 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
         }
       }
 
-      // Name the asset in the invoice only when the recipient already knows it.
-      // rgb-lib answers `AssetNotFound` for an asset id its wallet has never
-      // seen, and a first-time recipient by definition has not: the asset
-      // reaches it through the sender's consignment, not through the invoice.
+      // Name the asset only when the recipient knows it: rgb-lib answers
+      // `AssetNotFound` otherwise, since the asset arrives via the consignment.
       const recipientKnowsAsset = (await to.listAssets()).some((a) => a.id === asset!.id)
       const invoice: any = await to.createRgbInvoice!({
         ...(recipientKnowsAsset ? { assetId: asset!.id } : {}),
         amount,
-        // Expire fast. A witness recipient id is derived from the wallet's
-        // keychain with no outpoint to vary it, and this database is ephemeral
-        // per runner, so every run regenerates the SAME id — the proxy then
-        // answers `RecipientIDAlreadyUsed` for as long as the previous run's
-        // invoice is live. rgb-lib's default is 2000s (~33 min) and runs are
-        // minutes apart, which is why witness receive worked exactly once and
-        // collided every run after.
-        //
-        // A blinded id is derived from a real outpoint, which differs each run,
-        // so it never had this problem. Both get the short expiry anyway:
-        // nothing here needs an invoice to outlive its own test.
+        // Nothing here needs an invoice to outlive its own test.
         durationSeconds: 120,
         ...(mode === 'witness' ? { witness: true } : {}),
       })
@@ -314,12 +256,9 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       const before = (await to.getAssetBalance!(asset!.id)).total
 
-      // A witness recipient has no outpoint of its own: the SENDER creates the
-      // output, so it must say how many sats go in it. rgb-lib refuses with
-      // `InvalidRecipientData { "missing witness data for a witness
-      // recipient" }` without this, and a blinded invoice needs none because it
-      // carries its own outpoint. 1000 sat matches rgb-lib's own colorable
-      // UTXOs and clears dust.
+      // A witness recipient has no outpoint: the sender creates the output and
+      // must size it, or rgb-lib refuses with `InvalidRecipientData`. 1000 sat
+      // matches rgb-lib's own colorable UTXOs and clears dust.
       const res: any = await sendOrSkip(ctx, `RGB-L1 ${label}`, () =>
         from.sendAsset!({
           token: asset!.id,

@@ -1,25 +1,17 @@
 /**
- * Arkade identity derivation — and the two incompatible paths already in use.
- *
- * The engine ships two Arkade adapters and they derive **different keys from
- * the same mnemonic**, because their coin-type level differs in hardening:
+ * Arkade identity derivation — and the two incompatible paths in use.
  *
  * | adapter | path | coin type |
  * |---|---|---|
- * | `ArkadeAdapter` (SDK-direct, via `arkade-client-manager`) | `m/86'/{coin}'/0'/0/0` | hardened |
- * | `ArkadeWdkAdapter` (via `@arkade-os/wdk`) | `m/86'/{0\|1}/0'/0/{index}` | **not** hardened |
+ * | `ArkadeAdapter` (via `arkade-client-manager`) | `m/86'/{coin}'/0'/0/0` | hardened |
+ * | `ArkadeWdkAdapter` | `m/86'/{coin}/0'/0/{index}` | **not** hardened |
  *
- * Two different wallets, two different address sets, no error to say so. A host
- * that switched adapters on one mnemonic would open an empty wallet and its
- * funds would sit in the derivation it left. That has to be a decision a caller
- * makes by name, which is what `ArkadeDerivation` is for — never a default that
- * follows from which adapter happens to be constructing.
+ * Same mnemonic, two different wallets, no error to say so. Switching adapters
+ * on one seed opens an empty wallet with the funds in the derivation it left,
+ * so the choice is named by the caller and never defaulted.
  *
- * `WDK_COMPAT` reproduces `@arkade-os/wdk@0.1.4`'s
- * `wallet-manager-arkade.js:209` exactly, unhardened level included. It is
- * verified against the live mutinynet wallets — the x-only key it derives is
- * byte-identical to the one the WDK built — so the Arkade path can move off the
- * WDK without a single address changing.
+ * `WDK_COMPAT` reproduces `@arkade-os/wdk@0.1.4`, unhardened level included,
+ * and is verified byte-identical against the live wallets.
  */
 
 import { HDKey } from '@scure/bip32'
@@ -33,12 +25,7 @@ function coinType(network: string | undefined): '0' | '1' {
   return ['bitcoin', 'mainnet'].includes(String(network)) ? '0' : '1'
 }
 
-/**
- * The BIP-32 path for an Arkade account.
- *
- * `WDK_COMPAT` leaves the coin-type level unhardened. That is not a typo here:
- * it is what the WDK does, and matching it byte-for-byte is the whole point.
- */
+/** The BIP-32 path. `WDK_COMPAT`'s unhardened coin type is deliberate. */
 export function arkadeDerivationPath(
   derivation: ArkadeDerivation,
   network: string | undefined,
@@ -51,12 +38,9 @@ export function arkadeDerivationPath(
 }
 
 /**
- * Derive the 32-byte private key for an Arkade account.
- *
- * Accepts whatever `resolveWalletSeed` accepts — mnemonic, `nsec1…`, or 64-char
- * hex. The non-mnemonic forms are already a single key, and the WDK still runs
- * them through the same HD derivation, so this does too: a raw key used as an
- * HD seed is unusual but it is what the existing wallets were built with.
+ * Derive the 32-byte private key for an Arkade account. Non-mnemonic secrets
+ * are HD-derived too — unusual, but it is what the existing wallets were built
+ * with.
  */
 export function deriveArkadeIdentityKey(
   secret: string,

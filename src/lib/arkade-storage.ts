@@ -1,25 +1,12 @@
 /**
  * Storage repositories for an Arkade wallet.
  *
- * `@arkade-os/wdk` substitutes in-memory repositories whenever its caller does
- * not pass `storage`, and says so in its own comment: *"In-memory storage means
- * VTXO state is lost on app restart."* We never passed `storage`, so every
- * Arkade wallet the engine built rebuilt its wallet **and contract**
- * repositories from nothing on each connect.
- *
- * The contract repository is the part that matters. It holds the boarding and
- * offchain contract rows a signer rotation writes, and the deprecated-signer
- * migration reads them back to find coins minted under an old server key. Wiped
- * on every connect, that history cannot survive a restart, and the rotation the
- * wallet performed yesterday is invisible to it today.
- *
- * So pass repositories that persist where the runtime can: IndexedDB in a
- * browser or service worker, which is what `arkade-os/wallet` uses. Where it
- * cannot — Node, a worklet — in-memory is the honest fallback, but the caller
- * is told rather than left to infer it from a balance that resets.
+ * `@arkade-os/wdk` substituted in-memory repositories when given no `storage`,
+ * which wiped the contract rows the signer-rotation migration reads on every
+ * connect. Pass repositories that persist where the runtime can.
  */
 
-/** The SDK namespace, passed in so this module stays off the static import graph. */
+/** The SDK namespace, kept off the static import graph. */
 export interface ArkadeStorageSdk {
   IndexedDBWalletRepository?: new () => unknown
   IndexedDBContractRepository?: new () => unknown
@@ -43,10 +30,7 @@ function hasIndexedDB(): boolean {
   return typeof (globalThis as { indexedDB?: unknown }).indexedDB !== 'undefined'
 }
 
-/**
- * Pick the best repositories this runtime supports, unless the host supplied
- * its own — a host that brings storage knows better than we do.
- */
+/** Best repositories this runtime supports; a host's own always wins. */
 export function resolveArkadeStorage(
   sdk: ArkadeStorageSdk,
   injected?: ArkadeStorage,
@@ -72,7 +56,6 @@ export function resolveArkadeStorage(
   }
 }
 
-/** What a host loses with in-memory repositories, and how to stop losing it. */
 export const NON_PERSISTENT_STORAGE_REASON =
   'Arkade wallet state is in-memory: VTXO and contract rows are rebuilt on every connect, so signer-rotation history does not survive a restart. ' +
   'Pass ArkadeConfig.storage with repositories that persist on this runtime.'

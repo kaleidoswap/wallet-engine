@@ -53,22 +53,10 @@ export const RUN_SEND_TESTS = flag('RUN_SEND_TESTS')
 /**
  * After a send test, send the same amount back the way it came.
  *
- * Every send test is one-directional — Alice pays Bob — so each run moves sats
- * that never come back. Alice is the only wallet that ever pays, so Alice is
- * the only wallet that ever empties, and she empties on a schedule set by how
- * often CI runs. That is the drain behind #77: the suite spent its own
- * preconditions, and the skips and dispatch inputs added since report the
- * shortfall honestly without slowing it down.
- *
- * A return leg makes a run cost two fees instead of a hundred sats, which is
- * the difference between a wallet that needs a faucet every few weeks and one
- * that lasts. It runs in `afterAll`, only when a send actually happened, and
- * never fails the suite: a failed return is a funding fact for the next run,
- * not a broken adapter.
- *
- * Set `RETURN_TEST_FUNDS=0` to keep the sats where the test left them — when
- * you are deliberately moving balance from one wallet to the other, or
- * debugging a send and want its effect to persist.
+ * Send tests only run Alice → Bob, so without this she is the only wallet that
+ * ever empties. The return leg makes a run cost two fees instead of the sats.
+ * Runs in `afterAll`, only when a send happened, and never fails the suite.
+ * `RETURN_TEST_FUNDS=0` leaves the balance where the test put it.
  */
 export const RETURN_TEST_FUNDS = flagUnlessOff('RETURN_TEST_FUNDS')
 
@@ -127,23 +115,16 @@ export const LIQUID = {
 }
 
 /**
- * Mutinynet indexer, shared by the Arkade and RGB-L1 suites.
+ * Mutinynet indexer for the Arkade and RGB-L1 suites.
  *
- * Ours, not the public `https://mutinynet.com/api`, which answers CI with a
- * plain nginx 429: our GitLab and GitHub runners share one box, so a single
- * egress IP makes everyone's requests and the limit arrives long before any one
- * suite is unreasonable. It reads as an outage — `@utexo/rgb-sdk` reports every
- * `goOnline` failure as "Failed to establish online connection" — and the RGB-L1
- * red went unread for weeks on that description while the endpoint answered in
- * 240ms from anywhere else.
+ * Ours, not the public `mutinynet.com/api`, which answers CI with a 429 — our
+ * runners share one egress IP. It surfaces as "Failed to establish online
+ * connection", so it reads as an outage rather than a rate limit. Same
+ * reasoning as the Liquid waterfalls default above.
  *
- * `esplora.signet.kaleidoswap.com` is the same chain, not a similar one: it is
- * MutinyWallet/electrs `new-index` with `--signet-magic`, the only esplora build
- * that indexes Mutinynet's custom signet, and it tracks the public one tip for
- * tip and hash for hash. Same reasoning as the Liquid waterfalls default above:
- * an endpoint someone else rate-limits is not a dependency a suite can hold.
- *
- * Override per consumer with `ARKADE_ESPLORA_URL` / `RGB_INDEXER_URL`.
+ * `esplora.signet.kaleidoswap.com` is MutinyWallet/electrs with
+ * `--signet-magic` — the same chain, tip for tip. Override per consumer with
+ * `ARKADE_ESPLORA_URL` / `RGB_INDEXER_URL`.
  */
 const MUTINYNET_ESPLORA = env('MUTINYNET_ESPLORA_URL', 'https://esplora.signet.kaleidoswap.com')!
 
