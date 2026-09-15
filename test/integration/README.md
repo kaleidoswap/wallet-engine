@@ -154,6 +154,13 @@ hiding a real accounting disagreement about spent coins.
 
 `RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
 
+Both sides of a transfer need colorable UTXOs, and for different reasons. The
+recipient needs one to receive into; the **sender needs two**, because rgb-lib
+runs `maxAllocationsPerUtxo: 1` here — the allocation it already holds occupies
+one UTXO and the change allocation the send creates needs another. A sender
+short of slots fails in `quoteTransfer` with `InsufficientAllocationSlots`,
+which reads like a broken transfer and means "nowhere to put the change".
+
 Reuse keys off what a wallet **holds** (`total`), not what it can spend
 (`available`). They differ: after a transfer the sender's change allocation is
 unconfirmed, so `available` reads 0 against a `total` of nearly the whole

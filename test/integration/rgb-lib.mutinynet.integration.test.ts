@@ -233,11 +233,27 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
       return
     }
 
-    // The recipient needs a colorable UTXO of its own to receive into.
-    try {
-      await to.createRgbUtxos!({ num: 1, upTo: true })
-    } catch (err) {
-      expect(String(err)).toMatch(/AllocationsAlreadyAvailable/)
+    // Both sides need colorable UTXOs, and for different reasons.
+    //
+    // The recipient needs one to receive into. The SENDER needs two: rgb-lib
+    // here runs `maxAllocationsPerUtxo: 1`, so the allocation it already holds
+    // occupies one UTXO and the change allocation the send creates needs
+    // another. Preparing only the recipient left the sender to fail in
+    // `quoteTransfer` with `InsufficientAllocationSlots` — which reads like a
+    // broken transfer and is really "nowhere to put the change".
+    //
+    // `upTo` means "ensure at least N exist"; rgb-lib throws
+    // `AllocationsAlreadyAvailable` when the postcondition is already met,
+    // which is success stated as an error.
+    for (const [wallet, num] of [
+      [from, 2],
+      [to, 1],
+    ] as const) {
+      try {
+        await wallet.createRgbUtxos!({ num, upTo: true })
+      } catch (err) {
+        expect(String(err)).toMatch(/AllocationsAlreadyAvailable/)
+      }
     }
 
     // Name the asset in the invoice only when the recipient already knows it.
