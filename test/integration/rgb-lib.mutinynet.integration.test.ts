@@ -128,17 +128,35 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
    * exercise issuance itself.
    */
   it.skipIf(!RUN_SEND_TESTS)('holds a NIA asset, issuing one if neither wallet does', async (ctx) => {
-    const niaWithBalance = async (w: RgbLibWdkAdapter) =>
-      (await w.listAssets()).find((a) => a.id !== 'BTC' && a.balance.available > 0)
+    /**
+     * Any NIA asset this wallet **holds** — `total`, not `available`.
+     *
+     * `available` is the spendable figure, and after a transfer the sender's
+     * change allocation is unconfirmed, so spendable reads 0 while the wallet
+     * still owns the asset. Keying reuse off it meant every run decided it had
+     * nothing and issued again — caching the rgb-lib database fixed the wallet
+     * forgetting its assets, and this was the second reason the reuse never
+     * fired. Whether the asset can be spent *right now* is the transfer test's
+     * problem, and `sendOrSkip` already answers it honestly.
+     */
+    const niaHeld = async (w: RgbLibWdkAdapter) => {
+      const assets = (await w.listAssets()).filter((a) => a.id !== 'BTC')
+      console.log(
+        `[RGB_L1] ${w === alice ? 'alice' : 'bob'} holds: ${
+          assets.map((a) => `${a.id}(total=${a.balance.total},avail=${a.balance.available})`).join(' ') || 'nothing'
+        }`,
+      )
+      return assets.find((a) => a.balance.total > 0)
+    }
 
     const force = /^(1|true|yes)$/i.test(process.env.RGB_FORCE_ISSUANCE?.trim() ?? '')
     if (!force) {
-      const mine = await niaWithBalance(alice)
+      const mine = await niaHeld(alice)
       if (mine) {
         asset = mine
         holder = 'alice'
       } else {
-        const theirs = await niaWithBalance(bob)
+        const theirs = await niaHeld(bob)
         if (theirs) {
           asset = theirs
           holder = 'bob'
@@ -172,7 +190,7 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
     expect(asset.id).toBeTruthy()
     expect(asset.id).not.toBe('BTC')
     expect(asset.protocol).toBe('RGB_L1')
-    expect(asset.balance.available).toBeGreaterThan(0)
+    expect(asset.balance.total).toBeGreaterThan(0)
 
     // The issuance is only real if the wallet can list it back.
     const listed = await (holder === 'alice' ? alice : bob).listAssets()
