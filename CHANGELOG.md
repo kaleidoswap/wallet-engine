@@ -7,6 +7,19 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.68] - 2026-09-15
+
+Corrections and coverage on top of beta.67. The one thing here a consumer can
+observe is the dependency removal: beta.67's notes claimed `@arkade-os/wdk` was
+no longer a peer and it was still declared, so installs still pulled it and the
+nested `@arkade-os/sdk` 0.4.35 with it. Nothing else changes runtime behaviour.
+
+### Added
+- **`RgbLibWdkAdapter.listUnspents()` and `countFreeColorableSlots()`** — the
+  only way to answer "can this wallet receive or spend an RGB allocation right
+  now". `createRgbUtxos` cannot: it broadcasts a transaction whose outputs are
+  unusable until they confirm.
+
 ### Build
 - **A dispatchable workflow moves npm dist-tags** (`.github/workflows/dist-tag.yml`).
   `latest` is what a bare `npm install` resolves to, and it drifts: it sat on
@@ -17,11 +30,14 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   anything — `npm publish --tag` can only set a tag at publish time, so moving
   one afterwards is `npm dist-tag add` or nothing.
 
-### Added
-- **`RgbLibWdkAdapter.listUnspents()` and `countFreeColorableSlots()`** — the
-  only way to answer "can this wallet receive or spend an RGB allocation right
-  now". `createRgbUtxos` cannot: it broadcasts a transaction whose outputs are
-  unusable until they confirm.
+- **`@arkade-os/wdk` is actually removed now.** beta.67's notes said it was "no
+  longer a peer"; it was still declared as an optional peer and a devDependency,
+  while nothing in `src/` imported it. The claim that hosts could drop it was
+  true — the engine stopped using it in #87 — but the manifest still asked for
+  it, so `npm ls` and a fresh install still pulled it, and with it a nested
+  `@arkade-os/sdk` 0.4.35. Removed from `peerDependencies`,
+  `peerDependenciesMeta` and `devDependencies`; both lockfiles now carry zero
+  references to it.
 
 ### Tests
 - **The RGB-L1 suite covers both receive modes and stops guessing about
@@ -31,16 +47,6 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   exercised. Preconditions wait for `createRgbUtxos` to confirm instead of
   assuming it is instant, which is what left the transfer test passing or
   failing on what earlier runs happened to leave on-chain.
-
-### Build
-- **`@arkade-os/wdk` is actually removed now.** beta.67's notes said it was "no
-  longer a peer"; it was still declared as an optional peer and a devDependency,
-  while nothing in `src/` imported it. The claim that hosts could drop it was
-  true — the engine stopped using it in #87 — but the manifest still asked for
-  it, so `npm ls` and a fresh install still pulled it, and with it a nested
-  `@arkade-os/sdk` 0.4.35. Removed from `peerDependencies`,
-  `peerDependenciesMeta` and `devDependencies`; both lockfiles now carry zero
-  references to it.
 
 ## [1.0.0-beta.67] - 2026-09-15
 
