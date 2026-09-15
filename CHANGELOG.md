@@ -7,6 +7,14 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.69] - 2026-09-15
+
+A correctness release for one regression in beta.68: Arkade settings passed
+nested under `arkadeConfig` were dropped, which for a host that nests its
+`storage` means in-memory repositories and VTXO state lost on every restart.
+Nothing else in beta.68 is affected, and a host passing settings at the top
+level never was.
+
 ### Fixed
 - **Arkade settings nested under `arkadeConfig` are read again.** The SDK-direct
   rewrite (#87) read `storage`, `delegatorUrl`, `delegationEnabled`,
