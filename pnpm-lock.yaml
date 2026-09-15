@@ -37,8 +37,8 @@ importers:
         specifier: ^0.3.22
         version: 0.3.67(bip32@5.0.1(typescript@5.9.3))
       '@arkade-os/sdk':
-        specifier: ^0.4.19
-        version: 0.4.66(bip32@5.0.1(typescript@5.9.3))
+        specifier: ^0.4.71
+        version: 0.4.72(bip32@5.0.1(typescript@5.9.3))
       '@arkade-os/wdk':
         specifier: ^0.1.4
         version: 0.1.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))(bare-url@2.5.2)(bip32@5.0.1(typescript@5.9.3))
@@ -49,8 +49,8 @@ importers:
         specifier: ^0.5.7
         version: 0.5.10(@buildonspark/spark-sdk@0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(ws@8.21.3))(typescript@5.9.3)
       '@kaleidorg/swap-sdk':
-        specifier: ^0.1.1
-        version: 0.1.1
+        specifier: ^0.7.0
+        version: 0.7.0(@arkade-os/sdk@0.4.72(bip32@5.0.1(typescript@5.9.3)))
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)
@@ -151,8 +151,8 @@ packages:
       expo-task-manager:
         optional: true
 
-  '@arkade-os/sdk@0.4.66':
-    resolution: {integrity: sha512-wSpu22ypIse1YHdPjnOx1XWf7IMi/j5RuZpUHa2QclHs1YkzerS5HqwXTeusiynd3s0V/R9/K7ZZz7yRwkcBhg==}
+  '@arkade-os/sdk@0.4.72':
+    resolution: {integrity: sha512-u0h+oLu+l9//VBQxroIgHjXTdfQsOZZGfmXKkmZj5SzaozsDH6L2FDUbUtzGlNZF/UBKqcwwBHb4PzsP8unjZQ==}
     engines: {node: '>=22.12.0 <27'}
     peerDependencies:
       '@react-native-async-storage/async-storage': '>=1.0.0'
@@ -464,9 +464,17 @@ packages:
   '@js-sdsl/ordered-map@4.4.2':
     resolution: {integrity: sha512-iUKgm52T8HOE/makSxjqoWhe95ZJA1/G1sYsGev2JDKUSS14KAgg1LHb+Ba+IPow0xflbnSkOsZcO08C7w1gYw==}
 
-  '@kaleidorg/swap-sdk@0.1.1':
-    resolution: {integrity: sha512-kEHI0RBTn+6VGZe9K/j0uRH0nuGgEEk5i1usvBeiuXaVWDGwqhUHI00CFzojLp+flPEFwOteGS88lp4712oYpQ==}
+  '@kaleidorg/swap-sdk@0.7.0':
+    resolution: {integrity: sha512-xxw64l0XlQ5rAQGBTMuHGE6GQ9fOmt7ITNd0X0Yz6mAexQfjtf+RD++UYiCFmNMVrJFS+qJsq+fJOSMZ2K4Alw==}
     engines: {node: '>=22'}
+    peerDependencies:
+      '@arkade-os/sdk': '>=0.4.71 <0.5.0'
+      '@arkade-os/swap': ^0.0.14
+    peerDependenciesMeta:
+      '@arkade-os/sdk':
+        optional: true
+      '@arkade-os/swap':
+        optional: true
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3':
     resolution: {integrity: sha512-bSFvV/i5obI2yzQS3sgb6dxLhPL8dURGzG6VCrCHSGm5F23CH0o+kjQaheD5+QPpCF74guP5LhRzvkO1+QqR2Q==}
@@ -2402,7 +2410,7 @@ snapshots:
       - ecpair
       - utf-8-validate
 
-  '@arkade-os/sdk@0.4.66(bip32@5.0.1(typescript@5.9.3))':
+  '@arkade-os/sdk@0.4.72(bip32@5.0.1(typescript@5.9.3))':
     dependencies:
       '@bitcoinerlab/descriptors-scure': 3.1.7(bip32@5.0.1(typescript@5.9.3))
       '@marcbachmann/cel-js': 8.0.0
@@ -2702,7 +2710,9 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@kaleidorg/swap-sdk@0.1.1': {}
+  '@kaleidorg/swap-sdk@0.7.0(@arkade-os/sdk@0.4.72(bip32@5.0.1(typescript@5.9.3)))':
+    optionalDependencies:
+      '@arkade-os/sdk': 0.4.72(bip32@5.0.1(typescript@5.9.3))
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)':
     dependencies:

@@ -47,6 +47,28 @@ Set `REQUIRE_FUNDED_WALLETS=1` when the funding level is the thing you are
 checking, and a short wallet fails again. The Integration workflow exposes it
 as the `require_funded` dispatch input.
 
+This covers both places the shortfall can surface. The balance precondition
+runs first, but a wallet's reported balance and what its coin selection can
+actually assemble are different numbers — VTXO granularity, preconfirmed
+outputs and the real fee are invisible in a total — so a send that gets past
+the precondition and still comes back `Insufficient funds` skips on the same
+terms. A send error that is *not* about funds still fails.
+
+### When a network is down
+
+A suite whose `beforeAll` cannot connect **skips its tests one by one**, naming
+the endpoint and the error, rather than failing the file. The other suites
+carry on reporting.
+
+The reasoning is the same as for drained wallets: mutinynet, liquidtestnet and
+the regtest server are not ours, and a red that says "adapter broken" when the
+truth is "the indexer is down" cannot be cleared by any diff. Only *setup* is
+covered — an error inside a test is still a failure, because by then the
+connection worked and what broke is what the test was exercising.
+
+`REQUIRE_LIVE_ENDPOINTS=1` fails instead, exposed as the `require_endpoints`
+dispatch input.
+
 Note that a zero **spendable** balance is not always an empty wallet: on Arkade,
 boarding UTXOs that were never onboarded read as 0 spendable while the funds are
 there. Check before sending sats — the fix may be an onboard, not a faucet.

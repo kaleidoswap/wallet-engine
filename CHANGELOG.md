@@ -7,8 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.66] - 2026-09-13
+
 Security audit remediation (#71). Items marked **BREAKING** change behaviour a
 host can observe; each carries its migration note.
+
+### Build
+- **`@kaleidorg/swap-sdk` peer range accepts `^0.7.0`** (#80), the line that
+  carries the Arkade Intents corridor client in the core and
+  `kaleidoswapHttpTransport` on `./arkade`. Nothing the engine calls changed
+  shape; the venue's new `failed` phase is terminal for the store already.
+  The dev pin moves to 0.7.0 and `@arkade-os/sdk` to `^0.4.71`, the floor
+  that venue declares.
+- **`check:lockfiles` derives peer-only nodes from edges** (#80) instead of
+  npm's `peer` flag, which follows traversal order and flipped on 22
+  unrelated entries during the bump.
 
 ### Security
 - **Wallet identity is enforced across every singleton client manager.** The

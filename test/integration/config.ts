@@ -62,6 +62,21 @@ export const RUN_SEND_TESTS = flag('RUN_SEND_TESTS')
  */
 export const REQUIRE_FUNDED_WALLETS = flag('REQUIRE_FUNDED_WALLETS')
 
+/**
+ * Treat an unreachable test-network endpoint as a failure rather than a skip.
+ *
+ * The sibling of `REQUIRE_FUNDED_WALLETS`, for the other thing that is not our
+ * code: these suites connect to public mutinynet, liquidtestnet and regtest
+ * services, and when one of them is down every test behind it fails at
+ * `beforeAll` — which reads as "the adapter is broken" and turns the job red
+ * for a reason no diff can fix.
+ *
+ * Default is to skip that suite and let the others report. Set this when
+ * endpoint availability is the thing being tested, or in a run whose whole
+ * purpose is to prove the live surface is reachable.
+ */
+export const REQUIRE_LIVE_ENDPOINTS = flag('REQUIRE_LIVE_ENDPOINTS')
+
 // Per-protocol network + endpoint config. Endpoints default to public servers for
 // the target test network; override any of them via env.
 

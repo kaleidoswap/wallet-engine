@@ -6,18 +6,34 @@
  * ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ALICE, BOB, SPARK } from './config'
-import { assertFunded, connectSpark, safeDisconnect, spendableSend } from './helpers'
+import {
+  assertFunded,
+  connectSpark,
+  liveSetup,
+  safeDisconnect,
+  sendOrSkip,
+  skipWhenUnavailable,
+  spendableSend,
+} from './helpers'
 import type { SparkWdkAdapter } from '../../src/adapters/wdk/SparkWdkAdapter'
 
 describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
   let alice: SparkWdkAdapter
   let bob: SparkWdkAdapter
 
+  let unavailable: string | undefined
+
   beforeAll(async () => {
-    ;[alice, bob] = await Promise.all([connectSpark(ALICE), connectSpark(BOB)])
+    unavailable = await liveSetup('Spark regtest', async () => {
+      ;[alice, bob] = await Promise.all([connectSpark(ALICE), connectSpark(BOB)])
+    })
   }, 120_000)
+
+  // An unreachable endpoint skips this suite's tests one by one, so the
+  // report still says how many the outage cost. See `liveSetup`.
+  beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
@@ -56,7 +72,9 @@ describe.skipIf(!SPARK.enabled)('Spark regtest (Alice & Bob)', () => {
     // MECHANISM without assuming a specific funded amount (these are shared,
     // slowly-draining test wallets). Fails loudly if Alice is genuinely empty.
     const amount = spendableSend(ctx, (await alice.getBtcBalance()).total, 'Alice/Spark')
-    const res = await alice.sendPayment({ invoice: to.address, amount })
+    const res = await sendOrSkip(ctx, 'Alice/Spark', () =>
+      alice.sendPayment({ invoice: to.address, amount }),
+    )
     expect(res.status).toMatch(/pending|confirmed/)
     // Spark transfers settle fast; poll Bob's balance briefly.
     let after = before

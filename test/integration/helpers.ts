@@ -14,6 +14,7 @@ import {
   ARKADE,
   LIQUID,
   REQUIRE_FUNDED_WALLETS,
+  REQUIRE_LIVE_ENDPOINTS,
   RGB_L1,
   SPARK,
   rgbDataDir,
@@ -178,4 +179,89 @@ export function spendableSend(
   // `ctx.skip()` aborts, so this is unreachable; it exists so the signature
   // stays `number` and no call site has to handle a null it can never see.
   return target
+}
+
+
+/** Read a thrown value's message without assuming it is an Error. */
+function messageOf(error: unknown): string {
+  if (error instanceof Error) return error.message
+  return typeof error === 'string' ? error : JSON.stringify(error)
+}
+
+/**
+ * Run a suite's live setup, returning the reason it could not connect instead
+ * of throwing.
+ *
+ * A `beforeAll` that throws fails every test in the file, which is the right
+ * answer when the adapter is broken and the wrong one when the network it
+ * talks to is simply down. These suites connect to public mutinynet,
+ * liquidtestnet and regtest services; when one is unreachable the resulting
+ * red says "adapter broken" and no diff can clear it — the same signal-
+ * destroying failure the drained wallets caused (#77).
+ *
+ * So the reason is captured and handed to `skipWhenUnavailable`, and the other
+ * suites carry on reporting. `REQUIRE_LIVE_ENDPOINTS=1` rethrows instead, for
+ * the run that is asking whether the endpoints are up.
+ *
+ * Only setup is covered. An error inside a test is still a failure: by then
+ * the connection worked, and what broke is what the test was exercising.
+ */
+export async function liveSetup(label: string, connect: () => Promise<void>): Promise<string | undefined> {
+  try {
+    await connect()
+    return undefined
+  } catch (error) {
+    if (REQUIRE_LIVE_ENDPOINTS) throw error
+    const reason = `${label} is unreachable — ${messageOf(error)}`
+    console.warn(`⚠ SKIPPED — ${reason}`)
+    return reason
+  }
+}
+
+/**
+ * Skip a test whose suite never connected. Pass the reason `liveSetup`
+ * returned; `undefined` means the setup worked and the test runs.
+ *
+ * Called from `beforeEach` so the skip lands on each test individually and the
+ * file still reports how many tests the outage cost.
+ */
+export function skipWhenUnavailable(ctx: TestContext, reason: string | undefined): void {
+  if (reason) ctx.skip(reason)
+}
+
+/** Errors the underlying SDKs raise when coin selection cannot cover a send. */
+const INSUFFICIENT_FUNDS = /insufficient funds|insufficient balance|not enough/i
+
+/**
+ * Perform a send, skipping when the wallet turns out not to afford it after
+ * all.
+ *
+ * `spendableSend` asks the adapter for a balance and decides from that, but
+ * the balance a wallet reports and the amount its coin selection can actually
+ * assemble are different numbers. Alice's Arkade wallet proved it: she passed
+ * the 300-sat precondition and the send still died inside
+ * `selectVirtualCoins` with `Insufficient funds`, because VTXO granularity,
+ * preconfirmed outputs and the real fee are not visible in a total.
+ *
+ * A pre-check that can be wrong in this direction has to treat the SDK's own
+ * refusal as the same fact it was guarding against, or the guard just moves
+ * the red three lines down.
+ *
+ * The cost is honest and worth naming: a genuine bug that manifests as
+ * `Insufficient funds` — an adapter sending the wrong amount, say — now skips
+ * instead of failing. That is the same trade `spendableSend` already makes,
+ * and `REQUIRE_FUNDED_WALLETS=1` reverses both together.
+ */
+export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () => Promise<T>): Promise<T> {
+  try {
+    return await send()
+  } catch (error) {
+    const message = messageOf(error)
+    if (REQUIRE_FUNDED_WALLETS || !INSUFFICIENT_FUNDS.test(message)) throw error
+    const reason = `${label}: the wallet reported enough but coin selection could not cover the send — ${message}`
+    console.warn(`⚠ SKIPPED — ${reason}`)
+    ctx.skip(reason)
+    // Unreachable: `ctx.skip()` aborts the test.
+    throw error
+  }
 }
