@@ -8,6 +8,25 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 ## [Unreleased]
 
 ### Fixed
+- **Arkade settlement now works on Node, which means VTXOs stop expiring.**
+  `@arkade-os/sdk` reaches the Ark server's event stream through the global
+  `EventSource`, and it needs that stream to *complete a settle*, not merely to
+  observe one. Node has `EventSource` only behind `--experimental-eventsource`,
+  so on any Node host the SDK's periodic settle threw `EventSource is not
+  defined` on every poll, no VTXO was ever renewed, and the server swept the
+  funds at batch expiry — while the adapter reported `connected: true`
+  throughout. Measured on mutinynet over one 65-second poll window: 115 errors
+  without it, 1 with it (a round-timing error that retries).
+  - `ArkadeConfig.eventSource` accepts an implementation (`eventsource` from
+    npm, `undici`'s, your own); the adapter installs it globally, which is
+    where the SDK looks, and never overwrites one the runtime already has.
+  - When there is none, the adapter says so **once** at connect instead of 57
+    times a poll from inside the SDK, and `getConnectionInfo()` reports
+    `degraded: [...]` — because `connected` alone let a host believe its funds
+    were safe while the batch expiry ran down.
+  - Browsers and React Native are unaffected: they have the global.
+
+### Fixed
 - **BREAKING: the Arkade adapter no longer starts the Boltz swaps client on
   connect.** `ArkadeSwaps.create({ swapManager: true })` opens a WebSocket to the
   Boltz Ark endpoint and reconnects for the life of the session; a host that
