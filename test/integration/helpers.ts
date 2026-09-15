@@ -275,12 +275,23 @@ const INSUFFICIENT_FUNDS =
   /insufficient\s?(funds|balance|assignments|allocationslots|allocation slots)|not enough/i
 
 /**
- * A recipient id this wallet already used against the transport proxy.
+ * A recipient id this wallet has already used against the transport proxy.
  *
- * Not a resource shortfall, so it is kept out of `INSUFFICIENT_FUNDS`: it means
- * a previous run's invoice for the same id is still live. The short
- * `durationSeconds` on the test's invoices is what should prevent it; this is
- * the backstop for two runs closer together than that.
+ * Kept out of `INSUFFICIENT_FUNDS` because it is not a resource shortfall, and
+ * it does not clear on its own: the proxy retains `recipient id → consignment`
+ * indefinitely, and a WITNESS recipient id is derived from the wallet's
+ * keychain with no outpoint to vary it — so an ephemeral rgb-lib database
+ * regenerates the same id on every run and the proxy rejects it forever after
+ * the first use.
+ *
+ * I first read this as invoice expiry and shortened `durationSeconds` to 120s.
+ * That was wrong: a run more than an hour after the last invoice was created,
+ * with every window long past, still collided. Whatever fixes this, it is not
+ * time.
+ *
+ * Practical consequence: witness receive can be verified exactly once per
+ * (wallet, proxy). A blinded id derives from a real outpoint, differs each run,
+ * and is unaffected.
  */
 const RECIPIENT_ID_REUSED = /RecipientIDAlreadyUsed/i
 
@@ -310,7 +321,7 @@ export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () =>
   } catch (error) {
     const message = messageOf(error)
     if (RECIPIENT_ID_REUSED.test(message) && !REQUIRE_FUNDED_WALLETS) {
-      const reason = `${label}: the recipient id is still registered with the transport proxy from an earlier run — its invoice has not expired yet`
+      const reason = `${label}: this wallet's witness recipient id was already used against the transport proxy, and the proxy keeps them — an ephemeral rgb-lib database regenerates the same id every run, so witness receive verifies once per wallet and then always reports this`
       console.warn(`⚠ SKIPPED — ${reason}`)
       ctx.skip(reason)
       throw error
