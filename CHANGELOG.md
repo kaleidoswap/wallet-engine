@@ -7,54 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
-### Build
-- **The postcss override is now enforced, not just declared** (#61). It lived in
-  package.json's `pnpm.overrides`, which npm ignores entirely and pnpm drops in
-  v11 — and both install paths are in CI (`pnpm install --frozen-lockfile` in
-  ci/publish, `npm ci` in integration), so the pin held only by the accident of
-  a committed lockfile. It is now declared once per package manager: top-level
-  `overrides` for npm, `pnpm-workspace.yaml` for pnpm.
-  `check:lockfiles` asserts the two declarations agree **and** that both
-  lockfiles resolved to them, because a pin that is declared and not applied is
-  worth no more than no pin at all.
+## [1.0.0-beta.67] - 2026-09-15
 
-### Fixed
-- **`listTransactions({ asset: 'BTC' })` answers the same on Liquid whether or
-  not the policy asset is known** (#73). Every adapter but Liquid labels its
-  bitcoin row `id: 'BTC'`; Liquid labels L-BTC with the policy-asset hex, which
-  is the better answer and stays. But the filter compared ids exactly, so a
-  BTC-scoped query returned L-BTC rows only while the adapter could *not*
-  identify the policy asset — its fallback labels them `'BTC'` — and dropped
-  them once it could. The same wallet, the same rows, a different answer
-  depending on adapter state.
+Arkade settlement. VTXOs were never being renewed on any Node host, so they
+reached their batch expiry and the server swept them — while the adapter
+reported `connected: true` throughout and every other call kept working. Three
+separate causes, each fixed here, and the funds already lost to it came back.
 
-  `'BTC'` is the engine's protocol-neutral bitcoin id (`isBtcAssetId`), so it
-  now matches any row on a bitcoin layer as well as an exact id. Filtering on
-  the policy asset itself is unchanged, and a BTC filter still does not sweep
-  up L-USDT.
-
-### Added
-- **`RgbLibWdkAdapter.issueAssetNia`**, matching the contract
-  `RgbLibWasmAdapter` shipped in #76 — same parameters, same guarantees, so a
-  host feature-detecting one API gets the same behaviour from either backing.
-  The bindings underneath disagree (the native one takes an options object, the
-  wasm one positional arguments), which is why the difference belongs in the
-  adapter rather than at every call site. An answer with no asset id is a
-  failure, not a hollow success: rgb-lib can return one when the wallet has
-  nothing to colour.
-- **Live RGB-L1 issuance and transfer tests** (#88). The suite's header had
-  claimed transfers were gated behind `RUN_SEND_TESTS` for months while no such
-  test existed and the flag was never read there, so NIA issuance and the
-  consignment exchange — the part that actually breaks — had no coverage at all.
-  The issuance test reuses an asset either wallet already holds — keyed on
-  `total`, since a sender's unconfirmed change reads `available: 0` while it
-  still owns nearly the whole supply — and issues when neither does, which is
-  every run on CI's ephemeral data directory and rarely on a persistent local
-  one. `RGB_FORCE_ISSUANCE=1` forces the issuing path. A shortfall in spendable
-  assignments skips the way a drained wallet does, including rgb-lib's own
-  `InsufficientAssignments` refusal. The transfer follows whoever holds the asset and
-  returns it in teardown, so the suite stays runnable whichever way the last run
-  left the balance.
+Items marked **BREAKING** change behaviour a host can observe; each carries its
+migration note. The peer floor moves to `@arkade-os/sdk` `^0.4.72` and
+`@arkade-os/wdk` is no longer a peer at all.
 
 ### Changed
 - **BREAKING (peer): the Arkade adapter is built on `@arkade-os/sdk` directly.**
@@ -90,7 +52,63 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   **drops to zero**, and Alice's Arkade spendable balance went from 1,422,628 to
   3,010,524 as her boarding funds finally settled.
 
+- **`sweepSparkL1Deposits()` takes an optional window.** It costs one
+  `get_utxos_for_address` per unused single-use deposit address, and Spark issues
+  a new address on every receive, so a host sweeping on a timer paid for the
+  whole (growing) set every tick. Pass `{ limit }` — and the previous result's
+  `nextOffset` — to walk the set a slice per sweep; the window wraps, so a
+  rotating caller still covers every address. The result gains `addressesTotal`
+  and `nextOffset`. Calling it with no options is unchanged: full scan,
+  `nextOffset: 0`.
+
+### Added
+- **`RgbLibWdkAdapter.issueAssetNia`**, matching the contract
+  `RgbLibWasmAdapter` shipped in #76 — same parameters, same guarantees, so a
+  host feature-detecting one API gets the same behaviour from either backing.
+  The bindings underneath disagree (the native one takes an options object, the
+  wasm one positional arguments), which is why the difference belongs in the
+  adapter rather than at every call site. An answer with no asset id is a
+  failure, not a hollow success: rgb-lib can return one when the wallet has
+  nothing to colour.
+- **Live RGB-L1 issuance and transfer tests** (#88). The suite's header had
+  claimed transfers were gated behind `RUN_SEND_TESTS` for months while no such
+  test existed and the flag was never read there, so NIA issuance and the
+  consignment exchange — the part that actually breaks — had no coverage at all.
+  The issuance test reuses an asset either wallet already holds — keyed on
+  `total`, since a sender's unconfirmed change reads `available: 0` while it
+  still owns nearly the whole supply — and issues when neither does, which is
+  every run on CI's ephemeral data directory and rarely on a persistent local
+  one. `RGB_FORCE_ISSUANCE=1` forces the issuing path. A shortfall in spendable
+  assignments skips the way a drained wallet does, including rgb-lib's own
+  `InsufficientAssignments` refusal. The transfer follows whoever holds the asset and
+  returns it in teardown, so the suite stays runnable whichever way the last run
+  left the balance.
+
+- **`lib/arkade-identity`** names the two incompatible Arkade derivations the
+  engine already shipped. `ArkadeAdapter` derives `m/86'/{coin}'/0'/0/0` and
+  `ArkadeWdkAdapter` derives `m/86'/{coin}/0'/0/{index}` — the coin-type level
+  is hardened in one and not the other, so the same mnemonic opens two
+  different wallets with two different address sets and nothing says so. A host
+  that switched adapters would find an empty wallet and its funds in the
+  derivation it left. The choice is now explicit (`WDK_COMPAT` /
+  `BIP86_HARDENED`) and the WDK values are frozen in tests, verified
+  byte-identical against the live wallets.
+
 ### Fixed
+- **`listTransactions({ asset: 'BTC' })` answers the same on Liquid whether or
+  not the policy asset is known** (#73). Every adapter but Liquid labels its
+  bitcoin row `id: 'BTC'`; Liquid labels L-BTC with the policy-asset hex, which
+  is the better answer and stays. But the filter compared ids exactly, so a
+  BTC-scoped query returned L-BTC rows only while the adapter could *not*
+  identify the policy asset — its fallback labels them `'BTC'` — and dropped
+  them once it could. The same wallet, the same rows, a different answer
+  depending on adapter state.
+
+  `'BTC'` is the engine's protocol-neutral bitcoin id (`isBtcAssetId`), so it
+  now matches any row on a bitcoin layer as well as an exact id. Filtering on
+  the policy asset itself is unchanged, and a BTC filter still does not sweep
+  up L-USDT.
+
 - **Arkade VTXOs are renewed again, and the funds that had already expired came
   back.** `ArkadeWdkAdapter` declared `delegatorUrl` and `delegationEnabled` in
   its config type and read neither — the live suite had been passing a delegator
@@ -118,18 +136,6 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   spendable**; the Arkade suite went from a permanently skipped send to 5/5
   passing.
 
-### Added
-- **`lib/arkade-identity`** names the two incompatible Arkade derivations the
-  engine already shipped. `ArkadeAdapter` derives `m/86'/{coin}'/0'/0/0` and
-  `ArkadeWdkAdapter` derives `m/86'/{coin}/0'/0/{index}` — the coin-type level
-  is hardened in one and not the other, so the same mnemonic opens two
-  different wallets with two different address sets and nothing says so. A host
-  that switched adapters would find an empty wallet and its funds in the
-  derivation it left. The choice is now explicit (`WDK_COMPAT` /
-  `BIP86_HARDENED`) and the WDK values are frozen in tests, verified
-  byte-identical against the live wallets.
-
-### Fixed
 - **Arkade settlement now works on Node, which means VTXOs stop expiring.**
   `@arkade-os/sdk` reaches the Ark server's event stream through the global
   `EventSource`, and it needs that stream to *complete a settle*, not merely to
@@ -148,7 +154,6 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
     were safe while the batch expiry ran down.
   - Browsers and React Native are unaffected: they have the global.
 
-### Fixed
 - **BREAKING: the Arkade adapter no longer starts the Boltz swaps client on
   connect.** `ArkadeSwaps.create({ swapManager: true })` opens a WebSocket to the
   Boltz Ark endpoint and reconnects for the life of the session; a host that
@@ -158,15 +163,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `arkadeSwapsClientManager` needs it. Hosts that never touch that client need
   no change.
 
-### Changed
-- **`sweepSparkL1Deposits()` takes an optional window.** It costs one
-  `get_utxos_for_address` per unused single-use deposit address, and Spark issues
-  a new address on every receive, so a host sweeping on a timer paid for the
-  whole (growing) set every tick. Pass `{ limit }` — and the previous result's
-  `nextOffset` — to walk the set a slice per sweep; the window wraps, so a
-  rotating caller still covers every address. The result gains `addressesTotal`
-  and `nextOffset`. Calling it with no options is unchanged: full scan,
-  `nextOffset: 0`.
+### Build
+- **The postcss override is now enforced, not just declared** (#61). It lived in
+  package.json's `pnpm.overrides`, which npm ignores entirely and pnpm drops in
+  v11 — and both install paths are in CI (`pnpm install --frozen-lockfile` in
+  ci/publish, `npm ci` in integration), so the pin held only by the accident of
+  a committed lockfile. It is now declared once per package manager: top-level
+  `overrides` for npm, `pnpm-workspace.yaml` for pnpm.
+  `check:lockfiles` asserts the two declarations agree **and** that both
+  lockfiles resolved to them, because a pin that is declared and not applied is
+  worth no more than no pin at all.
 
 ### Tests
 - **The live send tests put the sats back.** Every send test ran one way, Alice
