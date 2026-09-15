@@ -7,22 +7,39 @@
  * Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ALICE, BOB, LIQUID } from './config'
-import { assertFunded, connectLiquid, safeDisconnect, spendableSend, withRetry } from './helpers'
+import {
+  assertFunded,
+  connectLiquid,
+  liveSetup,
+  safeDisconnect,
+  sendOrSkip,
+  skipWhenUnavailable,
+  spendableSend,
+  withRetry,
+} from './helpers'
 import type { LiquidWdkAdapter } from '../../src/adapters/wdk/LiquidWdkAdapter'
 
 describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
   let alice: LiquidWdkAdapter
   let bob: LiquidWdkAdapter
 
+  let unavailable: string | undefined
+
   beforeAll(async () => {
-    // Connect serially, not in parallel: each connect does a gap-limit scan
-    // (~40 esplora requests), and firing both at once doubles the burst that
-    // trips the public esplora's rate limit (→ lwk's browser-only backoff sleep).
-    alice = await connectLiquid(ALICE)
-    bob = await connectLiquid(BOB)
+    unavailable = await liveSetup('Liquid testnet', async () => {
+      // Connect serially, not in parallel: each connect does a gap-limit scan
+      // (~40 esplora requests), and firing both at once doubles the burst that
+      // trips the public esplora's rate limit (→ lwk's browser-only backoff sleep).
+      alice = await connectLiquid(ALICE)
+      bob = await connectLiquid(BOB)
+    })
   }, 180_000)
+
+  // An unreachable endpoint skips this suite's tests one by one, so the
+  // report still says how many the outage cost. See `liveSetup`.
+  beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
@@ -67,7 +84,9 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
     const to = await bob.getReceiveAddress()
     const bal = await withRetry('Alice/Liquid balance (send)', () => alice.getBtcBalance())
     const amount = spendableSend(ctx, bal.total, 'Alice/Liquid')
-    const res = await alice.sendPayment({ invoice: to.address, amount })
+    const res = await sendOrSkip(ctx, 'Alice/Liquid', () =>
+      alice.sendPayment({ invoice: to.address, amount }),
+    )
     expect(res.paymentHash).toBeTruthy()
     expect(res.status).toBe('pending')
   }, 180_000)

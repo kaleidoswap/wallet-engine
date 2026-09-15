@@ -6,18 +6,34 @@
  * Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ALICE, ARKADE, BOB } from './config'
-import { assertFunded, connectArkade, safeDisconnect, spendableSend } from './helpers'
+import {
+  assertFunded,
+  connectArkade,
+  liveSetup,
+  safeDisconnect,
+  sendOrSkip,
+  skipWhenUnavailable,
+  spendableSend,
+} from './helpers'
 import type { ArkadeWdkAdapter } from '../../src/adapters/wdk/ArkadeWdkAdapter'
 
 describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
   let alice: ArkadeWdkAdapter
   let bob: ArkadeWdkAdapter
 
+  let unavailable: string | undefined
+
   beforeAll(async () => {
-    ;[alice, bob] = await Promise.all([connectArkade(ALICE), connectArkade(BOB)])
+    unavailable = await liveSetup('Arkade mutinynet', async () => {
+      ;[alice, bob] = await Promise.all([connectArkade(ALICE), connectArkade(BOB)])
+    })
   }, 180_000)
+
+  // An unreachable endpoint skips this suite's tests one by one, so the
+  // report still says how many the outage cost. See `liveSetup`.
+  beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
@@ -58,7 +74,9 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
       spendable,
       'Alice/Arkade (spendable VTXOs — onboard boarding funds if 0)',
     )
-    const res = await alice.sendPayment({ invoice: to.address, amount })
+    const res = await sendOrSkip(ctx, 'Alice/Arkade', () =>
+      alice.sendPayment({ invoice: to.address, amount }),
+    )
     expect(res.status).toMatch(/pending|confirmed/)
   }, 180_000)
 })

@@ -10,21 +10,35 @@
  * behind RUN_SEND_TESTS. Skips unless ALICE_MNEMONIC + BOB_MNEMONIC are set.
  */
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 import { ALICE, BOB, RGB_L1 } from './config'
-import { assertFunded, connectRgbL1, safeDisconnect } from './helpers'
+import {
+  assertFunded,
+  connectRgbL1,
+  liveSetup,
+  safeDisconnect,
+  skipWhenUnavailable,
+} from './helpers'
 import type { RgbLibWdkAdapter } from '../../src/adapters/wdk/RgbLibWdkAdapter'
 
 describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () => {
   let alice: RgbLibWdkAdapter
   let bob: RgbLibWdkAdapter
 
+  let unavailable: string | undefined
+
   beforeAll(async () => {
-    // rgb-lib registers each wallet with the indexer on connect — do it serially
-    // so two cold SQLite/indexer registrations don't contend.
-    alice = await connectRgbL1(ALICE)
-    bob = await connectRgbL1(BOB)
+    unavailable = await liveSetup('RGB-L1 mutinynet', async () => {
+      // rgb-lib registers each wallet with the indexer on connect — do it serially
+      // so two cold SQLite/indexer registrations don't contend.
+      alice = await connectRgbL1(ALICE)
+      bob = await connectRgbL1(BOB)
+    })
   }, 240_000)
+
+  // An unreachable endpoint skips this suite's tests one by one, so the
+  // report still says how many the outage cost. See `liveSetup`.
+  beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
