@@ -302,8 +302,19 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
 
       const before = (await to.getAssetBalance!(asset!.id)).total
 
+      // A witness recipient has no outpoint of its own: the SENDER creates the
+      // output, so it must say how many sats go in it. rgb-lib refuses with
+      // `InvalidRecipientData { "missing witness data for a witness
+      // recipient" }` without this, and a blinded invoice needs none because it
+      // carries its own outpoint. 1000 sat matches rgb-lib's own colorable
+      // UTXOs and clears dust.
       const res: any = await sendOrSkip(ctx, `RGB-L1 ${label}`, () =>
-        from.sendAsset!({ token: asset!.id, recipient, amount }),
+        from.sendAsset!({
+          token: asset!.id,
+          recipient,
+          amount,
+          ...(mode === 'witness' ? { witnessData: { amountSat: 1000 } } : {}),
+        }),
       )
       const txid = res?.hash ?? res?.txid ?? ''
       expect(txid).toBeTruthy()
