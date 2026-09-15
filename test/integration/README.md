@@ -123,6 +123,21 @@ Ours is the same chain, not a similar one: MutinyWallet/electrs `new-index` with
 Override with `MUTINYNET_ESPLORA_URL`, or per consumer with `ARKADE_ESPLORA_URL`
 / `RGB_INDEXER_URL`.
 
+### RGB-L1 state is not derivable from the seed
+
+rgb-lib keeps its wallet in SQLite under `RGB_DATA_DIR`, and which assets a
+wallet holds is known **only** to that database — a seed does not reconstruct
+it. Delete the directory and the wallet forgets its assets, though the coins
+themselves are still on-chain.
+
+That matters for the issuance test, which reuses an asset either wallet already
+holds and issues only when neither does. On a fresh data directory it finds
+nothing and issues, so a CI runner with no persisted state would mint a new
+asset on every run, each one consuming a colorable UTXO and an on-chain fee.
+The Integration workflow therefore caches `.rgb-data` between runs.
+
+`RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
+
 ### Skipping a protocol
 
 Set `SKIP_SPARK=1`, `SKIP_LIQUID=1`, `SKIP_ARKADE=1`, or `SKIP_RGB_L1=1` to skip

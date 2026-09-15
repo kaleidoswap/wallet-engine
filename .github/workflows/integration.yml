@@ -73,10 +73,31 @@ jobs:
       - name: Build rgb-lib native bindings
         run: npm rebuild @utexo/rgb-lib-linux-x64
 
+      # rgb-lib keeps its wallet in SQLite under RGB_DATA_DIR, and RGB state is
+      # NOT derivable from the seed — an asset a wallet was issued is known only
+      # to that database. On a fresh runner the wallet therefore knows no assets,
+      # so the suite's "reuse an asset either wallet holds" check finds nothing
+      # and issues a new one, every run, each consuming a colorable UTXO and an
+      # on-chain fee. That is the drained-wallet problem of #77 with an extra
+      # step, and it arrives quietly as a growing pile of one-run assets.
+      #
+      # Rolling key: each run writes its own cache and restores the newest
+      # previous one, because a cache entry is immutable once written. The
+      # single-slot concurrency group above means runs never race for it.
+      - name: Restore rgb-lib wallet state
+        uses: actions/cache@v4
+        with:
+          path: .rgb-data
+          key: rgb-data-${{ github.run_id }}
+          restore-keys: rgb-data-
+
       - name: Run integration suite
         env:
           ALICE_MNEMONIC: ${{ secrets.ALICE_MNEMONIC }}
           BOB_MNEMONIC: ${{ secrets.BOB_MNEMONIC }}
+          # Persisted between runs by the cache step above, so issuance happens
+          # once rather than on every PR.
+          RGB_DATA_DIR: ${{ github.workspace }}/.rgb-data
           # Send tests run by default (push/PR); a dispatch can opt out via the input.
           RUN_SEND_TESTS: ${{ github.event_name != 'workflow_dispatch' && '1' || (inputs.run_send_tests && '1' || '') }}
           # An empty wallet SKIPS its send test here rather than failing the job.
