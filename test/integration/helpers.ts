@@ -263,8 +263,15 @@ export function skipWhenUnavailable(ctx: TestContext, reason: string | undefined
   if (reason) ctx.skip(reason)
 }
 
-/** Errors the underlying SDKs raise when coin selection cannot cover a send. */
-const INSUFFICIENT_FUNDS = /insufficient funds|insufficient balance|not enough/i
+/**
+ * Errors the underlying SDKs raise when coin selection cannot cover a send.
+ *
+ * Each protocol has its own word for it. rgb-lib says `InsufficientAssignments`
+ * when a wallet owns an asset but has no spendable allocation of it yet —
+ * the same fact as an Arkade wallet whose VTXOs will not assemble, and it
+ * deserves the same skip rather than a red job.
+ */
+const INSUFFICIENT_FUNDS = /insufficient\s?(funds|balance|assignments)|not enough/i
 
 /**
  * Perform a send, skipping when the wallet turns out not to afford it after

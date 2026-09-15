@@ -219,6 +219,20 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
     const label = holder === 'alice' ? 'Alice → Bob' : 'Bob → Alice'
     const amount = 10
 
+    // Holding an asset and being able to spend it are different things: after a
+    // transfer the sender's change allocation is unconfirmed, so `available`
+    // reads 0 against a `total` of nearly the whole supply until it settles.
+    // That is a fact about confirmations, not a broken adapter — the same trade
+    // `spendableSend` makes for BTC, and `sendOrSkip` catches rgb-lib's own
+    // `InsufficientAssignments` refusal if this precondition is too optimistic.
+    const spendable = (await from.getAssetBalance!(asset!.id)).available
+    if (spendable < amount) {
+      const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change has not settled yet`
+      console.warn(`⚠ SKIPPED — ${reason}`)
+      ctx.skip(reason)
+      return
+    }
+
     // The recipient needs a colorable UTXO of its own to receive into.
     try {
       await to.createRgbUtxos!({ num: 1, upTo: true })

@@ -138,6 +138,13 @@ The Integration workflow therefore caches `.rgb-data` between runs.
 
 `RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
 
+Reuse keys off what a wallet **holds** (`total`), not what it can spend
+(`available`). They differ: after a transfer the sender's change allocation is
+unconfirmed, so `available` reads 0 against a `total` of nearly the whole
+supply. The transfer test skips on that shortfall the way the BTC suites skip a
+drained wallet, and `sendOrSkip` catches rgb-lib's own `InsufficientAssignments`
+refusal when the precondition is too optimistic.
+
 ### Skipping a protocol
 
 Set `SKIP_SPARK=1`, `SKIP_LIQUID=1`, `SKIP_ARKADE=1`, or `SKIP_RGB_L1=1` to skip
