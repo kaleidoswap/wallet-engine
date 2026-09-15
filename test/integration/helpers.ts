@@ -271,7 +271,8 @@ export function skipWhenUnavailable(ctx: TestContext, reason: string | undefined
  * the same fact as an Arkade wallet whose VTXOs will not assemble, and it
  * deserves the same skip rather than a red job.
  */
-const INSUFFICIENT_FUNDS = /insufficient\s?(funds|balance|assignments)|not enough/i
+const INSUFFICIENT_FUNDS =
+  /insufficient\s?(funds|balance|assignments|allocationslots|allocation slots)|not enough/i
 
 /**
  * Perform a send, skipping when the wallet turns out not to afford it after
