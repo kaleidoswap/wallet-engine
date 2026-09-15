@@ -75,6 +75,32 @@ function addedIn(file) {
   }
 }
 
+/**
+ * A shallow clone cannot answer "which commit added this file", so every fix
+ * commit would render as unknown and `--check` would fail on a difference that
+ * says nothing about the index. Fail with the cause instead of the symptom.
+ */
+function assertFullHistory() {
+  try {
+    const shallow = execFileSync('git', ['rev-parse', '--is-shallow-repository'], {
+      cwd: root,
+      encoding: 'utf8',
+    }).trim()
+    if (shallow === 'true') {
+      console.error(
+        'This is a shallow clone, so fix commits cannot be resolved.\n' +
+          'Fetch full history (CI: actions/checkout with `fetch-depth: 0`):\n\n' +
+          '  git fetch --unshallow\n',
+      )
+      process.exit(1)
+    }
+  } catch {
+    /* not a git repo, or an old git: fall through and let commits read as unknown */
+  }
+}
+
+assertFullHistory()
+
 const entries = fs
   .readdirSync(auditDir)
   .filter((f) => f.endsWith('.test.ts'))

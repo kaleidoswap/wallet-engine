@@ -14,7 +14,13 @@ jobs:
       matrix:
         node-version: [20, 22]
     steps:
+      # Full history: `check:audit-index` resolves each audit test's fix commit
+      # with `git log --diff-filter=A`, which sees nothing in a depth-1 clone
+      # and would report every commit as unknown — failing the check for a
+      # reason that has nothing to do with the index. 453 commits is cheap.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@v4
 
