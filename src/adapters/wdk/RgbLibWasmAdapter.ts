@@ -282,6 +282,82 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     return found
   }
 
+  /**
+   * Issue a NIA (fungible) asset and return it in the same shape listAssets()
+   * yields. rgb-lib-wasm exposes issuance only on the wallet handle and returns
+   * a plain serde object, but a host that forwards the call without awaiting it
+   * (or reads it back through a structured clone) sees `{}` and reports a
+   * hollow success. Awaiting here, requiring an asset id, and carrying the
+   * issuance fields into `metadata` is what keeps that from reaching callers.
+   *
+   * Not part of IProtocolAdapter: only the wasm backing can issue, and only
+   * when the resolved rgb-lib build ships the binding. Callers feature-detect
+   * with `typeof adapter.issueAssetNia === 'function'` and fail closed, the
+   * same way the Liquid adapter derives its Simplicity operations.
+   */
+  async issueAssetNia(params: {
+    ticker: string
+    name: string
+    precision?: number
+    amounts: number[]
+  }): Promise<UnifiedAsset> {
+    this.assertConnected()
+    const wallet = this.account as unknown as {
+      issueAssetNia?: (
+        ticker: string,
+        name: string,
+        precision: number,
+        amounts: number[]
+      ) => unknown
+    }
+    if (typeof wallet?.issueAssetNia !== 'function') {
+      throw new ProtocolError(
+        'NIA issuance is not available in this rgb-lib-wasm build',
+        'RGB_L1',
+        'NOT_SUPPORTED'
+      )
+    }
+    if (!Array.isArray(params.amounts) || params.amounts.length === 0) {
+      throw new ProtocolError('At least one issuance amount is required', 'RGB_L1', 'BAD_REQUEST')
+    }
+    // Amounts cross into wasm as u64: anything but a positive safe integer would
+    // be silently truncated or rejected with an opaque binding error.
+    const amounts = params.amounts.map(Number)
+    if (!amounts.every((n) => Number.isSafeInteger(n) && n > 0)) {
+      throw new ProtocolError(
+        'Issuance amounts must be positive safe integers',
+        'RGB_L1',
+        'BAD_REQUEST',
+        { amounts: params.amounts }
+      )
+    }
+
+    let issued: unknown
+    try {
+      issued = await wallet.issueAssetNia(params.ticker, params.name, Number(params.precision ?? 0), amounts)
+    } catch (e) {
+      // rgb-lib-wasm throws bare strings; give hosts a stable code to match on.
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new ProtocolError(`NIA issuance failed: ${msg}`, 'RGB_L1', 'ISSUANCE_FAILED', { message: msg })
+    }
+    // Issuance mutates RGB state, which cannot be rebuilt from the seed.
+    await this.flushState()
+
+    const plain = plainFromWasm(issued)
+    const normalized = normalizeAsset(plain)
+    if (!normalized.asset_id) {
+      throw new ProtocolError(
+        'NIA issuance returned no asset id — the wallet may have no colorable UTXO',
+        'RGB_L1',
+        'ISSUANCE_FAILED'
+      )
+    }
+    const asset = rgbNiaAsset(normalized, RGB_L1_PROFILE)
+    const metadata = normalizeIssuanceMetadata(plain)
+    if (Object.keys(metadata).length > 0) asset.metadata = metadata
+    return asset
+  }
+
   // --- Invoices -----------------------------------------------------------
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
@@ -835,6 +911,54 @@ function normalizeRgbLibTransactionAmounts(t: any): {
     return { received: 0, sent: amount, type: 'send' }
   }
   return { received: amount, sent: 0, type: 'receive' }
+}
+
+/**
+ * Defensive copy of a raw rgb-lib-wasm return. Current builds hand back plain
+ * serde objects, so this is normally a spread; it also honours `toJSON` and
+ * walks prototype getters so a build that returns a wasm-bindgen class
+ * instance still normalizes instead of collapsing to `{}`.
+ */
+function plainFromWasm(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  const source = value as Record<string, unknown>
+  const toJson = (source as { toJSON?: unknown }).toJSON
+  if (typeof toJson === 'function') {
+    try {
+      return ((toJson as () => unknown).call(source) ?? {}) as Record<string, unknown>
+    } catch {
+      // fall through to the getter walk
+    }
+  }
+  const out: Record<string, unknown> = { ...source }
+  const proto = Object.getPrototypeOf(source) as object | null
+  for (const key of proto ? Object.getOwnPropertyNames(proto) : []) {
+    if (key === 'constructor' || key in out) continue
+    try {
+      const read = source[key]
+      if (typeof read !== 'function') out[key] = read
+    } catch {
+      // a wasm getter can throw on a freed pointer — skip it
+    }
+  }
+  return out
+}
+
+/**
+ * Issuance-only fields rgb-lib-wasm reports alongside the asset record (camelCase
+ * or snake_case), exposed on `UnifiedAsset.metadata` so hosts keep them.
+ */
+function normalizeIssuanceMetadata(a: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  const issuedSupply = firstFiniteNumber(a.issuedSupply, a.issued_supply)
+  if (issuedSupply !== null) out.issued_supply = issuedSupply
+  const timestamp = firstFiniteNumber(a.timestamp)
+  if (timestamp !== null) out.timestamp = timestamp
+  const addedAt = firstFiniteNumber(a.addedAt, a.added_at)
+  if (addedAt !== null) out.added_at = addedAt
+  const media = a.media
+  if (media !== null && media !== undefined) out.media = media
+  return out
 }
 
 /**
