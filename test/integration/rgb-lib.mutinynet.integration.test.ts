@@ -252,7 +252,12 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
       // worth a check of its own.
       let spendable = (await from.getAssetBalance!(asset!.id)).available
       if (spendable < amount) {
-        spendable = await waitForSpendableAsset(from, asset!.id, amount, `${holder}/${mode}`)
+        // `to` as well: the sender's change settles only after the recipient
+        // refreshes and accepts the consignment, so waiting without driving
+        // the counterparty waits on a state machine that cannot advance.
+        spendable = await waitForSpendableAsset(from, asset!.id, amount, `${holder}/${mode}`, {
+          refreshAlso: [to],
+        })
       }
       if (spendable < amount) {
         const reason = `${holder}/RGB-L1 holds ${asset!.id} but only ${spendable} is spendable (needs ${amount}) — the last transfer's change did not settle in time`
