@@ -294,6 +294,18 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
       const invoice: any = await to.createRgbInvoice!({
         ...(recipientKnowsAsset ? { assetId: asset!.id } : {}),
         amount,
+        // Expire fast. A witness recipient id is derived from the wallet's
+        // keychain with no outpoint to vary it, and this database is ephemeral
+        // per runner, so every run regenerates the SAME id — the proxy then
+        // answers `RecipientIDAlreadyUsed` for as long as the previous run's
+        // invoice is live. rgb-lib's default is 2000s (~33 min) and runs are
+        // minutes apart, which is why witness receive worked exactly once and
+        // collided every run after.
+        //
+        // A blinded id is derived from a real outpoint, which differs each run,
+        // so it never had this problem. Both get the short expiry anyway:
+        // nothing here needs an invoice to outlive its own test.
+        durationSeconds: 120,
         ...(mode === 'witness' ? { witness: true } : {}),
       })
       const recipient: string = invoice?.invoice ?? invoice

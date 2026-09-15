@@ -173,6 +173,15 @@ rgb-lib refuses with `InvalidRecipientData { "missing witness data for a
 witness recipient" }`. A blinded invoice carries its own outpoint and needs
 none. 1000 sat matches rgb-lib's own colorable UTXOs and clears dust.
 
+The suite's invoices use `durationSeconds: 120` rather than rgb-lib's 2000s
+default. A **witness** recipient id is derived from the wallet's keychain with
+no outpoint to vary it, and this database is ephemeral per runner, so every run
+regenerates the same id — the transport proxy then answers
+`RecipientIDAlreadyUsed` for as long as the previous run's invoice is live.
+With a ~33 minute default and runs minutes apart, witness receive worked
+exactly once and collided every run after. A **blinded** id derives from a real
+outpoint, which differs each run, so it never had the problem.
+
 `createRgbUtxos` **broadcasts a transaction**, and its outputs do not exist for
 the wallet until that transaction confirms. Creating one and immediately
 sending fails with `InsufficientAllocationSlots` — which reads like a broken
