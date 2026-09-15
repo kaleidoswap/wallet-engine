@@ -35,6 +35,7 @@ import { getCapabilities } from '../../capabilities'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
+import { ensureEventSource, EVENT_SOURCE_MISSING_REASON } from '../../lib/arkade-eventsource'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
@@ -117,6 +118,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       arkServerUrl?: string
       esploraUrl?: string
       swapProviderUrl?: string
+      eventSource?: unknown
     }
     if (!cfg.mnemonic) throw new ProtocolError('ArkadeWdkAdapter requires a mnemonic', 'ARKADE', 'CONFIG')
     await this.releasePreviousConnection()
@@ -142,8 +144,16 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // Lazy-load the SDK for Ramps (onboard/offboard). Off the static import graph.
     // @ts-ignore — resolved at runtime; a transitive dep of the WDK Arkade module.
     this.arkSdk = await loadWdkModule('@arkade-os/sdk', () => import('@arkade-os/sdk'))
+    // The SDK settles through the server's event stream, so a runtime without
+    // `EventSource` cannot renew a VTXO at all — it expires and is swept. Said
+    // once here rather than 57 times a poll from inside the SDK.
+    this.eventSourceAvailable = ensureEventSource(cfg.eventSource)
+    if (!this.eventSourceAvailable) console.warn(`[ArkadeWdkAdapter] ${EVENT_SOURCE_MISSING_REASON}`)
     this.connected = true
   }
+
+  /** False when the runtime has no `EventSource`; see `lib/arkade-eventsource`. */
+  private eventSourceAvailable = true
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
     this.assertConnected()
@@ -152,6 +162,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       connected: this.connected,
       network: this.network,
       syncStatus: { synced: true, progress: 100 },
+      // `connected` on its own would let a host believe its funds are safe
+      // while settlement is impossible and the batch expiry runs down.
+      ...(this.eventSourceAvailable ? {} : { degraded: [EVENT_SOURCE_MISSING_REASON] }),
     }
   }
 

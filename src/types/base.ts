@@ -220,6 +220,13 @@ export interface ConnectionInfo {
   network?: string
   blockHeight?: number
   syncStatus?: SyncStatus
+  /**
+   * Set when the adapter is connected but cannot do something a host would
+   * assume it can, and no call will fail to say so. Arkade sets it when the
+   * runtime has no `EventSource`: settlement is impossible, so VTXOs quietly
+   * expire while every other call keeps working and `connected` stays true.
+   */
+  degraded?: string[]
 }
 
 export interface SyncStatus {

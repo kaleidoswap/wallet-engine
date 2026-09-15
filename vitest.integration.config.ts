@@ -13,6 +13,15 @@ import { defineConfig } from 'vitest/config'
  */
 export default defineConfig(({ mode }) => {
   Object.assign(process.env, loadEnv(mode, 'test/integration', ''))
+  // `@arkade-os/sdk` settles through the Ark server's event stream, so a runtime
+  // without `EventSource` cannot renew a VTXO — it expires and the server sweeps
+  // it (#83). Node has it only behind this flag. Set on the env rather than
+  // `poolOptions.execArgv`, which the workers do not pick up; they inherit this.
+  // Without it one wallet logged 115 errors in a 65-second poll window, against
+  // 1 with it. The suite has to run the way a host that keeps its funds runs.
+  if (!/--experimental-eventsource/.test(process.env.NODE_OPTIONS ?? '')) {
+    process.env.NODE_OPTIONS = `${process.env.NODE_OPTIONS ?? ''} --experimental-eventsource`.trim()
+  }
   return {
     test: {
       environment: 'node',
