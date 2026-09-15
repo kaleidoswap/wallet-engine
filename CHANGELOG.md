@@ -22,6 +22,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   assuming it is instant, which is what left the transfer test passing or
   failing on what earlier runs happened to leave on-chain.
 
+### Build
+- **`@arkade-os/wdk` is actually removed now.** beta.67's notes said it was "no
+  longer a peer"; it was still declared as an optional peer and a devDependency,
+  while nothing in `src/` imported it. The claim that hosts could drop it was
+  true — the engine stopped using it in #87 — but the manifest still asked for
+  it, so `npm ls` and a fresh install still pulled it, and with it a nested
+  `@arkade-os/sdk` 0.4.35. Removed from `peerDependencies`,
+  `peerDependenciesMeta` and `devDependencies`; both lockfiles now carry zero
+  references to it.
+
 ## [1.0.0-beta.67] - 2026-09-15
 
 Arkade settlement. VTXOs were never being renewed on any Node host, so they

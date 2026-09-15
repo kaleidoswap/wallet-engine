@@ -39,9 +39,6 @@ importers:
       '@arkade-os/sdk':
         specifier: ^0.4.71
         version: 0.4.72(bip32@5.0.1(typescript@5.9.3))
-      '@arkade-os/wdk':
-        specifier: ^0.1.4
-        version: 0.1.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))(bare-url@2.5.2)(bip32@5.0.1(typescript@5.9.3))
       '@buildonspark/spark-sdk':
         specifier: ^0.7.10
         version: 0.7.17(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(ws@8.21.3)
@@ -87,17 +84,6 @@ importers:
 
 packages:
 
-  '@arkade-os/boltz-swap@0.3.40':
-    resolution: {integrity: sha512-Q1myKKXC5c44wzAD6eb4lrq3rro0qwyJqNqf0powjfbhSTzHfk5Do6DfZYrciueEK4agilynLNurWCYsoE8yEw==}
-    peerDependencies:
-      expo-background-task: '>=0.1.0'
-      expo-task-manager: '>=3.0.0'
-    peerDependenciesMeta:
-      expo-background-task:
-        optional: true
-      expo-task-manager:
-        optional: true
-
   '@arkade-os/boltz-swap@0.3.67':
     resolution: {integrity: sha512-NqbboMXy8GICdoEH5tauMhsYmgGM1WGEaqaJ2ZnGnLfqdSLmajOgyGedeQpiotoYMXHcSocgdN8KVT/A+rVeHQ==}
     peerDependencies:
@@ -105,27 +91,6 @@ packages:
       expo-task-manager: '>=3.0.0'
     peerDependenciesMeta:
       expo-background-task:
-        optional: true
-      expo-task-manager:
-        optional: true
-
-  '@arkade-os/sdk@0.4.35':
-    resolution: {integrity: sha512-gMARWDEgy5YL15vE4hBoUf4IGBi94tDRymtVwIehL+2MQylFm6cO1Qt50/aA6dwle5Ae+XMfF99Wf6k/Gc257A==}
-    engines: {node: '>=22.12.0 <25'}
-    peerDependencies:
-      '@react-native-async-storage/async-storage': '>=1.0.0'
-      expo: '>=54.0.0'
-      expo-background-task: ~1.0.10 || >=55.0.0
-      expo-sqlite: ~16.0.10 || >=55.0.0
-      expo-task-manager: ~14.0.9 || >=55.0.0
-    peerDependenciesMeta:
-      '@react-native-async-storage/async-storage':
-        optional: true
-      expo:
-        optional: true
-      expo-background-task:
-        optional: true
-      expo-sqlite:
         optional: true
       expo-task-manager:
         optional: true
@@ -171,10 +136,6 @@ packages:
         optional: true
       expo-task-manager:
         optional: true
-
-  '@arkade-os/wdk@0.1.4':
-    resolution: {integrity: sha512-VnxJka5J3yTGn0vkNiMb8z3ahUE0Lvpqd6MiLKLTPd5ZXBnVJ0PNO4EI6puLuQatoszsc1aeGaFRnBIqbZdEUQ==}
-    engines: {node: '>=18.0.0'}
 
   '@bitcoindevkit/bdk-wallet-node@0.2.0':
     resolution: {integrity: sha512-YYYAjKzCiFw766dGfFbc/JeOwDbCFFc5PH6bvVcI6dcpdVShs8KYY0M4UPhy7iAjdjB3XzyLCW5TLTMNPrMeZA==}
@@ -501,11 +462,6 @@ packages:
   '@lightsparkdev/core@1.5.2':
     resolution: {integrity: sha512-7EiV/Ld+IqAQJYvSLN2gS6E/UrcCCQ/H4voUz+nAPUDSk8U1P06afTKALh1FeizAXIzqxt1jFQWmQlXPSXmxIA==}
     engines: {node: '>=18'}
-
-  '@marcbachmann/cel-js@7.3.1':
-    resolution: {integrity: sha512-P6o26TvjStT8V8+8EF+yq9Pp7ZFV00bpiUMbssr76XbIZGxaB+NNWeBp6WNxOrR9gp0JPzvJueCKHpOs5LE9PQ==}
-    engines: {node: '>=20.19.0'}
-    hasBin: true
 
   '@marcbachmann/cel-js@8.0.0':
     resolution: {integrity: sha512-oaTrAziGr3zDLFiMt/yLU3nZuRMawyWQB5X1a0I7s9eGy3JYzX9l8ZXXHyMd64nzbeVFZTewuUShwsZQdK6UCA==}
@@ -2332,26 +2288,6 @@ packages:
 
 snapshots:
 
-  '@arkade-os/boltz-swap@0.3.40(bip32@5.0.1(typescript@5.9.3))':
-    dependencies:
-      '@arkade-os/sdk': 0.4.35(bip32@5.0.1(typescript@5.9.3))
-      '@noble/curves': 2.0.1
-      '@noble/hashes': 2.0.1
-      '@scure/base': 2.0.0
-      '@scure/btc-signer': 2.0.1
-      bip68: 1.0.4
-      light-bolt11-decoder: 3.2.0
-    transitivePeerDependencies:
-      - '@ledgerhq/ledger-bitcoin'
-      - '@react-native-async-storage/async-storage'
-      - bip32
-      - bitcoinjs-lib
-      - bufferutil
-      - ecpair
-      - expo
-      - expo-sqlite
-      - utf-8-validate
-
   '@arkade-os/boltz-swap@0.3.67(bip32@5.0.1(typescript@5.9.3))':
     dependencies:
       '@arkade-os/sdk': 0.4.62(bip32@5.0.1(typescript@5.9.3))
@@ -2370,25 +2306,6 @@ snapshots:
       - ecpair
       - expo
       - expo-sqlite
-      - utf-8-validate
-
-  '@arkade-os/sdk@0.4.35(bip32@5.0.1(typescript@5.9.3))':
-    dependencies:
-      '@bitcoinerlab/descriptors-scure': 3.1.7(bip32@5.0.1(typescript@5.9.3))
-      '@marcbachmann/cel-js': 7.3.1
-      '@noble/curves': 2.0.1
-      '@noble/secp256k1': 3.0.0
-      '@scure/base': 2.0.0
-      '@scure/bip39': 2.0.1
-      '@scure/btc-signer': 2.0.1
-      bip68: 1.0.4
-      ws-electrumx-client: 1.0.5
-    transitivePeerDependencies:
-      - '@ledgerhq/ledger-bitcoin'
-      - bip32
-      - bitcoinjs-lib
-      - bufferutil
-      - ecpair
       - utf-8-validate
 
   '@arkade-os/sdk@0.4.62(bip32@5.0.1(typescript@5.9.3))':
@@ -2427,36 +2344,6 @@ snapshots:
       - bitcoinjs-lib
       - bufferutil
       - ecpair
-      - utf-8-validate
-
-  '@arkade-os/wdk@0.1.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))(bare-url@2.5.2)(bip32@5.0.1(typescript@5.9.3))':
-    dependencies:
-      '@arkade-os/boltz-swap': 0.3.40(bip32@5.0.1(typescript@5.9.3))
-      '@arkade-os/sdk': 0.4.35(bip32@5.0.1(typescript@5.9.3))
-      '@scure/base': 2.3.0
-      '@scure/bip32': 2.3.0
-      '@tetherto/wdk-wallet': 1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))
-      light-bolt11-decoder: 3.2.0
-      sodium-universal: 5.0.1(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-url@2.5.2)
-    transitivePeerDependencies:
-      - '@ledgerhq/ledger-bitcoin'
-      - '@react-native-async-storage/async-storage'
-      - bare-abort-controller
-      - bare-buffer
-      - bare-events
-      - bare-pipe
-      - bare-tcp
-      - bare-url
-      - bip32
-      - bitcoinjs-lib
-      - bufferutil
-      - ecpair
-      - expo
-      - expo-background-task
-      - expo-sqlite
-      - expo-task-manager
-      - react-native-b4a
-      - sodium-javascript
       - utf-8-validate
 
   '@bitcoindevkit/bdk-wallet-node@0.2.0': {}
@@ -2744,8 +2631,6 @@ snapshots:
     transitivePeerDependencies:
       - bufferutil
       - utf-8-validate
-
-  '@marcbachmann/cel-js@7.3.1': {}
 
   '@marcbachmann/cel-js@8.0.0': {}
 
