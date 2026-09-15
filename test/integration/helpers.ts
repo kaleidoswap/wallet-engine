@@ -183,11 +183,36 @@ export function spendableSend(
 }
 
 
-/** Read a thrown value's message without assuming it is an Error. */
+/**
+ * Read a thrown value's message without assuming it is an Error, following the
+ * `cause` chain to the end.
+ *
+ * The outer message is usually the useless half. `@utexo/rgb-sdk` wraps every
+ * `goOnline` failure as `Failed to establish online connection` and hangs the
+ * reason rgb-lib actually gave off `cause`, so a suite that printed only the
+ * message reported an unreachable network whatever the truth was — a wrong
+ * indexer kind, a mismatched network, a rejected wallet — and got read as "the
+ * endpoint is flapping again" every time. It cost this suite a diagnosis more
+ * than once.
+ */
 function messageOf(error: unknown): string {
-  if (error instanceof Error) return error.message
-  return typeof error === 'string' ? error : JSON.stringify(error)
+  if (!(error instanceof Error)) return typeof error === 'string' ? error : JSON.stringify(error)
+  const chain: string[] = []
+  let current: unknown = error
+  // Bounded: a cause chain is short, and a cyclic one must not hang the suite.
+  for (let depth = 0; current instanceof Error && depth < 5; depth++) {
+    if (current.message && !chain.includes(current.message)) chain.push(current.message)
+    current = current.cause
+  }
+  if (current !== undefined && !(current instanceof Error)) {
+    const tail = typeof current === 'string' ? current : JSON.stringify(current)
+    if (tail && !chain.includes(tail)) chain.push(tail)
+  }
+  return chain.join(' ← ')
 }
+
+/** `messageOf` for call sites outside this module (the address printer). */
+export const describeError = messageOf
 
 /**
  * Run a suite's live setup, returning the reason it could not connect instead

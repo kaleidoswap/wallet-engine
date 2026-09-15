@@ -27,6 +27,7 @@ import {
   connectLiquid,
   connectRgbL1,
   connectSpark,
+  describeError,
   safeDisconnect,
 } from './helpers'
 
@@ -50,8 +51,10 @@ async function collect(
   for (const w of [ALICE, BOB]) {
     try {
       rows.push(...(await fn(w)))
-    } catch (e: any) {
-      console.log(`\n[${label}] ${w.name}: FAILED — ${e?.message ?? e}`)
+    } catch (e) {
+      // The full cause chain: the outer message alone has sent this suite's
+      // failures to the wrong diagnosis more than once. See `describeError`.
+      console.log(`\n[${label}] ${w.name}: FAILED — ${describeError(e)}`)
     }
   }
   if (rows.length) {

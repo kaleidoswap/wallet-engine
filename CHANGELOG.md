@@ -34,6 +34,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   emptied, on a schedule set by how often CI ran. Teardown now sends the amount
   back, only when a send happened and never failing the suite, which makes a run
   cost its two fees instead of a wallet. `RETURN_TEST_FUNDS=0` opts out.
+- **Live-suite failures print their whole `cause` chain.** `@utexo/rgb-sdk`
+  wraps every `goOnline` failure as `Failed to establish online connection` and
+  hangs rgb-lib's actual reason off `cause`, so the suite reported an
+  unreachable network whatever the truth was — and that is how the RGB-L1 red
+  kept getting waved through as "mutinynet is flapping again" while the
+  endpoint was answering in 240ms.
 - **`print-funding-addresses` prints balances next to the addresses**, which is
   the half that says whether a top-up is needed at all. It also documents
   `--silent=false`: vitest hides console output from passing tests, and every
