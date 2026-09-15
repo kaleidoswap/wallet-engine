@@ -275,6 +275,16 @@ const INSUFFICIENT_FUNDS =
   /insufficient\s?(funds|balance|assignments|allocationslots|allocation slots)|not enough/i
 
 /**
+ * A recipient id this wallet already used against the transport proxy.
+ *
+ * Not a resource shortfall, so it is kept out of `INSUFFICIENT_FUNDS`: it means
+ * a previous run's invoice for the same id is still live. The short
+ * `durationSeconds` on the test's invoices is what should prevent it; this is
+ * the backstop for two runs closer together than that.
+ */
+const RECIPIENT_ID_REUSED = /RecipientIDAlreadyUsed/i
+
+/**
  * Perform a send, skipping when the wallet turns out not to afford it after
  * all.
  *
@@ -299,6 +309,12 @@ export async function sendOrSkip<T>(ctx: TestContext, label: string, send: () =>
     return await send()
   } catch (error) {
     const message = messageOf(error)
+    if (RECIPIENT_ID_REUSED.test(message) && !REQUIRE_FUNDED_WALLETS) {
+      const reason = `${label}: the recipient id is still registered with the transport proxy from an earlier run — its invoice has not expired yet`
+      console.warn(`⚠ SKIPPED — ${reason}`)
+      ctx.skip(reason)
+      throw error
+    }
     if (REQUIRE_FUNDED_WALLETS || !INSUFFICIENT_FUNDS.test(message)) throw error
     const reason = `${label}: the wallet reported enough but coin selection could not cover the send — ${message}`
     console.warn(`⚠ SKIPPED — ${reason}`)
