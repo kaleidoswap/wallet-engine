@@ -126,11 +126,33 @@ export const LIQUID = {
   enabled: HAVE_WALLETS && !flag('SKIP_LIQUID'),
 }
 
+/**
+ * Mutinynet indexer, shared by the Arkade and RGB-L1 suites.
+ *
+ * Ours, not the public `https://mutinynet.com/api`, which answers CI with a
+ * plain nginx 429: our GitLab and GitHub runners share one box, so a single
+ * egress IP makes everyone's requests and the limit arrives long before any one
+ * suite is unreasonable. It reads as an outage — `@utexo/rgb-sdk` reports every
+ * `goOnline` failure as "Failed to establish online connection" — and the RGB-L1
+ * red went unread for weeks on that description while the endpoint answered in
+ * 240ms from anywhere else.
+ *
+ * `esplora.signet.kaleidoswap.com` is the same chain, not a similar one: it is
+ * MutinyWallet/electrs `new-index` with `--signet-magic`, the only esplora build
+ * that indexes Mutinynet's custom signet, and it tracks the public one tip for
+ * tip and hash for hash. Same reasoning as the Liquid waterfalls default above:
+ * an endpoint someone else rate-limits is not a dependency a suite can hold.
+ *
+ * Override per consumer with `ARKADE_ESPLORA_URL` / `RGB_INDEXER_URL`.
+ */
+const MUTINYNET_ESPLORA = env('MUTINYNET_ESPLORA_URL', 'https://esplora.signet.kaleidoswap.com')!
+
 export const ARKADE = {
   /** Mutinynet is a custom signet — the adapter's network key is 'signet'. */
   network: 'signet' as const,
   arkServerUrl: env('ARKADE_SERVER_URL', 'https://mutinynet.arkade.sh')!,
-  esploraUrl: env('ARKADE_ESPLORA_URL', 'https://mutinynet.com/api')!,
+  /** Ours — see MUTINYNET_ESPLORA. */
+  esploraUrl: env('ARKADE_ESPLORA_URL', MUTINYNET_ESPLORA)!,
   delegatorUrl: env('ARKADE_DELEGATOR_URL', 'https://delegator.mutinynet.arkade.sh')!,
   enabled: HAVE_WALLETS && !flag('SKIP_ARKADE'),
 }
@@ -138,8 +160,8 @@ export const ARKADE = {
 export const RGB_L1 = {
   /** rgb-lib on mutinynet — surfaced to rgb-lib as its custom signet. */
   network: 'signet' as const,
-  /** Electrum/Esplora indexer rgb-lib syncs against. */
-  indexerUrl: env('RGB_INDEXER_URL', 'https://mutinynet.com/api')!,
+  /** Electrum/Esplora indexer rgb-lib syncs against — ours, see MUTINYNET_ESPLORA. */
+  indexerUrl: env('RGB_INDEXER_URL', MUTINYNET_ESPLORA)!,
   /** RGB proxy (RGB HTTP JSON-RPC transport) for consignment exchange. */
   transportEndpoint: env('RGB_TRANSPORT_ENDPOINT', 'rpcs://proxy.iriswallet.com/0.2/json-rpc')!,
   enabled: HAVE_WALLETS && !flag('SKIP_RGB_L1'),

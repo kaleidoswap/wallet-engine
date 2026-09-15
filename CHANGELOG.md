@@ -34,6 +34,14 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   emptied, on a schedule set by how often CI ran. Teardown now sends the amount
   back, only when a send happened and never failing the suite, which makes a run
   cost its two fees instead of a wallet. `RETURN_TEST_FUNDS=0` opts out.
+- **The Arkade and RGB-L1 suites use our own Mutinynet indexer.** The public
+  `mutinynet.com/api` answers CI with a plain nginx 429 — our GitLab and GitHub
+  runners share one box, so one egress IP carries everyone's requests — and
+  `@utexo/rgb-sdk` renders that as "Failed to establish online connection",
+  which is how the RGB-L1 red went unread for weeks. `esplora.signet.kaleidoswap.com`
+  is the same chain (MutinyWallet/electrs `--signet-magic`), tip for tip.
+  `connectRgbL1` also gained the `withRetry` that Spark and Liquid already had.
+  Override with `MUTINYNET_ESPLORA_URL`, `ARKADE_ESPLORA_URL` or `RGB_INDEXER_URL`.
 - **Live-suite failures print their whole `cause` chain.** `@utexo/rgb-sdk`
   wraps every `goOnline` failure as `Failed to establish online connection` and
   hangs rgb-lib's actual reason off `cause`, so the suite reported an

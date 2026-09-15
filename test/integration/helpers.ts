@@ -107,18 +107,26 @@ export async function connectArkade(wallet: WalletFixture): Promise<ArkadeWdkAda
   return adapter
 }
 
-/** Connect a local rgb-lib (RGB_L1, mutinynet/signet) adapter for the given wallet. */
+/**
+ * Connect a local rgb-lib (RGB_L1, mutinynet/signet) adapter for the given wallet.
+ *
+ * Retried like Spark and Liquid: `goOnline` syncs the wallet on connect and both
+ * Alice and Bob do it, which makes this the suite's heaviest burst at the
+ * indexer and the first thing a rate limit refuses.
+ */
 export async function connectRgbL1(wallet: WalletFixture): Promise<RgbLibWdkAdapter> {
-  const adapter = new RgbLibWdkAdapter()
-  await adapter.connect({
-    protocol: 'RGB_L1',
-    network: RGB_L1.network,
-    mnemonic: wallet.mnemonic!,
-    dataDir: rgbDataDir(wallet),
-    indexerUrl: RGB_L1.indexerUrl,
-    transportEndpoint: RGB_L1.transportEndpoint,
-  } as any)
-  return adapter
+  return withRetry(`connectRgbL1(${wallet.name})`, async () => {
+    const adapter = new RgbLibWdkAdapter()
+    await adapter.connect({
+      protocol: 'RGB_L1',
+      network: RGB_L1.network,
+      mnemonic: wallet.mnemonic!,
+      dataDir: rgbDataDir(wallet),
+      indexerUrl: RGB_L1.indexerUrl,
+      transportEndpoint: RGB_L1.transportEndpoint,
+    } as any)
+    return adapter
+  })
 }
 
 /** Best-effort disconnect; never throws (used in afterAll cleanup). */

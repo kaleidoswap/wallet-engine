@@ -108,6 +108,21 @@ Note that a zero **spendable** balance is not always an empty wallet: on Arkade,
 boarding UTXOs that were never onboarded read as 0 spendable while the funds are
 there. Check before sending sats — the fix may be an onboard, not a faucet.
 
+### The Mutinynet indexer is ours
+
+Both the Arkade and RGB-L1 suites default to `https://esplora.signet.kaleidoswap.com`,
+not the public `https://mutinynet.com/api`. The public one answers CI with a
+plain nginx **429**: our GitLab and GitHub runners share a box, so one egress IP
+carries everyone's requests. `@utexo/rgb-sdk` renders any `goOnline` failure as
+`Failed to establish online connection`, so that rate limit was indistinguishable
+from an outage and the RGB-L1 red went unread for weeks — the suite now prints
+the whole `cause` chain, which is how it surfaced.
+
+Ours is the same chain, not a similar one: MutinyWallet/electrs `new-index` with
+`--signet-magic`, the only esplora build that indexes Mutinynet's custom signet.
+Override with `MUTINYNET_ESPLORA_URL`, or per consumer with `ARKADE_ESPLORA_URL`
+/ `RGB_INDEXER_URL`.
+
 ### Skipping a protocol
 
 Set `SKIP_SPARK=1`, `SKIP_LIQUID=1`, `SKIP_ARKADE=1`, or `SKIP_RGB_L1=1` to skip
