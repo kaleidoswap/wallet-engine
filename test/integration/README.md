@@ -123,6 +123,44 @@ Ours is the same chain, not a similar one: MutinyWallet/electrs `new-index` with
 Override with `MUTINYNET_ESPLORA_URL`, or per consumer with `ARKADE_ESPLORA_URL`
 / `RGB_INDEXER_URL`.
 
+### RGB-L1 state is not derivable from the seed
+
+rgb-lib keeps its wallet in SQLite under `RGB_DATA_DIR`, and which assets a
+wallet holds is known **only** to that database — a seed does not reconstruct
+it. Delete the directory and the wallet forgets its assets, though the coins
+themselves are still on-chain.
+
+That matters for the issuance test, which reuses an asset either wallet already
+holds and issues only when neither does. A local run with a persistent
+`RGB_DATA_DIR` reuses; CI, whose data directory is ephemeral, issues a fresh
+asset each run. That costs one colorable UTXO and an on-chain fee per run —
+a few hundred signet sats against the ~1.59M each wallet holds, so thousands
+of runs — and the assets do not accumulate anywhere, because the database they
+are recorded in does not survive the runner.
+
+**Do not cache the CI data directory to avoid that.** It was tried, and it
+breaks the suite outright: the cached database is authoritative about which
+UTXOs the wallet owns, any other instance of the same seed spends some of
+them, and the next restore fails `goOnline` with
+
+```
+RgbLib(Inconsistency { details: "spent bitcoins with another wallet: [...]" })
+```
+
+An RGB database can only be shared by instances that are the sole users of
+their seed, which a test wallet run from CI and from laptops is not. `goOnline`
+takes a skip-consistency-check flag; suppressing this particular check would be
+hiding a real accounting disagreement about spent coins.
+
+`RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
+
+Reuse keys off what a wallet **holds** (`total`), not what it can spend
+(`available`). They differ: after a transfer the sender's change allocation is
+unconfirmed, so `available` reads 0 against a `total` of nearly the whole
+supply. The transfer test skips on that shortfall the way the BTC suites skip a
+drained wallet, and `sendOrSkip` catches rgb-lib's own `InsufficientAssignments`
+refusal when the precondition is too optimistic.
+
 ### Skipping a protocol
 
 Set `SKIP_SPARK=1`, `SKIP_LIQUID=1`, `SKIP_ARKADE=1`, or `SKIP_RGB_L1=1` to skip
