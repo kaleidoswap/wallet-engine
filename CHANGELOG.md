@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Build
+- **The postcss override is now enforced, not just declared** (#61). It lived in
+  package.json's `pnpm.overrides`, which npm ignores entirely and pnpm drops in
+  v11 — and both install paths are in CI (`pnpm install --frozen-lockfile` in
+  ci/publish, `npm ci` in integration), so the pin held only by the accident of
+  a committed lockfile. It is now declared once per package manager: top-level
+  `overrides` for npm, `pnpm-workspace.yaml` for pnpm.
+  `check:lockfiles` asserts the two declarations agree **and** that both
+  lockfiles resolved to them, because a pin that is declared and not applied is
+  worth no more than no pin at all.
+
 ### Added
 - **`RgbLibWdkAdapter.issueAssetNia`**, matching the contract
   `RgbLibWasmAdapter` shipped in #76 — same parameters, same guarantees, so a
