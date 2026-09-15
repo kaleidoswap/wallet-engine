@@ -61,7 +61,12 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
       const back = holder === 'alice' ? bob : alice
       const to = holder === 'alice' ? alice : bob
       await returnFunds(`RGB-L1 ${holder === 'alice' ? 'Bob → Alice' : 'Alice → Bob'}`, async () => {
-        const invoice: any = await to.createRgbInvoice!({ assetId: asset!.id, amount: sentAmount })
+        // Same constraint as the outbound leg: bind the invoice to the asset
+        // only when this wallet already knows it.
+        const knows = (await to.listAssets()).some((a) => a.id === asset!.id)
+        const invoice: any = await to.createRgbInvoice!(
+          knows ? { assetId: asset!.id, amount: sentAmount } : { amount: sentAmount },
+        )
         return back.sendAsset!({ token: asset!.id, recipient: invoice?.invoice ?? invoice, amount: sentAmount })
       })
     }
@@ -203,7 +208,16 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
       expect(String(err)).toMatch(/AllocationsAlreadyAvailable/)
     }
 
-    const invoice: any = await to.createRgbInvoice!({ assetId: asset!.id, amount })
+    // Name the asset in the invoice only when the recipient already knows it.
+    // rgb-lib answers `AssetNotFound` for an asset id its wallet has never seen,
+    // and a first-time recipient by definition has not: the asset reaches it
+    // through the sender's consignment, not through the invoice. So the first
+    // transfer asks for a bare blinded UTXO, and later ones can bind to the
+    // asset. (This is what the first CI run of this test taught us.)
+    const recipientKnowsAsset = (await to.listAssets()).some((a) => a.id === asset!.id)
+    const invoice: any = await to.createRgbInvoice!(
+      recipientKnowsAsset ? { assetId: asset!.id, amount } : { amount },
+    )
     const recipient: string = invoice?.invoice ?? invoice
     expect(typeof recipient).toBe('string')
     expect(recipient.startsWith('rgb:')).toBe(true)
