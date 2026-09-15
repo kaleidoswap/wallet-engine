@@ -74,6 +74,31 @@ export function resolveEventSourceFactory(injected?: unknown): EventSourceFactor
  * `eventSource` goes to each provider rather than onto `globalThis`, which is
  * also correct for a process holding two wallets on different transports.
  */
+/**
+ * Flatten a connect config that may carry its settings at the top level or
+ * nested under `arkadeConfig`.
+ *
+ * Hosts use both shapes, and the pre-SDK-direct adapter accepted either because
+ * it spread `arkadeConfig` wholesale into `Wallet.create`. Reading only the top
+ * level drops a nested `storage` on the floor — silently, since the wallet then
+ * falls back to in-memory and loses its VTXO state on every restart.
+ */
+export function flattenArkadeConfig(cfg: Record<string, any>): Record<string, any> {
+  const nested = (cfg.arkadeConfig ?? {}) as Record<string, any>
+  const pick = (key: string): unknown => cfg[key] ?? nested[key]
+  return {
+    arkServerUrl: pick('arkServerUrl'),
+    esploraUrl: pick('esploraUrl'),
+    indexerUrl: pick('indexerUrl'),
+    swapProviderUrl: pick('swapProviderUrl'),
+    delegatorUrl: pick('delegatorUrl'),
+    delegationEnabled: pick('delegationEnabled'),
+    boltzSwapsEnabled: pick('boltzSwapsEnabled'),
+    storage: pick('storage'),
+    eventSource: pick('eventSource'),
+  }
+}
+
 export async function createArkadeSdkWallet(
   sdk: ArkadeWalletSdk,
   options: ArkadeSdkWalletOptions,

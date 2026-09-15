@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+- **Arkade settings nested under `arkadeConfig` are read again.** The SDK-direct
+  rewrite (#87) read `storage`, `delegatorUrl`, `delegationEnabled`,
+  `boltzSwapsEnabled` and `eventSource` only at the top level of the connect
+  config, while the adapter it replaced accepted either shape — it spread
+  `arkadeConfig` wholesale into `Wallet.create`. A host passing them nested,
+  which Rate does, silently lost them: a dropped `storage` falls back to
+  in-memory repositories and loses VTXO state on every app restart. Every
+  passthrough now reads both shapes, top level first.
+
 ## [1.0.0-beta.68] - 2026-09-15
 
 Corrections and coverage on top of beta.67. The one thing here a consumer can
