@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+- `@kaleidorg/wdk-wallet-liquid` bumped to 1.0.0-beta.9, which moves Liquid to
+  LWK 0.19 (`lwk_node`/`lwk_wasm` 0.19.0). Additive upstream release apart from
+  one field: `inspectPset` inputs now report `sighash` as optional, undefined
+  when LWK cannot resolve the spent output, where 0.18 always answered
+  SIGHASH_ALL. Hosts that bundle `lwk_wasm` themselves must move to 0.19.0.
+
 ## [1.0.0-beta.69] - 2026-09-15
 
 A correctness release for one regression in beta.68: Arkade settings passed

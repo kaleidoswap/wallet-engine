@@ -52,8 +52,8 @@ importers:
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)
       '@kaleidorg/wdk-wallet-liquid':
-        specifier: 1.0.0-beta.8
-        version: 1.0.0-beta.8(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))
+        specifier: 1.0.0-beta.9
+        version: 1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))
       '@kaleidorg/wdk-wallet-rln':
         specifier: ^1.0.0-beta.5
         version: 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)
@@ -442,12 +442,12 @@ packages:
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
 
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.8':
-    resolution: {integrity: sha512-HR0QRUFC9+ZwP3sibUR/1H/hbHmOKPjCJ/4JiDuKEcfxoxLkTmslIOhQwpLNSJbR8W9vOvRVywdHBQvQEKGsnw==}
+  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.9':
+    resolution: {integrity: sha512-9MZI9+wgay1Yer4jCnNzkuMu9x1OHDDSUGFrH0ypxLM8oIdV39P50ukx6yYUxpELcw6C8GfS937iLrmjdyF+Fg==}
     peerDependencies:
       '@tetherto/wdk-wallet': ^1.0.0-beta.6
       lwk-rn: ^0.9.0-2.0.3
-      lwk_wasm: ^0.18.0
+      lwk_wasm: ^0.19.0
     peerDependenciesMeta:
       lwk-rn:
         optional: true
@@ -1714,8 +1714,8 @@ packages:
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
-  lwk_node@0.18.0:
-    resolution: {integrity: sha512-w25RViZB5Jdfet1BOUvyTq6y32eA5NMX+zG93TIwXdHjiPsidY/Nma8pS1YWeYMRrTvwffRNtrwf98m7Dwqe6A==}
+  lwk_node@0.19.0:
+    resolution: {integrity: sha512-OQAFt1GUPHeucoQOL7glhqInCVPJrTwq07oc4zMWkEXVtdnE6xW6rIcit3TwBR0p3h+iSK7g8eCinUayINWMVA==}
 
   magic-string@0.30.21:
     resolution: {integrity: sha512-vd2F4YUyEXKGcLHoq+TEyCjxueSeHnFxyyjNp80yg0XV4vUhnDer/lvvlqM/arB5bXQN5K2/3oinyCRyx8T2CQ==}
@@ -2608,10 +2608,10 @@ snapshots:
     transitivePeerDependencies:
       - typescript
 
-  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.8(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))':
+  '@kaleidorg/wdk-wallet-liquid@1.0.0-beta.9(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))
-      lwk_node: 0.18.0
+      lwk_node: 0.19.0
 
   '@kaleidorg/wdk-wallet-rln@1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)':
     dependencies:
@@ -4258,7 +4258,7 @@ snapshots:
   lru-cache@10.4.3:
     optional: true
 
-  lwk_node@0.18.0: {}
+  lwk_node@0.19.0: {}
 
   magic-string@0.30.21:
     dependencies:
