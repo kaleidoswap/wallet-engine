@@ -7,6 +7,11 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.70] - 2026-09-17
+
+Liquid moves to LWK 0.19. A dependency release: the engine holds no direct LWK
+dependency, and the only code change is one type correction.
+
 ### Changed
 - `@kaleidorg/wdk-wallet-liquid` bumped to 1.0.0-beta.9, which moves Liquid to
   LWK 0.19 (`lwk_node`/`lwk_wasm` 0.19.0). Additive upstream release apart from
