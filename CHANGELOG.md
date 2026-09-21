@@ -7,6 +7,11 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.71] - 2026-09-21
+
+Second's Ark (bark) joins the engine as its own protocol, and both Ark adapters
+stop trusting the address prefix.
+
 ### Added
 - **BARK: Second's Ark, as its own protocol.** `@kaleidorg/wallet-engine/adapters/bark`
   exports `BarkAdapter` and `barkClientManager` over `@secondts/bark` (optional
