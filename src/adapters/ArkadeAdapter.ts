@@ -22,6 +22,7 @@ import { arkadeSwapsClientManager } from "../lib/arkade-swaps-client-manager";
 import {
   Ramps,
   isSpendable,
+  isValidArkAddress,
   type ExtendedVirtualCoin,
   type Wallet,
   type ArkTransaction,
@@ -86,8 +87,14 @@ function stripLightningPrefix(value: string): string {
     : trimmed;
 }
 
+/**
+ * An `ark1`/`tark1` prefix is NOT enough: bark (Second's Ark) mints addresses
+ * under the same HRP. The two payloads differ — Arkade encodes 65 bytes
+ * (version + server key + VTXO key), bark 75 — and each SDK's validator
+ * rejects the other's, so ask the SDK rather than the prefix.
+ */
 function isArkadeAddress(value: string): boolean {
-  return /^(ark|tark)1[0-9a-z]{6,}$/i.test(value.trim());
+  return isValidArkAddress(value.trim());
 }
 
 export class ArkadeAdapter implements IProtocolAdapter {

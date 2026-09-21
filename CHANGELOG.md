@@ -7,6 +7,32 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- **BARK: Second's Ark, as its own protocol.** `@kaleidorg/wallet-engine/adapters/bark`
+  exports `BarkAdapter` and `barkClientManager` over `@secondts/bark` (optional
+  peer), with `BARK` in `ProtocolType` and `BTC_BARK` in `Layer`. Distinct from
+  ARKADE: different servers, no interop. BTC only — no assets, no channels, no
+  native swaps — but Lightning send and receive run through the Ark server's own
+  gateway, so the account reaches LN with no swap provider in the path. Two
+  binding traps are handled and pinned by tests: bark reaches IndexedDB through
+  `web_sys::window()` (an `instanceof Window` check no service worker passes, so
+  the manager names the missing alias instead of failing inside the wasm), and
+  `Wallet.open` does not check the mnemonic against the stored database (so the
+  config carries an explicit per-wallet `dbName`). The wallet opens with
+  `runDaemon: false` and `runMaintenance()` replaces bark's own loop for hosts
+  that get evicted, refreshing through `refreshVtxosDelegated` so a round
+  completes whether or not the host is alive when it starts.
+
+### Fixed
+- **Ark addresses route by SDK validation, not by prefix.** Arkade and bark both
+  mint `ark1`/`tark1` addresses, so the HRP cannot say which server an address
+  belongs to, and sending to the wrong one loses the money rather than failing.
+  The payloads differ (Arkade 65 bytes, bark 75) and each SDK's validator rejects
+  the other's, so `ArkadeAdapter` now asks `isValidArkAddress` and `BarkAdapter`
+  asks the loaded bindings' `validateArkAddress`. The destination router still
+  classifies the whole HRP as `arkade` — it is SDK-free by design — so a spending
+  adapter must validate.
+
 ## [1.0.0-beta.70] - 2026-09-17
 
 Liquid moves to LWK 0.19. A dependency release: the engine holds no direct LWK

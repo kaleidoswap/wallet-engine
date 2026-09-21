@@ -24,6 +24,9 @@ export type ProtocolCapability =
   | 'spark-transfer'
   | 'arkade-onboard'
   | 'arkade-offboard'
+  | 'bark-board'
+  | 'bark-offboard'
+  | 'bark-exit'
   | 'liquid-pset-inspect'
   | 'liquid-pset-sign'
   | 'simplicity-compile'
@@ -56,6 +59,15 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
     'asset-receive',
     'arkade-onboard',
     'arkade-offboard',
+  ],
+  BARK: [
+    'onchain-send',
+    'onchain-receive',
+    'lightning-send',
+    'lightning-receive',
+    'bark-board',
+    'bark-offboard',
+    'bark-exit',
   ],
   RGB_L1: [
     'onchain-send',
