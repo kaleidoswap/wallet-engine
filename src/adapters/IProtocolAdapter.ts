@@ -286,6 +286,32 @@ export interface IArkadeOperations {
   offboard(address: string, amount?: number): Promise<{ txid: string }>
 }
 
+/**
+ * Bark-specific operations: funding the account from on-chain, and taking it
+ * back out. Separate from `IArkadeOperations` because the two Arks agree on
+ * almost nothing below the name — bark boards a named amount into a pending
+ * board that confirms into a VTXO, and prices the round itself.
+ */
+export interface IBarkOperations {
+  /**
+   * On-chain address that funds this account, with the height its boarding
+   * output stops being spendable and the key index behind it.
+   */
+  boardFundingAddress(): Promise<{
+    address: string
+    expiryHeight: number
+    keypairIndex: number
+  }>
+  /** Board an exact amount already sitting at the funding address. */
+  boardAmount(amountSats: number): Promise<Record<string, unknown>>
+  /** Board everything the funding address holds. */
+  boardAll(): Promise<Record<string, unknown>>
+  /** Boards submitted but not yet confirmed into a VTXO. */
+  pendingBoards(): Promise<Record<string, unknown>[]>
+  /** Server terms a host has to show before boarding: minimum, confirmations. */
+  boardingTerms(): Promise<{ minBoardAmountSats: number; requiredConfirmations: number }>
+}
+
 /** Native cross-asset swaps. Gated by `supportsSwaps()` on the core surface. */
 export interface ISwapOperations {
   getSwapQuote(request: QuoteRequest): Promise<Quote>
@@ -318,6 +344,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<IBackupOperations> &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &
+  Partial<IBarkOperations> &
   Partial<ISwapOperations> &
   Partial<ISwapRecoveryOperations> &
   Partial<IExtensibleAdapter>
@@ -374,6 +401,9 @@ export function asSparkOperations(a: IProtocolAdapter): ISparkOperations | null 
 }
 export function asArkadeOperations(a: IProtocolAdapter): IArkadeOperations | null {
   return isFn(a.onboard) && isFn(a.getVtxos) ? (a as IArkadeOperations) : null
+}
+export function asBarkOperations(a: IProtocolAdapter): IBarkOperations | null {
+  return isFn(a.boardFundingAddress) && isFn(a.boardAmount) ? (a as IBarkOperations) : null
 }
 
 export interface IProtocolAdapterFactory {

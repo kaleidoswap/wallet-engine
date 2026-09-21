@@ -7,6 +7,20 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.72] - 2026-09-21
+
+Boarding for Bark: the rail that funds the account from on-chain.
+
+### Added
+- **`IBarkOperations`** — `boardFundingAddress`, `boardAmount`, `boardAll`,
+  `pendingBoards` and `boardingTerms`, narrowed with `asBarkOperations`. Kept
+  apart from `IArkadeOperations` because the two Arks agree on almost nothing
+  below the name: bark boards a named amount into a pending board that
+  confirms into a VTXO, and prices the round itself. `boardAmount` refuses
+  anything under the server's own minimum rather than letting the server
+  reject it, and `boardingTerms` gives a host the minimum and the confirmation
+  count it has to show before asking for money.
+
 ## [1.0.0-beta.71] - 2026-09-21
 
 Second's Ark (bark) joins the engine as its own protocol, and both Ark adapters
