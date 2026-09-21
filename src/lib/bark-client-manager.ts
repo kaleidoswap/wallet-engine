@@ -43,9 +43,13 @@ export function setBarkModuleLoader(loader: () => Promise<BarkModule>): void {
   moduleLoader = loader
 }
 
+/** The resolved bindings, kept so address checks need no wallet. */
+let loadedModule: BarkModule | null = null
+
 async function loadBark(): Promise<BarkModule> {
-  if (moduleLoader) return moduleLoader()
-  return import('@secondts/bark')
+  const module = moduleLoader ? await moduleLoader() : await import('@secondts/bark')
+  loadedModule = module
+  return module
 }
 
 function toBarkNetwork(network: BarkConfig['network']): BarkNetwork {
@@ -138,6 +142,21 @@ class BarkClientManager {
     if (!(await attempt.claim(() => wallet.free()))) return
     this.wallet = wallet
     log.info('[BarkClientManager] Bark wallet opened in %dms', Date.now() - started)
+  }
+
+  /**
+   * Whether the bindings accept this as one of THIS Ark's addresses. Arkade
+   * mints under the same `tark1` HRP with a different payload, and bark's
+   * validator rejects it — which is the only reliable way to tell them apart.
+   * False before the module is loaded: nothing can be sent then either.
+   */
+  isBarkAddress(address: string): boolean {
+    if (!loadedModule) return false;
+    try {
+      return loadedModule.validateArkAddress(address.trim());
+    } catch {
+      return false;
+    }
   }
 
   getWallet(): BarkWallet {

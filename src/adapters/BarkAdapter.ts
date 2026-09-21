@@ -48,8 +48,12 @@ function isLightningInvoice(value: string): boolean {
   return /^ln(bc|tb|bcrt|sb)/.test(body)
 }
 
-function isArkAddress(value: string): boolean {
-  return /^(ark|tark)1[0-9a-z]{6,}$/i.test(value.trim())
+/**
+ * Ask the bindings, never the prefix: Arkade mints `tark1…` too, and sending
+ * one of its addresses to this Ark's server would be a loss, not an error.
+ */
+function isBarkAddress(value: string): boolean {
+  return barkClientManager.isBarkAddress(value)
 }
 
 function formatSats(sats: number): string {
@@ -311,9 +315,9 @@ export class BarkAdapter implements IProtocolAdapter {
     if (!target) throw new ValidationError('A destination is required', 'BARK')
 
     if (isLightningInvoice(target)) return this.payLightning(target, request.amount)
-    if (isArkAddress(target)) return this.payArkoor(target, request.amount)
+    if (isBarkAddress(target)) return this.payArkoor(target, request.amount)
     throw new ValidationError(
-      'Unsupported bark destination: expected a bolt11 invoice or an ark address',
+      'Unsupported bark destination: expected a bolt11 invoice or a bark ark address',
       'BARK',
     )
   }

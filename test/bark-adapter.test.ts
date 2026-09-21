@@ -23,6 +23,13 @@ const INVOICE =
   'lntbs10u1p4tplctsp56ctf30jgccvj0xlm8egpw4h4jjakdusmvaxsguunx237dfsp6vlqpp5gda3p6a96u5wvj0klg3ddnuzf65r249ygjk7arfh3su8ykhr8kxsdqqxqy9gcqcqzpc9qyysgqtr8rql6jgxz2e0kcyztaxux46038xw0y2gfgmsxrkvkc6yscdw655suwjzl04zhn02v2w9t0ncv0jlr80cyqzdamsddjqx35mtrvx5qq77snxn'
 const PAYMENT_HASH = '437b10eba5d728e649f6fa22d6cf824ea83554a444adee8d378c38725ae33d8d'
 
+// Real addresses: the first from a bark wallet on ark.signet.2nd.dev, the
+// second minted by @arkade-os/sdk. Same `tark1` HRP, different payloads.
+const BARK_ADDRESS =
+  'tark1pem36wcfzqqpc0zgce9q3jqgnt3t7w54dz6gtzddt9awugjx25uduq7fnzvvvzvezqyp82sv47phqky46zwd44dfzy3m9uvqztvza9ljmnd583e7wztchvwqpjpewg'
+const ARKADE_ADDRESS =
+  'tark1qqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jqscqqsyqcyq5rqwzqfpg9scrgwpugpzysnzs23v9ccrydpk8qarc0jq5f04nj'
+
 function fakeWallet(overrides: Record<string, unknown> = {}) {
   return {
     free: vi.fn(),
@@ -74,7 +81,15 @@ const CONFIG: BarkConfig = {
 beforeEach(() => {
   wallet = fakeWallet()
   open = vi.fn().mockResolvedValue(wallet)
-  setBarkModuleLoader(async () => ({ Wallet: { open } }) as never)
+  // bark's own validator, standing in for the wasm: it takes this Ark's
+  // 75-byte payload and rejects Arkade's 65-byte one.
+  setBarkModuleLoader(
+    async () =>
+      ({
+        Wallet: { open },
+        validateArkAddress: (address: string) => address === BARK_ADDRESS,
+      }) as never,
+  )
   // The real bindings need all three; assertBarkRuntime fails loudly without them.
   ;(globalThis as Record<string, unknown>).indexedDB ??= {}
   ;(globalThis as Record<string, unknown>).Window ??= globalThis.constructor
@@ -169,14 +184,24 @@ describe('BarkAdapter payments', () => {
     expect(result.paymentHash).toBe(PAYMENT_HASH)
   })
 
-  it('routes an ark address to an arkoor payment and requires an amount', async () => {
+  it('routes a bark address to an arkoor payment and requires an amount', async () => {
     const adapter = new BarkAdapter()
     await adapter.connect(CONFIG as never)
-    const address = 'tark1pem36wcfzqqpc0zgce9q3jqgnt3t7w54dz6gtzddt9awugjx25uduq7fnz'
 
-    await expect(adapter.sendPayment({ invoice: address })).rejects.toThrow(/amount/i)
-    await adapter.sendPayment({ invoice: address, amount: 2_000 })
-    expect(wallet.sendArkoorPayment).toHaveBeenCalledWith(address, 2_000)
+    await expect(adapter.sendPayment({ invoice: BARK_ADDRESS })).rejects.toThrow(/amount/i)
+    await adapter.sendPayment({ invoice: BARK_ADDRESS, amount: 2_000 })
+    expect(wallet.sendArkoorPayment).toHaveBeenCalledWith(BARK_ADDRESS, 2_000)
+  })
+
+  it("refuses an Arkade address rather than sending it to this Ark's server", async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+
+    // Same HRP, different Ark. Routing on the prefix would lose the money.
+    await expect(
+      adapter.sendPayment({ invoice: ARKADE_ADDRESS, amount: 2_000 }),
+    ).rejects.toThrow(/Unsupported bark destination/)
+    expect(wallet.sendArkoorPayment).not.toHaveBeenCalled()
   })
 
   it('rejects a destination that is neither bolt11 nor an ark address', async () => {
