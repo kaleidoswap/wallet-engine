@@ -57,6 +57,9 @@ importers:
       '@kaleidorg/wdk-wallet-rln':
         specifier: ^1.0.0-beta.5
         version: 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)
+      '@secondts/bark':
+        specifier: ^0.24.0
+        version: 0.24.0
       '@tetherto/wdk-wallet-spark':
         specifier: ^1.0.0-beta.17
         version: 1.0.0-beta.24(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))(bare-url@2.5.2)(ws@8.21.3)
@@ -730,6 +733,9 @@ packages:
 
   '@scure/btc-signer@2.3.0':
     resolution: {integrity: sha512-05oEjx2l4VhT+CBGKqGqE+4R2n+XN7+z+vC5I0edzymHfmTZ8nrHvl0WGgPVaNPkOg/+elEhIB1gRROkunxCRg==}
+
+  '@secondts/bark@0.24.0':
+    resolution: {integrity: sha512-0cG2jaTAnz0u5hpTi3jbXUyKzRk9CIastgm44i+fHhA8wUjBh+H6NoWTSa6JDkidMqlpHwesLBuuNcH1tFajLA==}
 
   '@standard-schema/spec@1.1.0':
     resolution: {integrity: sha512-l2aFy5jALhniG5HgqrD6jXLi/rUWrKvqN/qJx6yoJsgKhblVd+iqqU4RCXavm/jPityDo5TCvKMnpjKnOriy0w==}
@@ -2837,6 +2843,8 @@ snapshots:
       '@noble/hashes': 2.3.0
       '@scure/base': 2.3.0
       micro-packed: 0.11.0
+
+  '@secondts/bark@0.24.0': {}
 
   '@standard-schema/spec@1.1.0': {}
 

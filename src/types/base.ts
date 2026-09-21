@@ -6,13 +6,16 @@
 // Protocol names
 // 'RGB_LN' = RGB over an rgb-lightning-node (BTC L1/LN + RGB L1/LN, swaps).
 // 'RGB_L1' = RGB on-chain only, backed by rgb-lib locally (no Lightning).
-export type ProtocolType = 'RGB_LN' | 'RGB_L1' | 'SPARK' | 'ARKADE' | 'BTC' | 'LIQUID'
+// 'ARKADE' = Ark via @arkade-os/sdk; 'BARK' = Ark via @secondts/bark. Separate
+// servers with no interop, and both mint `tark1…` addresses.
+export type ProtocolType = 'RGB_LN' | 'RGB_L1' | 'SPARK' | 'ARKADE' | 'BARK' | 'BTC' | 'LIQUID'
 
 // Layer types
 export type Layer =
   | 'BTC_L1'          // Bitcoin onchain
   | 'BTC_LN'          // Bitcoin Lightning
   | 'BTC_ARKADE'      // Bitcoin Arkade
+  | 'BTC_BARK'        // Bitcoin on Second's Ark (bark)
   | 'BTC_SPARK'       // Bitcoin Spark
   | 'BTC_LIQUID'      // L-BTC on Liquid
   | 'RGB_L1'          // RGB onchain

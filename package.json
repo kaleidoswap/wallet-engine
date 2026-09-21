@@ -19,6 +19,10 @@
       "types": "./dist/adapters/arkade.d.ts",
       "default": "./dist/adapters/arkade.js"
     },
+    "./adapters/bark": {
+      "types": "./dist/adapters/bark.d.ts",
+      "default": "./dist/adapters/bark.js"
+    },
     "./adapters/spark": {
       "types": "./dist/adapters/spark.d.ts",
       "default": "./dist/adapters/spark.js"
@@ -100,6 +104,7 @@
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.3",
     "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.9",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.5",
+    "@secondts/bark": "^0.24.0",
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
     "@utexo/rgb-lib-wasm": "^1.0.0-beta.3",
     "@utexo/wdk-wallet-rgb": "^2.0.3",
@@ -130,6 +135,9 @@
     "@kaleidorg/wdk-wallet-rln": {
       "optional": true
     },
+    "@secondts/bark": {
+      "optional": true
+    },
     "@tetherto/wdk-wallet-spark": {
       "optional": true
     },
@@ -152,6 +160,7 @@
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.3",
     "@kaleidorg/wdk-wallet-liquid": "1.0.0-beta.9",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.5",
+    "@secondts/bark": "^0.24.0",
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
     "@utexo/wdk-wallet-rgb": "^2.0.3",
     "fast-check": "^4.9.0",
