@@ -404,6 +404,58 @@ export class BarkAdapter implements IProtocolAdapter {
   }
 
   // ==========================================================================
+  // Boarding (IBarkOperations)
+  // ==========================================================================
+
+  async boardFundingAddress(): Promise<{
+    address: string
+    expiryHeight: number
+    keypairIndex: number
+  }> {
+    const info = await this.wallet().boardFundingAddress()
+    return {
+      address: info.address,
+      // The boarding output stops being spendable by the server at this
+      // height; a host that shows the address should say so.
+      expiryHeight: info.expiryHeight,
+      keypairIndex: info.keypairIndex,
+    }
+  }
+
+  async boardAmount(amountSats: number): Promise<Record<string, unknown>> {
+    if (!amountSats || amountSats <= 0) {
+      throw new ValidationError('Boarding requires an amount in sats', 'BARK')
+    }
+    const terms = await this.boardingTerms()
+    if (amountSats < terms.minBoardAmountSats) {
+      throw new ValidationError(
+        `The Bark server takes boards of at least ${terms.minBoardAmountSats} sats`,
+        'BARK',
+      )
+    }
+    return (await this.wallet().boardAmount(amountSats)) as unknown as Record<string, unknown>
+  }
+
+  async boardAll(): Promise<Record<string, unknown>> {
+    return (await this.wallet().boardAll()) as unknown as Record<string, unknown>
+  }
+
+  async pendingBoards(): Promise<Record<string, unknown>[]> {
+    return (await this.wallet().pendingBoards()) as unknown as Record<string, unknown>[]
+  }
+
+  async boardingTerms(): Promise<{ minBoardAmountSats: number; requiredConfirmations: number }> {
+    const info = await this.wallet().arkInfo()
+    if (!info) {
+      throw new ProtocolError('Bark server unreachable — boarding terms unknown', 'BARK')
+    }
+    return {
+      minBoardAmountSats: info.minBoardAmountSats,
+      requiredConfirmations: info.requiredBoardConfirmations,
+    }
+  }
+
+  // ==========================================================================
   // Node info / swaps
   // ==========================================================================
 

@@ -36,6 +36,7 @@ export {
   type IBackupOperations,
   type ISparkOperations,
   type IArkadeOperations,
+  type IBarkOperations,
   type ISwapOperations,
   type ISwapRecoveryOperations,
   type IExtensibleAdapter,
@@ -48,6 +49,7 @@ export {
   asBackupOperations,
   asSparkOperations,
   asArkadeOperations,
+  asBarkOperations,
   ProtocolAdapterRegistry,
 } from './adapters/IProtocolAdapter'
 

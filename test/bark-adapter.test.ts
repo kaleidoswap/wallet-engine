@@ -43,8 +43,15 @@ function fakeWallet(overrides: Record<string, unknown> = {}) {
       roundIntervalSecs: 300,
       vtxoLifetime: 144,
       minBoardAmountSats: 10_000,
+      requiredBoardConfirmations: 1,
     }),
     newAddress: vi.fn().mockResolvedValue('tark1pem36wcfzqqp'),
+    boardFundingAddress: vi
+      .fn()
+      .mockResolvedValue({ address: 'tb1pboard', expiryHeight: 323_206, keypairIndex: 5 }),
+    boardAmount: vi.fn().mockResolvedValue({ id: 1 }),
+    boardAll: vi.fn().mockResolvedValue({ id: 2 }),
+    pendingBoards: vi.fn().mockResolvedValue([]),
     history: vi.fn().mockResolvedValue([]),
     bolt11Invoice: vi
       .fn()
@@ -210,6 +217,38 @@ describe('BarkAdapter payments', () => {
     await expect(
       adapter.sendPayment({ invoice: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' }),
     ).rejects.toThrow(/Unsupported bark destination/)
+  })
+})
+
+describe('BarkAdapter boarding', () => {
+  it('hands back the funding address with the height its output expires', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+
+    const info = await adapter.boardFundingAddress!()
+    expect(info.address).toBe('tb1pboard')
+    expect(info.expiryHeight).toBe(323_206)
+  })
+
+  it("refuses a board under the server's minimum instead of letting it fail there", async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+
+    await expect(adapter.boardAmount!(5_000)).rejects.toThrow(/at least 10000 sats/)
+    expect(wallet.boardAmount).not.toHaveBeenCalled()
+
+    await adapter.boardAmount!(10_000)
+    expect(wallet.boardAmount).toHaveBeenCalledWith(10_000)
+  })
+
+  it('reports the terms a host has to show before boarding', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+
+    expect(await adapter.boardingTerms!()).toEqual({
+      minBoardAmountSats: 10_000,
+      requiredConfirmations: 1,
+    })
   })
 })
 
