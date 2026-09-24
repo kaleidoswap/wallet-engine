@@ -244,7 +244,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
     // synced again — two full indexer round-trips, ~2× the cold-sync wait.
     await this.account.sync?.(this.online)
-    await this.account.refresh?.(this.online, null, [], true)
+    const result = await this.account.refresh?.(this.online, null, [], true)
+    // rgb-lib reports a transfer it cannot advance as a per-transfer `failure`,
+    // not a throw; unlogged, a receive that never settles leaves no trace (#108).
+    for (const [idx, t] of refreshEntries(result)) {
+      if (t?.failure != null) {
+        console.warn(`[RGB-L1] refresh could not advance transfer batch ${idx}:`, describeRgbLibError(t.failure))
+      }
+    }
     // Flush or the settled-transfer promotion lives only in memory and is lost
     // on the next MV3 cold start, resurfacing as stale balances on the next send.
     await this.flushState()
@@ -442,7 +449,30 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
     this.assertConnected()
-    return this.account.listTransfers(options?.asset_id ?? null)
+    if (options?.asset_id) return this.account.listTransfers(options.asset_id)
+    return this.listAllTransfers()
+  }
+
+  /**
+   * Every transfer the wallet knows. rgb-lib's `listTransfers(null)` is not "all":
+   * it returns only transfers with no asset, and a blank-invoice receive leaves
+   * that set as soon as its consignment validates and gets an asset id (#107).
+   * Asset rows carry no asset id of their own, so tag them with it.
+   */
+  private async listAllTransfers(): Promise<any[]> {
+    const rows = (raw: any): any[] => (Array.isArray(raw) ? raw : raw?.transfers ?? [])
+    const res: any = await this.account.listAssets([])
+    const assets: any[] = Array.isArray(res) ? res : [...(res?.nia ?? []), ...(res?.ifa ?? [])]
+    const out: any[] = []
+    for (const a of assets) {
+      const assetId = normalizeAsset(a).asset_id
+      if (!assetId) continue
+      for (const t of rows(await this.account.listTransfers(assetId))) {
+        out.push({ ...t, assetId: t?.assetId ?? t?.asset_id ?? assetId })
+      }
+    }
+    out.push(...rows(await this.account.listTransfers(null)))
+    return out
   }
 
   // --- RGB-specific hooks (used by the RGB host surface) ------------------
@@ -699,8 +729,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
     this.assertConnected()
     const needle = String(params.invoice ?? '')
-    const raw: any = await this.account.listTransfers(null)
-    const transfers: any[] = Array.isArray(raw) ? raw : raw?.transfers ?? []
+    const transfers = await this.listAllTransfers()
     const match = transfers.find((t) => {
       const fields = [t?.recipientId, t?.recipient_id, t?.invoiceString, t?.invoice_string, t?.invoice]
       return fields.some((f) => f && String(f) === needle)
@@ -989,6 +1018,23 @@ function normalizeAssetBalance(a: any): RgbBalanceLike | undefined {
     spendable: a.spendable ?? a.available,
     offchain_outbound: a.offchain_outbound ?? a.offchainOutbound ?? a.locked,
     offchain_inbound: a.offchain_inbound ?? a.offchainInbound,
+  }
+}
+
+/** rgb-lib's RefreshResult: a `Map` from serde-wasm-bindgen, or a plain object. */
+function refreshEntries(result: unknown): Array<[string, any]> {
+  if (result instanceof Map) return [...result.entries()].map(([k, v]) => [String(k), v])
+  if (result && typeof result === 'object') return Object.entries(result)
+  return []
+}
+
+/** A serialized rgb-lib `Error` (`"Variant"` or `{ Variant: { details } }`) as one line. */
+function describeRgbLibError(failure: unknown): string {
+  if (typeof failure === 'string') return failure
+  try {
+    return JSON.stringify(failure, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+  } catch {
+    return String(failure)
   }
 }
 
