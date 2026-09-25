@@ -27,7 +27,7 @@ beforeEach(() => {
   initCalls = 0
   ;(kaleidoClientManager as any).client = {
     maker: {
-      initSwap: async () => { initCalls++; return { swapstring: 's', payment_hash: 'h', access_token: 't' } },
+      initSwap: async () => { initCalls++; return { swapstring: '1000/btc/1000/USDT/1790000000/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', payment_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', access_token: 't' } },
       executeSwap: async () => ({ status: 200 }),
     },
     rln: { whitelistSwap: async () => {}, getTakerPubkey: async () => 'pk' },
@@ -62,7 +62,7 @@ describe('B-F2: a non-finite quote expiry must fail closed', () => {
 
   it('a valid unexpired quote still executes', async () => {
     const r = await adapter().executeSwap(quote({}))
-    expect(r.paymentHash).toBe('h')
+    expect(r.paymentHash).toBe('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa')
     expect(initCalls).toBe(1)
   })
 })

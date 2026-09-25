@@ -6,6 +6,7 @@ import { loadWdkModule } from '../adapters/wdk/moduleLoader'
 import {
   toSwapAmount as toAmount,
   validateSwapQuoteTerms,
+  verifySwapstring,
 } from '../lib/swap-money'
 import {
   KaleidoswapSwapStore,
@@ -68,6 +69,8 @@ export class KaleidoswapSwap {
   private readonly store: KaleidoswapSwapStore
   /** Hot cache only; the record store remains authoritative across restarts. */
   private readonly accessTokenCache = new Map<string, string>()
+  /** Approved terms of the swaps currently executing, keyed by rfq id. */
+  private readonly approvedInFlight = new Map<string, Quote>()
 
   /**
    * @param account a connected WDK RLN account (whitelists the swap HTLC on the
@@ -84,7 +87,7 @@ export class KaleidoswapSwap {
       // @ts-ignore — declared as a workspace/optional dep; resolved at runtime.
       const mod = await loadWdkModule('@kaleidorg/wdk-protocol-swap-kaleidoswap', () => import('@kaleidorg/wdk-protocol-swap-kaleidoswap'))
       const KaleidoswapProtocol = mod.default ?? mod
-      const proto = new KaleidoswapProtocol(this.account, { baseUrl: this.config.baseUrl })
+      const proto = new KaleidoswapProtocol(this.guardedAccount(), { baseUrl: this.config.baseUrl })
       this.proto = proto
       return proto
     })()
@@ -94,6 +97,40 @@ export class KaleidoswapSwap {
     } finally {
       if (this.protoPromise === pending) this.protoPromise = null
     }
+  }
+
+  /**
+   * The swap module whitelists the maker's swapstring on the node itself, so the
+   * account it receives refuses any swapstring that no in-flight approval matches.
+   */
+  private guardedAccount(): any {
+    const account = this.account
+    const approvedInFlight = this.approvedInFlight
+    return new Proxy(account, {
+      get(target, prop) {
+        if (prop === 'atomicTaker') {
+          return async (swapstring: string) => {
+            const approvals = [...approvedInFlight.values()]
+            let refusal: unknown = new ProtocolError(
+              'Maker swapstring does not match the approved quote: no swap is executing',
+              'RGB_LN',
+              'SWAPSTRING_MISMATCH',
+            )
+            for (const approved of approvals) {
+              try {
+                verifySwapstring(swapstring, approved)
+                return target.atomicTaker(swapstring)
+              } catch (error) {
+                refusal = error
+              }
+            }
+            throw refusal
+          }
+        }
+        const value = Reflect.get(target, prop, target)
+        return typeof value === 'function' ? value.bind(target) : value
+      },
+    })
   }
 
   async getQuote(req: SwapQuoteRequest): Promise<Quote> {
@@ -132,9 +169,9 @@ export class KaleidoswapSwap {
   }
 
   /**
-   * Execute an approved quote as an atomic swap. The maker binds execution to the
-   * rfqId and exact raw amounts passed here — no server-side re-quote, so both legs
-   * settle at what the user approved or the swap fails with no funds moved.
+   * Execute an approved quote as an atomic swap. The maker-supplied swapstring is
+   * checked against the approval before the node whitelists it (guardedAccount),
+   * so both legs settle at what the user approved or the swap is refused.
    */
   async executeSwap(quote: Quote): Promise<SwapResult> {
     if (!quote?.id) {
@@ -182,6 +219,7 @@ export class KaleidoswapSwap {
       })
       await this.store.update(quote.id, { state: 'executing', updatedAt: kaleidoswapNow() })
       let r: RawSwap
+      this.approvedInFlight.set(quote.id, quote)
       try {
         r = await proto.swap({
           rfqId: quote.id,
@@ -191,8 +229,14 @@ export class KaleidoswapSwap {
           tokenOutAmount: quote.toAmount,
         })
       } catch (error) {
-        await this.store.update(quote.id, { state: 'execution_unknown', updatedAt: kaleidoswapNow() })
+        const refused = error instanceof ProtocolError && error.code === 'SWAPSTRING_MISMATCH'
+        await this.store.update(quote.id, {
+          state: refused ? 'failed' : 'execution_unknown',
+          updatedAt: kaleidoswapNow(),
+        })
         throw error
+      } finally {
+        this.approvedInFlight.delete(quote.id)
       }
       await this.store.update(quote.id, {
         paymentHash: r.paymentHash,

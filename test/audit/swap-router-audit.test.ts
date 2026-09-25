@@ -232,7 +232,7 @@ describe('F4: partial failure after initSwap discards payment_hash + access_toke
   it('maker.executeSwap rejects after init+whitelist -> nothing about the live swap is retained', async () => {
     const adapter = rgbAdapterWithClient({
       maker: {
-        initSwap: async () => ({ swapstring: 'ss', payment_hash: 'ph-live', access_token: 'tok-live' }),
+        initSwap: async () => ({ swapstring: '100000/rgb:USDT/5000/btc/1790000000/dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', payment_hash: 'dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd', access_token: 'tok-live' }),
         // Server accepted execution but the response was lost (timeout).
         executeSwap: async () => {
           throw new Error('socket timeout after server accepted execution')
