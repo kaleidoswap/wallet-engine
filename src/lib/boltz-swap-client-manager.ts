@@ -1,7 +1,7 @@
 /**
  * Boltz Swap Client Manager
  *
- * Singleton owning the `@kaleidorg/swap-sdk` wasm module and one `BoltzClient`
+ * Singleton owning the `@kaleidorg/swap-sdk` wasm module and one `SwapClient`
  * pointed at a KaleidoSwap maker (`/v2`). This is the cross-chain rail — BTC <->
  * L-BTC — distinct from the RFQ rail in `swap/KaleidoswapSwap`.
  *
@@ -47,7 +47,7 @@ export interface BoltzClientConfig {
 /** The subset of the SDK module surface this engine uses. */
 export interface BoltzSdkModule {
   init(input?: unknown): Promise<void>;
-  BoltzClient: {
+  SwapClient: {
     new (baseUrl: string, timeoutSecs?: bigint | null): BoltzClientLike;
     forNetwork(network: string): BoltzClientLike;
   };
@@ -100,7 +100,7 @@ export interface SwapMasterKeyLike {
 const PACKAGE_NAME = "@kaleidorg/swap-sdk";
 
 /**
- * Default maker per network, mirroring the SDK's `BoltzClient.forNetwork`.
+ * Default maker per network, mirroring the SDK's `SwapClient.forNetwork`.
  * Duplicated because claim/refund `TxParams` need the base URL as a string and the
  * client does not expose the one it resolved. "mainnet"/"testnet" are absent on
  * purpose: no KaleidoSwap maker runs there, and a default must never fall back to
@@ -163,11 +163,11 @@ class BoltzSwapClientManager {
       const mod: BoltzSdkModule = await loadWdkModule(PACKAGE_NAME, () => import(PACKAGE_NAME));
       await mod.init(config.wasmInput);
       const client = config.baseUrl
-        ? new mod.BoltzClient(
+        ? new mod.SwapClient(
             config.baseUrl,
             config.timeoutSecs == null ? null : BigInt(config.timeoutSecs),
           )
-        : mod.BoltzClient.forNetwork(config.network);
+        : mod.SwapClient.forNetwork(config.network);
       // dispose() may have run while the wasm was loading — discard if so.
       if (generation !== this._generation) {
         client.free?.();
