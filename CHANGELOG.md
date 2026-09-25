@@ -12,8 +12,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   swap-sdk 0.9 renamed `BoltzClient` to `SwapClient` and the claim/refund
   `boltzBaseUrl` field to `makerBaseUrl`, with no aliases, so the engine can no
   longer load 0.7 or earlier. Hosts on swap-sdk < 0.9 must upgrade it alongside
-  this release. The engine's own `BoltzClientConfig`, `BoltzClientLike` and
-  `boltzSwapClientManager` keep their names.
+  this release. Built and tested against 0.10.0, whose TypeScript surface
+  matches 0.9 apart from the added `./pay-through` subpath. The engine's own
+  `BoltzClientConfig`, `BoltzClientLike` and `boltzSwapClientManager` keep
+  their names.
 
 ## [1.0.0-beta.72] - 2026-09-21
 
