@@ -48,7 +48,7 @@ import {
 import { RgbConfig } from "../types/rgb";
 import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import { resolveRgbFeeRatePolicy, type FeeUrgency } from "../lib/rgb-fee-policy";
-import { toSwapAmount, validateSwapQuoteTerms } from "../lib/swap-money";
+import { toSwapAmount, validateSwapQuoteTerms, verifySwapstring } from "../lib/swap-money";
 import { mapPaymentStatus, mapSwapStatus } from "../lib/rgb-helpers";
 import { roundedMsatToSat, toSafeAmountNumber } from "../lightning/amounts";
 import { decodeBolt11, decodeBolt11Invoice } from "../lib/bolt11";
@@ -1117,9 +1117,6 @@ export class RgbAdapter implements IProtocolAdapter {
           { quoteId: rfqId, state: previous.state, paymentHash: previous.paymentHash },
         );
       }
-      // The maker binds the swap to the rfq_id and these exact raw amounts —
-      // there is no server-side re-quote, so the fill can never diverge from
-      // the approved quote on either leg.
       const init = await client.maker.initSwap({
         rfq_id: rfqId,
         from_asset: quote.fromAsset,
@@ -1127,6 +1124,9 @@ export class RgbAdapter implements IProtocolAdapter {
         to_asset: quote.toAsset,
         to_amount: quote.toAmount,
       });
+      // The swapstring and hash are maker-supplied: enforce the approved terms
+      // client-side before the node is told to accept an HTLC on them.
+      verifySwapstring(init.swapstring, quote, init.payment_hash);
 
       const createdAt = kaleidoswapNow();
       recordId = rfqId;
