@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { RgbLibWasmAdapter } from '../src/adapters/wdk/RgbLibWasmAdapter'
 import { createWdkRegistry } from '../src/registry/createWdkRegistry'
 
@@ -588,6 +588,74 @@ describe('RgbLibWasmAdapter', () => {
       const asset = await adapter.issueAssetNia({ ticker: 'MAX', name: 'Max', amounts: [Number.MAX_SAFE_INTEGER] })
       expect(asset.metadata?.issued_supply).toBe(Number.MAX_SAFE_INTEGER)
     })
+  })
+
+  /**
+   * #107: rgb-lib's `listTransfers(null)` returns only transfers with no asset.
+   * The fake below applies that filter, as rgb-lib does, to a blank-invoice
+   * receive whose consignment has validated and so gained an asset id.
+   */
+  describe('transfers across assets (#107)', () => {
+    const invoice = 'rgb:~/~/~/bc:utxob:recv-1'
+    const db = [
+      { assetId: 'rgb:NIA', idx: 1, status: 2, recipientId: 'utxob:recv-1', invoiceString: invoice },
+      { assetId: 'rgb:NIA', idx: 2, status: 2, recipientId: 'utxob:other' },
+      { assetId: null, idx: 3, status: 0, recipientId: 'utxob:blank' },
+    ]
+    const account = () => {
+      const calls: unknown[] = []
+      return {
+        calls,
+        listAssets: () => ({ nia: [{ assetId: 'rgb:NIA', precision: 0 }], ifa: [] }),
+        listTransfers: (assetId: string | null) => {
+          calls.push(assetId)
+          return db.filter((t) => t.assetId === assetId).map(({ assetId: _a, ...row }) => row)
+        },
+      }
+    }
+
+    it('getInvoiceStatus still finds a blank-invoice receive once it has an asset id', async () => {
+      const adapter = connected(account())
+      const res: any = await adapter.getInvoiceStatus({ invoice })
+      expect(res.status).toBe(2)
+      expect(res.transfer.idx).toBe(1)
+    })
+
+    it('listTransfers() with no asset returns every asset and asset-less transfer, tagged', async () => {
+      const acc = account()
+      const rows: any = await connected(acc).listTransfers()
+      expect(rows.map((t: any) => t.idx).sort()).toEqual([1, 2, 3])
+      expect(rows.find((t: any) => t.idx === 1).assetId).toBe('rgb:NIA')
+      expect(acc.calls).toEqual(['rgb:NIA', null])
+    })
+
+    it('listTransfers({ asset_id }) stays a single filtered call', async () => {
+      const acc = account()
+      const rows: any = await connected(acc).listTransfers({ asset_id: 'rgb:NIA' })
+      expect(rows.map((t: any) => t.idx)).toEqual([1, 2])
+      expect(acc.calls).toEqual(['rgb:NIA'])
+    })
+  })
+
+  // #108: a transfer rgb-lib cannot advance comes back as a failure, not a throw.
+  it('refreshBalances logs per-transfer refresh failures instead of dropping them', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    try {
+      const adapter = connected({
+        sync: async () => {},
+        refresh: async () =>
+          new Map([
+            [4, { updatedStatus: null, failure: { Internal: { details: 'consignment not found in memory' } } }],
+            [5, { updatedStatus: 2, failure: null }],
+          ]),
+      })
+      await adapter.refreshBalances()
+      expect(warn).toHaveBeenCalledTimes(1)
+      expect(String(warn.mock.calls[0][0])).toContain('batch 4')
+      expect(String(warn.mock.calls[0][1])).toContain('consignment not found in memory')
+    } finally {
+      warn.mockRestore()
+    }
   })
 })
 
