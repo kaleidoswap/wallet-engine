@@ -60,7 +60,7 @@ function installFakeSdk(overrides: Record<string, any> = {}) {
   manager.config = { network: 'regtest' }
   manager.sdk = {
     init: async () => undefined,
-    BoltzClient: {},
+    SwapClient: {},
     SwapScript: { fromChain: () => ({}) },
     SwapMasterKey: {
       fromWalletMnemonic: () => ({

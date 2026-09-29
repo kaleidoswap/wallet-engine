@@ -520,7 +520,7 @@ export class BoltzChainSwap {
       outputAddress: record.destinationAddress,
       swapId: record.swapId,
       keysSecretHex,
-      boltzBaseUrl: resolveBoltzBaseUrl(boltzSwapClientManager.getConfig()),
+      makerBaseUrl: resolveBoltzBaseUrl(boltzSwapClientManager.getConfig()),
       network: boltzSwapClientManager.getConfig().network,
       bitcoinEsploraUrl: this.config.bitcoinEsploraUrl,
       liquidEsploraUrl: this.config.liquidEsploraUrl,
