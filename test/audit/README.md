@@ -84,7 +84,7 @@ defect is *absent*.
 | `N` | the Arkade snapshot cache does NOT have the O6 defect that was fixed in the Spark balance cache (aac6ac6). | [`probe-N-arkade-snapshot-cache.test.ts`](./probe-N-arkade-snapshot-cache.test.ts) |
 | `N` | two swaps racing on one route / one quote. | [`probe-N-concurrent-swaps.test.ts`](./probe-N-concurrent-swaps.test.ts) |
 
-## Supporting tests (29)
+## Supporting tests (30)
 
 Audit-suite tests not named after a single finding.
 
@@ -97,6 +97,7 @@ Audit-suite tests not named after a single finding.
 | [`regression-arkade-intents-wallet-session.test.ts`](./regression-arkade-intents-wallet-session.test.ts) | — |
 | [`regression-EF1b-format-amount-range.test.ts`](./regression-EF1b-format-amount-range.test.ts) | — |
 | [`regression-packaging-prepare.test.ts`](./regression-packaging-prepare.test.ts) | — |
+| [`regression-swapstring-binding.test.ts`](./regression-swapstring-binding.test.ts) | — |
 | [`regression-wallet-session-guard.test.ts`](./regression-wallet-session-guard.test.ts) | — |
 | [`swap-router-audit.test.ts`](./swap-router-audit.test.ts) | — |
 | [`task-c-rgb-rln.test.ts`](./task-c-rgb-rln.test.ts) | — |

@@ -122,3 +122,57 @@ export function validateSwapQuoteTerms(
     toAmount,
   }
 }
+
+export interface ApprovedSwapTerms {
+  fromAsset: string
+  fromAmount: number
+  toAsset: string
+  toAmount: number
+}
+
+const normalizeSwapAsset = (asset: string) => (asset.toLowerCase() === 'btc' ? 'btc' : asset)
+
+/**
+ * The swapstring is what the taker's node whitelists, so it is the only place
+ * the approved terms can be enforced: the maker returns it and the node knows
+ * nothing about the quote. Refuse anything that differs from the approval.
+ * `paymentHash`, when given, must match the hash the maker returned on init.
+ */
+export function verifySwapstring(
+  swapstring: unknown,
+  approved: ApprovedSwapTerms,
+  paymentHash?: string,
+): void {
+  const mismatch = (reason: string): never => {
+    throw new ProtocolError(
+      `Maker swapstring does not match the approved quote: ${reason}`,
+      'RGB_LN',
+      'SWAPSTRING_MISMATCH',
+      { reason },
+    )
+  }
+  if (typeof swapstring !== 'string') return mismatch('swapstring is missing')
+  const parts = swapstring.split('/')
+  if (parts.length !== 6) return mismatch(`expected 6 fields, got ${parts.length}`)
+  const [qtyFrom, fromAsset, qtyTo, toAsset, expiry, hash] = parts
+  const sameAmount = (actual: string, expected: number) =>
+    /^[0-9]+$/.test(actual) && BigInt(actual) === BigInt(expected)
+
+  if (!sameAmount(qtyFrom, approved.fromAmount)) {
+    mismatch(`from amount ${qtyFrom} != approved ${approved.fromAmount}`)
+  }
+  if (normalizeSwapAsset(fromAsset) !== normalizeSwapAsset(approved.fromAsset)) {
+    mismatch(`from asset ${fromAsset} != approved ${approved.fromAsset}`)
+  }
+  if (!sameAmount(qtyTo, approved.toAmount)) {
+    mismatch(`to amount ${qtyTo} != approved ${approved.toAmount}`)
+  }
+  if (normalizeSwapAsset(toAsset) !== normalizeSwapAsset(approved.toAsset)) {
+    mismatch(`to asset ${toAsset} != approved ${approved.toAsset}`)
+  }
+  if (!/^[0-9]+$/.test(expiry)) mismatch('expiry is not a timestamp')
+  if (!/^[0-9a-f]{64}$/i.test(hash)) mismatch('payment hash is malformed')
+  if (paymentHash !== undefined && hash.toLowerCase() !== paymentHash.toLowerCase()) {
+    mismatch('payment hash differs from the one returned on init')
+  }
+}
