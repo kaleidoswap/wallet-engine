@@ -17,6 +17,10 @@ export interface BarkConfig extends Omit<BaseProtocolConfig, 'network'> {
   /** Chain source. The SDK has no default — omitting it fails at open. */
   esploraUrl?: string
   network?: 'mainnet' | 'signet'
+  /** Required by the React Native adapter; unused by the browser backend. */
+  dataDir?: string
+  /** Native backend: opening defaults to an existing wallet. */
+  createIfMissing?: boolean
   /**
    * IndexedDB database name. Defaults to bark's own fingerprint-derived name.
    * Set it per wallet: `Wallet.open` does NOT check the mnemonic against the

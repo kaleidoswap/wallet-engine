@@ -331,81 +331,97 @@ Native fallback adapters remain available alongside the WDK-backed ones.
 [MIT](LICENSE)
 
 
-## Bark on React Native (initial backend)
+## Bark on React Native
 
-The opt-in `@kaleidorg/wallet-engine/backends/bark-react-native` entry point wraps
-Second's on-device Bark wallet. It currently supports opening or explicitly
-creating a wallet, recovery status, categorized balances, movement history, Ark
-receiving addresses, manual sync, Ark payments, and shutdown. It is a backend
-foundation, **not yet an `IProtocolAdapter`**: it is not registered with
-`ProtocolManager` or the cross-protocol router. Arkade remains a separate backend.
+Import `BarkReactNativeAdapter` from
+`@kaleidorg/wallet-engine/adapters/bark-react-native` for an on-device Bark wallet.
+It implements the same `BARK` protocol as the browser `BarkAdapter`, using the
+native UniFFI SDK and SQLite instead of WASM and IndexedDB. Its entry point stays
+separate from the browser binding and loads native code only during `connect()`.
 
-Install `@secondts/bark-react-native@0.25.0` in the **host app**. For Expo, add
-`@secondts/bark-react-native` to `expo.plugins` and rebuild the native app. The
-published package requires React Native 0.75+ (Expo SDK 52+), New Architecture,
-and Hermes; Expo Go does not support it. See [Second's React Native guide](https://second.tech/docs/bark-sdk/react-native)
-and the [published SDK](https://www.npmjs.com/package/@secondts/bark-react-native/v/0.25.0).
-The implementation targets the published `Wallet.open` API; older quickstart
-examples using `Wallet.create` do not match this pinned version.
+Install `@secondts/bark-react-native@0.25.0` in the host app, add the
+`@secondts/bark-react-native` Expo plugin, and rebuild the native app. The package
+requires New Architecture and Hermes (React Native 0.75+); Expo Go is unsupported.
+See [Second's React Native guide](https://second.tech/docs/bark-sdk/react-native).
+This integration targets the published `Wallet.open` API; the older
+`Wallet.create` quickstart is not compatible with this pinned version.
 
 ```ts
-import { BarkReactNativeBackend } from '@kaleidorg/wallet-engine/backends/bark-react-native'
+import { ProtocolManager } from '@kaleidorg/wallet-engine'
+import { BarkReactNativeAdapter } from '@kaleidorg/wallet-engine/adapters/bark-react-native'
 
-const bark = new BarkReactNativeBackend()
-await bark.connect({
+// Alternatively, supply the runtime once through setPlatform().
+const bark = new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } })
+const manager = new ProtocolManager()
+manager.registerAdapter(bark)
+await manager.connect('BARK', {
+  protocol: 'BARK',
   network: 'signet',
-  serverUrl: 'https://ark.signet.2nd.dev',
+  arkServerUrl: 'https://ark.signet.2nd.dev',
   esploraUrl: 'https://esplora.signet.2nd.dev',
   dataDir,  // existing app-private absolute path, supplied by the host
-  mnemonic, // read from the host's secure storage; never log it
-  createIfMissing: true, // use only when explicitly initializing/restoring locally
+  mnemonic, // retrieved from secure storage; never log it
+  createIfMissing: true, // explicit local initialization/recovery only
 })
-
-const info = await bark.getWalletInfo() // includes recovery completeness
-await bark.sync()
-const address = await bark.getReceiveAddress()
-const balance = await bark.getBalance()
-// Show balance.spendableSats as spendable; keep pending categories separate.
-
-// Call only after the host has authorized this destination and amount:
-// await bark.sendArkPayment({ address: recipientArkAddress, amountSats: 1000 })
-
-await bark.disconnect()
+await manager.setActiveProtocol('BARK')
+const address = await manager.getReceiveAddress()
+const invoice = await manager.createInvoice({ amount: 1000, layer: 'BTC_LN' })
 ```
 
-The host creates and protects the directory, stores the mnemonic securely, and
-backs up the wallet database. Do not open the same directory from another JS
-runtime, another native handle, or a symlink alias. Opening defaults to an existing
-wallet; errors never trigger a create/recovery fallback. A recovery result of
-`incomplete` or `failed` means the displayed balance may omit funds. Native code
-loads only on `connect()`, and never through the engine root barrel.
+Supported operations:
 
-No daemon starts automatically. The host explicitly calls `sync()` to process
-incoming payments and progress pending Bark operations. Balance/history reads do
-not sync, fund, board, refresh VTXOs, or broadcast payments. Disconnect waits for
-queued operations and native shutdown; if shutdown fails, retry disconnect before
-reopening. The backend does not retain the supplied mnemonic after opening;
-the native SDK owns the wallet keys for its lifetime.
+- **Ark and Lightning:** native Ark addresses, BOLT11 invoices, sends, status,
+  categorized balances and history. The native SDK checks an Ark destination's
+  network and server before payment. BOLT11 and Bitcoin destinations include
+  BARK in router candidates. Ark and Arkade share address prefixes, so direct
+  Ark sends must select the account explicitly; a prefix cannot select a server.
+- **Boarding:** `bark.backend.getOnchainAddress()` supplies a BDK funding address.
+  Fund it explicitly, call `syncOnchain()`, then `bark.boardAmount(sats)` or
+  `boardAll()`. `boardingTerms()` and `pendingBoards()` expose server terms and
+  pending results. `boardFundingAddress()` is the separate board output address;
+  it is not the BDK wallet's deposit address. Use `getOnchainBalance()` to display
+  BDK funds separately from Ark balances. `restoreOnchain()` explicitly scans
+  existing on-chain history after seed restoration.
+- **Offboarding and recovery:** `bark.backend.offboard(address, vtxoIds)`,
+  `refreshVtxos(vtxoIds)`, `progressPendingRounds()`, `startExit(vtxoIds)`,
+  `progressExits(feeRate?)`, `getVtxos()`, `getPendingRounds()`, `getExitStatus()`,
+  and `recoverVtxos(vtxoIds)`. Empty selections are rejected. `prepareExitClaim`
+  signs selected claims and returns transaction hex plus its fee; broadcast
+  separately through `bark.broadcastTransaction` after host authorization.
+- **Fees:** `bark.backend.estimatePaymentFee(kind, sats, address?)` supplies an
+  estimate for Ark, Lightning, or on-chain sends. It is not an enforceable cap.
+  Payment `maxFeeSats`, custom invoice expiry, and on-chain send fee-rate overrides
+  are rejected because these SDK methods cannot honor them.
 
-`sendArkPayment` validates integer satoshis and asks the native SDK whether the
-address is deliverable on the selected network/server. Success returns
-`{ status: 'submitted', address, amountSats }`: Bark's arkoor call does not return a
-transaction id, payment hash, fee, or recipient receipt. A supplied `maxFeeSats`
-is rejected because this SDK method cannot enforce it. A native send error is
-`PAYMENT_OUTCOME_UNKNOWN`; inspect `getHistory()` before deciding whether to retry.
-History exposes signed balance deltas and fees separately, not invented payment
-amounts. SDK exception details are withheld because they may contain secrets.
+The host authorizes each fund-moving operation. Raw adapter/backend access
+bypasses ProtocolManager policies; use the manager for ordinary sends and an
+explicit host authorization flow for boarding and lifecycle operations. A daemon
+never starts automatically. Call `bark.backend.sync()` while the app is active to
+process mailbox and Lightning state. Refreshing VTXOs and advancing exits require
+explicit lifecycle calls and must not be inferred from a balance read.
 
-Next steps are a Bark protocol adapter and routing identity, Lightning with fee
-and settlement handling, boarding/offboarding, VTXO refresh and exit/recovery
-controls, and device tests. These operations are not advertised by this backend.
-Unit tests use a mock native wallet; Android/iOS native loading and live signet
-payments still require validation in a development build.
+A Lightning send starts with `wait: false`; call sync and poll status until it
+settles. A matching preimage is required to report it as confirmed. An Ark send
+returns pending with an empty payment hash because the SDK returns no receipt;
+reconcile it through history. `feeKnown: false` means the numeric fee placeholder
+is unavailable, not a zero-fee payment. A native error after submission is
+`PAYMENT_OUTCOME_UNKNOWN`; inspect wallet state before retrying.
 
-When upgrading the optional SDK, compile its structural contract fixture with
-that peer installed (no native code executes):
+Hosts own the directory, mnemonic storage and continuous wallet database backup.
+Never share a directory between wallets, runtimes or symlink aliases. Opening
+requires an existing wallet unless `createIfMissing` is explicit, and never
+retries by recreating it. `bark.backend.getWalletInfo()` reports recovery as
+complete, incomplete, failed, or not-run; incomplete/failed recovery can omit
+funds from displayed balances. Disconnect drains queued work before closing both
+native wallet handles. Retry failed disconnects before reopening.
 
-```sh
-npx tsc --noEmit --strict --skipLibCheck --target ES2020 --module ES2020 \
-  --moduleResolution bundler test/bark-native.types.ts
-```
+The lower-level `BarkReactNativeBackend` remains available from
+`@kaleidorg/wallet-engine/backends/bark-react-native`. Its `BarkReactNativeConfig`
+uses `serverUrl` and an optional `onchain` flag; the protocol adapter uses the
+shared `BarkConfig` (`arkServerUrl`) and always attaches BDK.
+
+Build and tests cover SDK type compatibility, conversions, payment proof checks,
+wallet lifecycle races, manager routing and import isolation. They mock native
+execution. Android/iOS native linking and funded signet flows have not been run
+in this repository session; this remains a beta release. Verify them in a native
+development build before using the new backend with funds.

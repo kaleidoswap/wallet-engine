@@ -7,6 +7,31 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.73] - 2026-10-01
+
+### Added
+- React Native Bark adapter at `adapters/bark-react-native`, backed by the
+  optional `@secondts/bark-react-native@0.25.0` peer. Registers with
+  ProtocolManager as BARK and shares domain behavior with the browser adapter.
+- On-device wallet lifecycle, BDK funding, boarding, Ark/BOLT11 payments,
+  payment status, fee estimates, categorized balances and history, explicit
+  offboarding, delegated VTXO refresh, exit preparation/progression and recovery.
+- Native SDK compatibility checks, import isolation and operation/lifecycle
+  regression tests. Test dependencies match Rate's React 19.1 / RN 0.81 line.
+
+### Fixed
+- Bark fee caps are rejected before payment when the SDK cannot enforce them.
+- Native payment results distinguish unavailable fees with `feeKnown: false`;
+  Lightning settlement requires a matching preimage. Uncertain native sends
+  are never retried automatically.
+- BARK participates in BOLT11 and Bitcoin destination routing. Direct Ark
+  addresses still require explicit account selection because Arkade shares
+  their prefix.
+
+Native device linking and funded signet flows remain unverified in this release;
+unit tests mock native execution. Hosts must authorize lifecycle operations and
+provide persistent private storage and continuous wallet backups.
+
 ## [1.0.0-beta.72] - 2026-09-21
 
 Boarding for Bark: the rail that funds the account from on-chain.

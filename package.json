@@ -1,6 +1,6 @@
 {
   "name": "@kaleidorg/wallet-engine",
-  "version": "1.0.0-beta.72",
+  "version": "1.0.0-beta.73",
   "packageManager": "pnpm@10.33.0",
   "description": "WDK-based multi-protocol wallet engine (Spark, RGB/RLN, Liquid, Arkade): IProtocolAdapter contract + WDK adapters, cross-protocol router, BIP321 unified receive, and lite/advanced disclosure.",
   "type": "module",
@@ -71,6 +71,10 @@
     "./backends/bark-react-native": {
       "types": "./dist/backends/bark-react-native.d.ts",
       "default": "./dist/backends/bark-react-native.js"
+    },
+    "./adapters/bark-react-native": {
+      "types": "./dist/adapters/bark-react-native.d.ts",
+      "default": "./dist/adapters/bark-react-native.js"
     }
   },
   "scripts": {
@@ -86,7 +90,8 @@
     "example:tour": "tsx examples/tour/tour.ts",
     "clean": "rm -rf dist",
     "prepare": "node scripts/prepare.mjs",
-    "prepublishOnly": "npm run build"
+    "prepublishOnly": "npm run build",
+    "check:bark-types": "tsc --noEmit --strict --skipLibCheck --target ES2020 --module ES2020 --moduleResolution bundler test/bark-native.types.ts"
   },
   "files": [
     "dist"
@@ -176,7 +181,10 @@
     "tsx": "^4.23.12",
     "typescript": "~5.9.3",
     "vite": "^7.3.1",
-    "vitest": "^4.1.10"
+    "vitest": "^4.1.10",
+    "@secondts/bark-react-native": "0.25.0",
+    "react": "19.1.4",
+    "react-native": "0.81.5"
   },
   "publishConfig": {
     "access": "public"

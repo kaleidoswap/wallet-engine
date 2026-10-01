@@ -12,6 +12,10 @@ export interface BarkReactNativeConfig {
   mnemonic: string
   /** Explicit opt-in to creating a wallet. Opening never falls back to recreation. */
   createIfMissing?: boolean
+  /** Attach Bark’s local BDK wallet for boarding and exit fee funding. */
+  onchain?: boolean
+  vtxoRefreshExpiryThreshold?: number
+  userAgent?: string
 }
 
 export interface BarkArkPaymentRequest {
@@ -63,4 +67,13 @@ export interface BarkMovement {
   paymentHash?: string
   sentToAddresses: string[]
   receivedOnAddresses: string[]
+}
+
+/** JSON-safe lifecycle details; native enum tags and fields are preserved. */
+export type BarkValue = null | boolean | string | number | BarkValue[] | { [key: string]: BarkValue }
+export interface BarkFeeEstimate {
+  grossAmountSats: number
+  netAmountSats: number
+  feeSats: number
+  vtxosSpent: string[]
 }
