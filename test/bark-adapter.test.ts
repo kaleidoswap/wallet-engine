@@ -169,6 +169,14 @@ describe('BarkAdapter balances', () => {
 })
 
 describe('BarkAdapter payments', () => {
+  it('rejects an unenforceable fee cap before calling either payment API', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG)
+    await expect(adapter.sendPayment({ invoice: INVOICE, maxFeeSats: 1 })).rejects.toThrow(/fee cap/)
+    expect(wallet.payLightningInvoice).not.toHaveBeenCalled()
+    expect(wallet.sendArkoorPayment).not.toHaveBeenCalled()
+  })
+
   it('reads the paid variant`s snake_case payment_hash', async () => {
     const adapter = new BarkAdapter()
     await adapter.connect(CONFIG as never)
@@ -215,7 +223,7 @@ describe('BarkAdapter payments', () => {
     const adapter = new BarkAdapter()
     await adapter.connect(CONFIG as never)
     await expect(
-      adapter.sendPayment({ invoice: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' }),
+      adapter.sendPayment({ invoice: 'not-a-payment-destination' }),
     ).rejects.toThrow(/Unsupported bark destination/)
   })
 })

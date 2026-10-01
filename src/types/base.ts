@@ -182,6 +182,8 @@ export interface KeysendRequest {
 }
 
 export interface PaymentResult {
+  /** False means fee is unavailable; do not display the numeric placeholder as a quote or final fee. */
+  feeKnown?: boolean
   paymentHash: string
   txid?: string
   preimage?: string

@@ -10,6 +10,8 @@
 // Types
 export * from './types/base'
 export * from './types/cross-l2'
+export type { BarkConfig, BarkBalance, BarkMaintenanceReport } from './types/bark.js'
+export type { BarkReactNativeConfig, BarkWalletInfo, BarkFeeEstimate, BarkValue } from './types/bark-native.js'
 export type { SparkConfig, SparkTransfer, SparkLightningInvoice, SparkLightningSend, SparkNodeInfo } from './types/spark'
 export type { ArkadeConfig, ArkadeVtxo, ArkadeBalance, ArkadeTransaction } from './types/arkade'
 export type { RgbConfig, RgbAssetMetadata, RgbChannel, RgbInvoice, RgbTransfer, KaleidoswapQuote, RgbNodeInfo, TradingPair } from './types/rgb'

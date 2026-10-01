@@ -55,6 +55,8 @@ jobs:
             const m = await import('@kaleidorg/wallet-engine');
             if (typeof m.classifyDestination !== 'function') { throw new Error('root barrel missing expected export'); }
             if (typeof m.asSimplicityOperations !== 'function') { throw new Error('root barrel missing Simplicity exports'); }
+            const native = await import('@kaleidorg/wallet-engine/adapters/bark-react-native');
+            if (typeof native.BarkReactNativeAdapter !== 'function') { throw new Error('native Bark entry missing'); }
             console.log('OK: root barrel imports in bare Node with', Object.keys(m).length, 'exports');
           "
 

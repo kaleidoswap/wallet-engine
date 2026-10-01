@@ -37,6 +37,9 @@ jobs:
       - name: Type-check + build (tsc)
         run: pnpm run build
 
+      - name: Check native Bark API compatibility
+        run: pnpm run check:bark-types
+
       - name: Test
         run: pnpm test
 

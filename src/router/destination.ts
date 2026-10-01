@@ -131,7 +131,7 @@ export function classifyDestination(raw: string): ClassifiedDestination {
       // On-chain BTC can be served by any protocol with a Bitcoin on-chain path.
       // LIQUID is excluded: it's a separate L1 and cannot settle a BTC address.
       // (An embedded `lightning=` fallback widens the route at the router layer.)
-      candidates: ['RGB_LN', 'RGB_L1', 'ARKADE', 'SPARK'],
+      candidates: ['RGB_LN', 'RGB_L1', 'ARKADE', 'SPARK', 'BARK'],
       lightningFallback,
       value: addr,
     }
@@ -142,7 +142,7 @@ export function classifyDestination(raw: string): ClassifiedDestination {
   }
 
   if (RE.bolt11.test(dest)) {
-    return { kind: 'BOLT11', layer: 'BTC_LN', format: 'BOLT11', candidates: ['RGB_LN', 'SPARK', 'ARKADE'], value: dest }
+    return { kind: 'BOLT11', layer: 'BTC_LN', format: 'BOLT11', candidates: ['RGB_LN', 'SPARK', 'ARKADE', 'BARK'], value: dest }
   }
 
   if (RE.lnurl.test(dest) || RE.lnAddress.test(dest)) {
@@ -172,7 +172,7 @@ export function classifyDestination(raw: string): ClassifiedDestination {
       kind: 'BTC_ONCHAIN',
       layer: 'BTC_L1',
       format: 'BTC_ADDRESS',
-      candidates: ['RGB_LN', 'RGB_L1', 'ARKADE', 'SPARK'], // protocols that can pay an on-chain BTC address
+      candidates: ['RGB_LN', 'RGB_L1', 'ARKADE', 'SPARK', 'BARK'], // protocols that can pay an on-chain BTC address
       value: dest,
     }
   }

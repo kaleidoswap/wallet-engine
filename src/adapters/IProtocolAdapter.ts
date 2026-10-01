@@ -37,6 +37,7 @@ import type { ProtocolCapability } from '../capabilities/operations'
 import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { RgbConfig } from '../types/rgb'
 import type { SparkConfig } from '../types/spark'
+import type { BarkConfig } from '../types/bark.js'
 import type { ArkadeConfig } from '../types/arkade'
 import type {
   LiquidPsetReview,
@@ -64,6 +65,7 @@ export type ProtocolConfig =
   | RgbConfig
   | SparkConfig
   | ArkadeConfig
+  | BarkConfig
   | (BaseProtocolConfig & Record<string, unknown>)
 
 // ===========================================================================
