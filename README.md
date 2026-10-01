@@ -329,3 +329,83 @@ Native fallback adapters remain available alongside the WDK-backed ones.
 ## License
 
 [MIT](LICENSE)
+
+
+## Bark on React Native (initial backend)
+
+The opt-in `@kaleidorg/wallet-engine/backends/bark-react-native` entry point wraps
+Second's on-device Bark wallet. It currently supports opening or explicitly
+creating a wallet, recovery status, categorized balances, movement history, Ark
+receiving addresses, manual sync, Ark payments, and shutdown. It is a backend
+foundation, **not yet an `IProtocolAdapter`**: it is not registered with
+`ProtocolManager` or the cross-protocol router. Arkade remains a separate backend.
+
+Install `@secondts/bark-react-native@0.25.0` in the **host app**. For Expo, add
+`@secondts/bark-react-native` to `expo.plugins` and rebuild the native app. The
+published package requires React Native 0.75+ (Expo SDK 52+), New Architecture,
+and Hermes; Expo Go does not support it. See [Second's React Native guide](https://second.tech/docs/bark-sdk/react-native)
+and the [published SDK](https://www.npmjs.com/package/@secondts/bark-react-native/v/0.25.0).
+The implementation targets the published `Wallet.open` API; older quickstart
+examples using `Wallet.create` do not match this pinned version.
+
+```ts
+import { BarkReactNativeBackend } from '@kaleidorg/wallet-engine/backends/bark-react-native'
+
+const bark = new BarkReactNativeBackend()
+await bark.connect({
+  network: 'signet',
+  serverUrl: 'https://ark.signet.2nd.dev',
+  esploraUrl: 'https://esplora.signet.2nd.dev',
+  dataDir,  // existing app-private absolute path, supplied by the host
+  mnemonic, // read from the host's secure storage; never log it
+  createIfMissing: true, // use only when explicitly initializing/restoring locally
+})
+
+const info = await bark.getWalletInfo() // includes recovery completeness
+await bark.sync()
+const address = await bark.getReceiveAddress()
+const balance = await bark.getBalance()
+// Show balance.spendableSats as spendable; keep pending categories separate.
+
+// Call only after the host has authorized this destination and amount:
+// await bark.sendArkPayment({ address: recipientArkAddress, amountSats: 1000 })
+
+await bark.disconnect()
+```
+
+The host creates and protects the directory, stores the mnemonic securely, and
+backs up the wallet database. Do not open the same directory from another JS
+runtime, another native handle, or a symlink alias. Opening defaults to an existing
+wallet; errors never trigger a create/recovery fallback. A recovery result of
+`incomplete` or `failed` means the displayed balance may omit funds. Native code
+loads only on `connect()`, and never through the engine root barrel.
+
+No daemon starts automatically. The host explicitly calls `sync()` to process
+incoming payments and progress pending Bark operations. Balance/history reads do
+not sync, fund, board, refresh VTXOs, or broadcast payments. Disconnect waits for
+queued operations and native shutdown; if shutdown fails, retry disconnect before
+reopening. The backend does not retain the supplied mnemonic after opening;
+the native SDK owns the wallet keys for its lifetime.
+
+`sendArkPayment` validates integer satoshis and asks the native SDK whether the
+address is deliverable on the selected network/server. Success returns
+`{ status: 'submitted', address, amountSats }`: Bark's arkoor call does not return a
+transaction id, payment hash, fee, or recipient receipt. A supplied `maxFeeSats`
+is rejected because this SDK method cannot enforce it. A native send error is
+`PAYMENT_OUTCOME_UNKNOWN`; inspect `getHistory()` before deciding whether to retry.
+History exposes signed balance deltas and fees separately, not invented payment
+amounts. SDK exception details are withheld because they may contain secrets.
+
+Next steps are a Bark protocol adapter and routing identity, Lightning with fee
+and settlement handling, boarding/offboarding, VTXO refresh and exit/recovery
+controls, and device tests. These operations are not advertised by this backend.
+Unit tests use a mock native wallet; Android/iOS native loading and live signet
+payments still require validation in a development build.
+
+When upgrading the optional SDK, compile its structural contract fixture with
+that peer installed (no native code executes):
+
+```sh
+npx tsc --noEmit --strict --skipLibCheck --target ES2020 --module ES2020 \
+  --moduleResolution bundler test/bark-native.types.ts
+```

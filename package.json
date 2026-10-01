@@ -63,7 +63,11 @@
       "types": "./dist/lightning/rln/index.d.ts",
       "default": "./dist/lightning/rln/index.js"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./backends/bark-react-native": {
+      "types": "./dist/backends/bark-react-native.d.ts",
+      "default": "./dist/backends/bark-react-native.js"
+    }
   },
   "scripts": {
     "build": "tsc && node scripts/fix-esm-extensions.mjs",
@@ -102,7 +106,8 @@
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
     "@utexo/rgb-lib-wasm": "^1.0.0-beta.3",
     "@utexo/wdk-wallet-rgb": "^2.0.3",
-    "kaleido-sdk": "^0.1.18"
+    "kaleido-sdk": "^0.1.18",
+    "@secondts/bark-react-native": "0.25.0"
   },
   "peerDependenciesMeta": {
     "@arkade-os/boltz-swap": {
@@ -142,6 +147,9 @@
       "optional": true
     },
     "kaleido-sdk": {
+      "optional": true
+    },
+    "@secondts/bark-react-native": {
       "optional": true
     }
   },
