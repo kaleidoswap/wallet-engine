@@ -24,6 +24,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - Native payment results distinguish unavailable fees with `feeKnown: false`;
   Lightning settlement requires a matching preimage. Uncertain native sends
   are never retried automatically.
+- Bark history separates payment amounts from fee-inclusive balance deltas and
+  preserves pending send direction before the delta settles.
 - BARK participates in BOLT11 and Bitcoin destination routing. Direct Ark
   addresses still require explicit account selection because Arkade shares
   their prefix.

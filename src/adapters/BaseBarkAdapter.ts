@@ -217,10 +217,14 @@ export class BaseBarkAdapter implements IProtocolAdapter {
   }
 
   private toUnifiedTransaction(movement: Movement, asset: UnifiedAsset): UnifiedTransaction {
-    const amount = movement.effectiveBalanceSats
+    const delta = movement.effectiveBalanceSats === 0
+      ? movement.intendedBalanceSats
+      : movement.effectiveBalanceSats
+    // Bark records net wallet deltas, including fees; transaction amounts do not.
+    const amount = delta < 0 ? Math.max(0, -delta - movement.offchainFeeSats) : delta
     return {
       id: String(movement.id),
-      type: amount >= 0 ? 'receive' : 'send',
+      type: delta >= 0 ? 'receive' : 'send',
       status: movementStatus(movement),
       timestamp: movementTimestamp(movement),
       amount: Math.abs(amount),
@@ -231,6 +235,8 @@ export class BaseBarkAdapter implements IProtocolAdapter {
       from: movement.receivedOnAddresses[0],
       to: movement.sentToAddresses[0],
       protocolData: {
+        balanceDeltaSats: movement.effectiveBalanceSats,
+        intendedBalanceDeltaSats: movement.intendedBalanceSats,
         subsystem: movement.subsystemName,
         subsystemKind: movement.subsystemKind,
         paymentHash: movement.paymentHash,

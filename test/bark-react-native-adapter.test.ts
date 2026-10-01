@@ -108,8 +108,15 @@ describe('native Bark adapter', () => {
     const [tx] = await adapter.listTransactions({ asset: 'BTC', status: 'confirmed' })
     expect(tx.protocolData?.paymentHash).toBe(TEST_PAYMENT_HASH)
     expect(tx.fee).toBe(2)
+    expect(tx.amount).toBe(1000)
+    expect(tx.protocolData?.balanceDeltaSats).toBe(-1002)
     expect(await adapter.listTransactions({ asset: 'OTHER' })).toEqual([])
     expect(() => JSON.stringify(tx)).not.toThrow()
+  })
+
+  it('preserves pending send direction before its balance delta settles', async () => {
+    f.wallet.history.mockResolvedValue([{ ...movement, status: 'pending', completedAt: undefined, effectiveBalanceSats: 0n }])
+    expect(await adapter.listTransactions()).toMatchObject([{ type: 'send', amount: 1000, fee: 2, status: 'pending' }])
   })
 
   it('creates an amount-bound Lightning invoice and passes its description', async () => {
