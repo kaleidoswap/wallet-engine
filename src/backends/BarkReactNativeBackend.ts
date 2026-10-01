@@ -1,9 +1,9 @@
 import { validateMnemonic } from '@scure/bip39'
 import { wordlist } from '@scure/bip39/wordlists/english'
-import { BarkBackendError } from '../types/bark.js'
+import { BarkBackendError } from '../types/bark-native.js'
 import type {
-  BarkConfig, BarkBalance, BarkArkPaymentRequest, BarkArkPaymentResult, BarkWalletInfo, BarkMovement,
-} from '../types/bark.js'
+  BarkReactNativeConfig, BarkBalance, BarkArkPaymentRequest, BarkArkPaymentResult, BarkWalletInfo, BarkMovement,
+} from '../types/bark-native.js'
 import { loadBarkNative } from './bark-native.js'
 import type { NativeBarkWallet } from './bark-native.js'
 
@@ -27,7 +27,7 @@ function delta(value: bigint): number {
   return value < 0n ? -sats(-value) : sats(value)
 }
 
-function endpoint(value: string, network: BarkConfig['network']): string {
+function endpoint(value: string, network: BarkReactNativeConfig['network']): string {
   let url: URL
   try { url = new URL(value) } catch { return validation('Bark endpoints must be absolute URLs') }
   if (url.username || url.password || url.hash || url.search ||
@@ -37,7 +37,7 @@ function endpoint(value: string, network: BarkConfig['network']): string {
   return url.toString().replace(/\/$/, '')
 }
 
-function configuration(config: BarkConfig): BarkConfig {
+function configuration(config: BarkReactNativeConfig): BarkReactNativeConfig {
   if (!config || !['mainnet', 'testnet', 'signet', 'regtest'].includes(config.network)) {
     validation('Select an explicit Bark network')
   }
@@ -79,7 +79,7 @@ export class BarkReactNativeBackend {
 
   isConnected(): boolean { return this.state === 'open' }
 
-  async connect(input: BarkConfig): Promise<void> {
+  async connect(input: BarkReactNativeConfig): Promise<void> {
     if (this.state !== 'closed' || this.closing) {
       throw new BarkBackendError('ALREADY_CONNECTED', 'Disconnect Bark before opening another wallet')
     }

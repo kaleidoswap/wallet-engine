@@ -22,6 +22,7 @@ import { arkadeSwapsClientManager } from "../lib/arkade-swaps-client-manager";
 import {
   Ramps,
   isSpendable,
+  isValidArkAddress,
   type ExtendedVirtualCoin,
   type Wallet,
   type ArkTransaction,
@@ -86,8 +87,14 @@ function stripLightningPrefix(value: string): string {
     : trimmed;
 }
 
+/**
+ * An `ark1`/`tark1` prefix is NOT enough: bark (Second's Ark) mints addresses
+ * under the same HRP. The two payloads differ — Arkade encodes 65 bytes
+ * (version + server key + VTXO key), bark 75 — and each SDK's validator
+ * rejects the other's, so ask the SDK rather than the prefix.
+ */
 function isArkadeAddress(value: string): boolean {
-  return /^(ark|tark)1[0-9a-z]{6,}$/i.test(value.trim());
+  return isValidArkAddress(value.trim());
 }
 
 export class ArkadeAdapter implements IProtocolAdapter {
@@ -119,12 +126,16 @@ export class ArkadeAdapter implements IProtocolAdapter {
       this.assetDetailsCache.clear();
       log.info("[ArkadeAdapter] Connected to Arkade successfully");
 
-      // Initialize the Boltz swap client in the background. Failures are
-      // non-fatal — swaps just stay unavailable until the next connect.
-      const wallet = arkadeClientManager.getWallet();
-      arkadeSwapsClientManager.initialize(wallet).catch((error: unknown) => {
-        log.warn("[ArkadeAdapter] Boltz swaps init failed (Lightning swaps unavailable):", error);
-      });
+      // Initialize the Boltz swap client in the background, if the host asked
+      // for it. Failures are non-fatal — swaps just stay unavailable until the
+      // next connect. Off by default because the client holds a WebSocket open
+      // (and retries it forever) whether or not anything ever swaps.
+      if (arkadeConfig.boltzSwapsEnabled) {
+        const wallet = arkadeClientManager.getWallet();
+        arkadeSwapsClientManager.initialize(wallet).catch((error: unknown) => {
+          log.warn("[ArkadeAdapter] Boltz swaps init failed (Lightning swaps unavailable):", error);
+        });
+      }
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Arkade: ${msg}`, "ARKADE");

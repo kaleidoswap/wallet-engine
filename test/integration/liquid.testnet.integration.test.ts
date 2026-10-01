@@ -13,6 +13,7 @@ import {
   assertFunded,
   connectLiquid,
   liveSetup,
+  returnFunds,
   safeDisconnect,
   sendOrSkip,
   skipWhenUnavailable,
@@ -26,6 +27,8 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
   let bob: LiquidWdkAdapter
 
   let unavailable: string | undefined
+  /** Amount the send test moved to Bob, for teardown to send back. */
+  let sentToBob = 0
 
   beforeAll(async () => {
     unavailable = await liveSetup('Liquid testnet', async () => {
@@ -42,6 +45,12 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
   beforeEach((ctx) => skipWhenUnavailable(ctx, unavailable))
 
   afterAll(async () => {
+    if (sentToBob) {
+      const back = await alice.getReceiveAddress()
+      await returnFunds('Liquid Bob → Alice', () =>
+        bob.sendPayment({ invoice: back.address, amount: sentToBob }),
+      )
+    }
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
   })
 
@@ -89,5 +98,6 @@ describe.skipIf(!LIQUID.enabled)('Liquid testnet (Alice & Bob)', () => {
     )
     expect(res.paymentHash).toBeTruthy()
     expect(res.status).toBe('pending')
+    sentToBob = amount
   }, 180_000)
 })

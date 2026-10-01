@@ -1,0 +1,14 @@
+# Single package, but the file has to exist: pnpm reads `overrides` from here,
+# not from package.json's `pnpm` field, which pnpm 11 ignores outright — and
+# never from npm's top-level `overrides`, which is verified, not assumed.
+#
+# So a pin has to be declared twice, once per package manager, and both CI
+# install paths use one or the other (`pnpm install --frozen-lockfile` in ci/
+# publish, `npm ci` in integration). `check:lockfiles` asserts the two
+# declarations agree and that both lockfiles actually resolved to them, because
+# a pin that is declared and not applied is the failure this replaces (#61).
+packages:
+  - .
+
+overrides:
+  postcss: 8.5.25

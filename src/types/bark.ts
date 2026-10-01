@@ -1,17 +1,44 @@
-/** Host-owned configuration for the on-device Bark wallet. */
-export interface BarkConfig {
-  network: 'mainnet' | 'testnet' | 'signet' | 'regtest'
-  serverUrl: string
-  esploraUrl: string
-  /** Existing app-private directory, as an absolute filesystem path (not a URI). */
-  dataDir: string
-  /** Read from the host's secure storage; never persisted by the engine. */
+/**
+ * Bark Protocol Types — Second's Ark implementation (`@secondts/bark`).
+ *
+ * Distinct from ARKADE (`@arkade-os/sdk`): different server, different rounds,
+ * no interop. Both mint `tark1…` addresses on signet, so an address alone
+ * cannot tell the two apart — route by account, never by prefix.
+ */
+
+import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
+
+export interface BarkConfig extends Omit<BaseProtocolConfig, 'network'> {
+  protocol: 'BARK'
+  /** BIP39 phrase; bark derives its own keys from it. */
   mnemonic: string
-  /** Explicit opt-in to creating a wallet. Opening never falls back to recreation. */
-  createIfMissing?: boolean
+  /** Ark server, e.g. https://ark.signet.2nd.dev */
+  arkServerUrl: string
+  /** Chain source. The SDK has no default — omitting it fails at open. */
+  esploraUrl?: string
+  network?: 'mainnet' | 'signet'
+  /**
+   * IndexedDB database name. Defaults to bark's own fingerprint-derived name.
+   * Set it per wallet: `Wallet.open` does NOT check the mnemonic against the
+   * stored database, so two seeds sharing a name silently share state.
+   */
+  dbName?: string
+  /**
+   * Let bark run its own background loop (mailbox, round events, periodic
+   * sync). Off by default here: an MV3 service worker is evicted while idle,
+   * so the host drives `maintenance()`/`progressPendingRounds()` from an alarm
+   * instead.
+   */
+  runDaemon?: boolean
+  /** Skip the mailbox recovery scan on the open that creates the wallet. */
+  skipRecovery?: boolean
+  /** Refresh a VTXO once it is within this many blocks of expiry. */
+  vtxoRefreshExpiryThreshold?: number
+  /** Sent to the Ark server; defaults to the SDK's own string. */
+  userAgent?: string
 }
 
-/** Separate categories; incoming HTLCs and outgoing HTLCs are not spendable BTC. */
+/** Subset of bark's `Balance` the engine reads. */
 export interface BarkBalance {
   spendableSats: number
   pendingInRoundSats: number
@@ -21,53 +48,12 @@ export interface BarkBalance {
   pendingBoardSats: number
 }
 
-export interface BarkArkPaymentRequest {
-  address: string
-  amountSats: number
-  /** Currently rejected: Bark's arkoor API has no enforceable fee-cap parameter. */
-  maxFeeSats?: number
-}
-
-export interface BarkArkPaymentResult {
-  /** The SDK returned successfully; it does not return a payment id or receipt. */
-  status: 'submitted'
-  address: string
-  amountSats: number
-}
-
-export interface BarkWalletInfo {
-  network: BarkConfig['network']
-  fingerprint: string
-  recovery: 'not-run' | 'complete' | 'incomplete' | 'failed'
-}
-
-export type BarkBackendErrorCode =
-  | 'VALIDATION_ERROR'
-  | 'NOT_CONNECTED'
-  | 'ALREADY_CONNECTED'
-  | 'NOT_SUPPORTED'
-  | 'SDK_UNAVAILABLE'
-  | 'SDK_ERROR'
-  | 'PAYMENT_OUTCOME_UNKNOWN'
-
-export class BarkBackendError extends Error {
-  constructor(public readonly code: BarkBackendErrorCode, message: string) {
-    super(message)
-    this.name = 'BarkBackendError'
-  }
-}
-
-/** Bark movement accounting, without guessing a unified transaction or receipt. */
-export interface BarkMovement {
-  id: string
-  state: string
-  kind: string
-  intendedBalanceDeltaSats: number
-  effectiveBalanceDeltaSats: number
-  feeSats: number
-  createdAt: string
-  completedAt?: string
-  paymentHash?: string
-  sentToAddresses: string[]
-  receivedOnAddresses: string[]
+/** What the host's periodic lifecycle tick did. */
+export interface BarkMaintenanceReport {
+  syncedMs: number
+  refreshed: string[]
+  pendingRounds: number
+  claimableExits: number
+  /** Block height by which a VTXO must be refreshed, when one is due. */
+  nextRequiredRefreshHeight?: number
 }

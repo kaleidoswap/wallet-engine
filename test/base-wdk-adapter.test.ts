@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { BaseWdkAdapter } from '../src/adapters/wdk/BaseWdkAdapter'
 import type { ProtocolType } from '../src/types/base'
+import { TOO_SHORT_MNEMONIC } from './fixtures/mnemonics'
 
 const OPS = new Set(['allowedOp'])
 
@@ -44,7 +45,7 @@ describe('BaseWdkAdapter', () => {
 
   it('disconnect clears the retained mnemonic (a locked wallet must not keep signing)', async () => {
     const a = new TestAdapter()
-    Object.assign(a as any, { connected: true, account: {}, mnemonic: 'abandon abandon ability' })
+    Object.assign(a as any, { connected: true, account: {}, mnemonic: TOO_SHORT_MNEMONIC })
     await a.disconnect()
     expect((a as any).mnemonic).toBeNull()
   })
@@ -54,7 +55,7 @@ describe('BaseWdkAdapter', () => {
     Object.assign(a as any, {
       connected: true,
       account: { dispose: () => new Promise<void>(() => {}) },
-      mnemonic: 'abandon abandon ability',
+      mnemonic: TOO_SHORT_MNEMONIC,
     })
 
     void a.disconnect()

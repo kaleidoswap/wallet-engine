@@ -117,7 +117,7 @@ describe('B-F3: approved RFQs execute at most once', () => {
     let executeCalls = 0
     const client = {
       maker: {
-        initSwap: async () => ({ swapstring: 'ss', payment_hash: 'native-payment', access_token: 'native-token' }),
+        initSwap: async () => ({ swapstring: '100000/rgb:USDT/5000/btc/1790000000/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', payment_hash: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', access_token: 'native-token' }),
         executeSwap: async () => { executeCalls += 1 },
       },
       rln: { getTakerPubkey: async () => 'native-wallet', whitelistSwap: async () => {} },

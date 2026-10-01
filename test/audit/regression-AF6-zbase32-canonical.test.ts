@@ -3,10 +3,9 @@ import { zbase32Decode } from '../../src/lib/zbase32'
 import { signLnMessage, verifyLnMessage } from '../../src/lib/ln-message-sign'
 import { HDKey } from '@scure/bip32'
 import { mnemonicToSeedSync } from '@scure/bip39'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-const key = HDKey.fromMasterSeed(mnemonicToSeedSync(MNEMONIC)).derive("m/138'/1'").privateKey!
+const key = HDKey.fromMasterSeed(mnemonicToSeedSync(BIP39_TEST_VECTOR_MNEMONIC)).derive("m/138'/1'").privateKey!
 
 describe('A-F6: canonical zbase32 signatures', () => {
   it('rejects input longer than the explicitly requested byte length', () => {

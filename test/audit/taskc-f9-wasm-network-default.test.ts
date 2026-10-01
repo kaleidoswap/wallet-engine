@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { RgbLibWasmAdapter } from '../../src/adapters/wdk/RgbLibWasmAdapter'
 import { registerWdkModule } from '../../src/adapters/wdk/moduleLoader'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
 /**
  * AUDIT C-F9 — RgbLibWasmAdapter maps any UNKNOWN network string to 'Mainnet'
@@ -35,7 +36,7 @@ describe('AUDIT C-F9: toRgbNetwork unknown-network default', () => {
     await expect(adapter.connect({
       protocol: 'RGB_L1',
       network: 'testnet4',
-      mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      mnemonic: BIP39_TEST_VECTOR_MNEMONIC,
       indexerUrl: 'http://indexer',
     } as any)).rejects.toThrow(/Unsupported RGB network/)
     expect(seenNetwork, 'no keys may be derived at all').toBeNull()

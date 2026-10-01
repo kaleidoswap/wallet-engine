@@ -4,12 +4,11 @@ import { signLnMessage, verifyLnMessage, verifyLnMessageFrom } from '../../src/l
 import { HDKey } from '@scure/bip32'
 import { mnemonicToSeedSync } from '@scure/bip39'
 import { bytesToHex } from '@noble/hashes/utils.js'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-const key = HDKey.fromMasterSeed(mnemonicToSeedSync(MNEMONIC)).derive("m/138'/1'").privateKey!
+const key = HDKey.fromMasterSeed(mnemonicToSeedSync(BIP39_TEST_VECTOR_MNEMONIC)).derive("m/138'/1'").privateKey!
 const pub = bytesToHex(
-  HDKey.fromMasterSeed(mnemonicToSeedSync(MNEMONIC)).derive("m/138'/1'").publicKey!,
+  HDKey.fromMasterSeed(mnemonicToSeedSync(BIP39_TEST_VECTOR_MNEMONIC)).derive("m/138'/1'").publicKey!,
 )
 
 describe('zbase32 signature malleability', () => {

@@ -57,9 +57,8 @@ vi.mock('@arkade-os/sdk', () => {
 })
 
 import { arkadeClientManager } from '../../src/lib/arkade-client-manager'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
-const MNEMONIC =
-  'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 
 function arkCfg(mnemonic: string) {
   return {
@@ -86,7 +85,7 @@ afterEach(() => {
 
 describe('ArkadeClientManager teardown race', () => {
   it('F3 [FIXED]: disconnect() during in-flight initialize() no longer resurrects the wallet', async () => {
-    const init = arkadeClientManager.initialize(arkCfg(MNEMONIC))
+    const init = arkadeClientManager.initialize(arkCfg(BIP39_TEST_VECTOR_MNEMONIC))
     // Let _doInitialize run up to the awaited Wallet.create() call.
     await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
     // Host locks / tears down while Wallet.create() is still pending.
@@ -106,7 +105,7 @@ describe('ArkadeClientManager teardown race', () => {
   })
 
   it('F3b [FIXED]: reset() during in-flight initialize() also discards the orphan', async () => {
-    const init = arkadeClientManager.initialize(arkCfg(MNEMONIC))
+    const init = arkadeClientManager.initialize(arkCfg(BIP39_TEST_VECTOR_MNEMONIC))
     await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
     // reset() nulls _initPromise but cannot cancel the in-flight _doInitialize —
     // the generation guard is what makes that safe.
@@ -123,7 +122,7 @@ describe('ArkadeClientManager teardown race', () => {
   it('F3c [FIXED]: a wallet switch racing the handshake installs B, never A', async () => {
     const OTHER =
       'legal winner thank year wave sausage worth useful legal winner thank yellow'
-    const initA = arkadeClientManager.initialize(arkCfg(MNEMONIC))
+    const initA = arkadeClientManager.initialize(arkCfg(BIP39_TEST_VECTOR_MNEMONIC))
     await vi.waitFor(() => expect(sdkState.pending).not.toBeNull())
     const pendingA = sdkState.pending!
 

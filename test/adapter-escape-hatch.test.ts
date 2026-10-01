@@ -102,7 +102,10 @@ describe('ArkadeWdkAdapter.executeProtocolOperation allowlist', () => {
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
-      account: { getLightningLimits: async () => ({ min: 1, max: 2 }) },
+      // Arkade routes its own allowlist since the path moved off the WDK:
+      // Lightning ops are served by the swaps client, the rest by the wallet.
+      wallet: {},
+      swaps: { getLightningLimits: async () => ({ min: 1, max: 2 }) },
     })
     return adapter
   }

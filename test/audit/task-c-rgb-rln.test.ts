@@ -27,6 +27,7 @@ vi.mock('../../src/lib/kaleido-client-manager', () => ({
   },
 }))
 import { RgbAdapter } from '../../src/adapters/RgbAdapter'
+import { BIP39_TEST_VECTOR_MNEMONIC } from '../fixtures/mnemonics'
 
 afterEach(() => {
   state.client = null
@@ -211,7 +212,6 @@ describe('F5: fee policy gaps', () => {
 
 // ── F6: auth fail-open (localhost mock node, real WDK module) ───────────────
 describe('F6: RLN apiKey forwarding / fail-open', () => {
-  const MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
   let server: http.Server | null = null
   let captured: Array<{ url?: string; auth?: string }> = []
 
@@ -234,7 +234,7 @@ describe('F6: RLN apiKey forwarding / fail-open', () => {
   it('with apiKey: every node request carries Authorization: Bearer, and the key never appears in a URL', async () => {
     const nodeUrl = await startMockNode()
     const adapter = new RlnWdkAdapter()
-    await adapter.connect({ protocol: 'RGB_LN', mnemonic: MNEMONIC, nodeUrl, network: 'regtest', apiKey: 'secret-token' } as any)
+    await adapter.connect({ protocol: 'RGB_LN', mnemonic: BIP39_TEST_VECTOR_MNEMONIC, nodeUrl, network: 'regtest', apiKey: 'secret-token' } as any)
     await adapter.getConnectionInfo() // getNodeInfo
     expect(captured.length).toBeGreaterThan(0)
     for (const r of captured) {
@@ -247,7 +247,7 @@ describe('F6: RLN apiKey forwarding / fail-open', () => {
   it('without apiKey: connect and calls succeed with NO auth header and NO error (fail-open)', async () => {
     const nodeUrl = await startMockNode()
     const adapter = new RlnWdkAdapter()
-    await adapter.connect({ protocol: 'RGB_LN', mnemonic: MNEMONIC, nodeUrl, network: 'regtest' } as any)
+    await adapter.connect({ protocol: 'RGB_LN', mnemonic: BIP39_TEST_VECTOR_MNEMONIC, nodeUrl, network: 'regtest' } as any)
     await adapter.getConnectionInfo()
     expect(captured.length).toBeGreaterThan(0)
     for (const r of captured) expect(r.auth).toBeUndefined()

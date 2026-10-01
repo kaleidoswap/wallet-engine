@@ -7,3 +7,6 @@ dist/
 # Integration-test secrets + local rgb-lib wallet state (never commit)
 .env
 test/integration/.env
+# rgb-lib SQLite wallet state, when RGB_DATA_DIR points into the workspace
+# (CI does, so the wallet remembers its assets between runs).
+.rgb-data/

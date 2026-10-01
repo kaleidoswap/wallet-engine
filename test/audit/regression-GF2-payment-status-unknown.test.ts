@@ -7,7 +7,9 @@ import { SparkWdkAdapter } from "../../src/adapters/wdk/SparkWdkAdapter";
 import { arkadeClientManager } from "../../src/lib/arkade-client-manager";
 
 function connected<T extends object>(adapter: T, account: Record<string, unknown>): T {
-  Object.assign(adapter as object, { connected: true, account });
+  // `wallet` as well as `account`: the Arkade adapter builds its SDK wallet
+  // directly, the others still go through a WDK account.
+  Object.assign(adapter as object, { connected: true, account, wallet: account });
   return adapter;
 }
 

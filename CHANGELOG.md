@@ -7,8 +7,330 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.72] - 2026-09-21
+
+Boarding for Bark: the rail that funds the account from on-chain.
+
+### Added
+- **`IBarkOperations`** — `boardFundingAddress`, `boardAmount`, `boardAll`,
+  `pendingBoards` and `boardingTerms`, narrowed with `asBarkOperations`. Kept
+  apart from `IArkadeOperations` because the two Arks agree on almost nothing
+  below the name: bark boards a named amount into a pending board that
+  confirms into a VTXO, and prices the round itself. `boardAmount` refuses
+  anything under the server's own minimum rather than letting the server
+  reject it, and `boardingTerms` gives a host the minimum and the confirmation
+  count it has to show before asking for money.
+
+## [1.0.0-beta.71] - 2026-09-21
+
+Second's Ark (bark) joins the engine as its own protocol, and both Ark adapters
+stop trusting the address prefix.
+
+### Added
+- **BARK: Second's Ark, as its own protocol.** `@kaleidorg/wallet-engine/adapters/bark`
+  exports `BarkAdapter` and `barkClientManager` over `@secondts/bark` (optional
+  peer), with `BARK` in `ProtocolType` and `BTC_BARK` in `Layer`. Distinct from
+  ARKADE: different servers, no interop. BTC only — no assets, no channels, no
+  native swaps — but Lightning send and receive run through the Ark server's own
+  gateway, so the account reaches LN with no swap provider in the path. Two
+  binding traps are handled and pinned by tests: bark reaches IndexedDB through
+  `web_sys::window()` (an `instanceof Window` check no service worker passes, so
+  the manager names the missing alias instead of failing inside the wasm), and
+  `Wallet.open` does not check the mnemonic against the stored database (so the
+  config carries an explicit per-wallet `dbName`). The wallet opens with
+  `runDaemon: false` and `runMaintenance()` replaces bark's own loop for hosts
+  that get evicted, refreshing through `refreshVtxosDelegated` so a round
+  completes whether or not the host is alive when it starts.
+
+### Fixed
+- **Ark addresses route by SDK validation, not by prefix.** Arkade and bark both
+  mint `ark1`/`tark1` addresses, so the HRP cannot say which server an address
+  belongs to, and sending to the wrong one loses the money rather than failing.
+  The payloads differ (Arkade 65 bytes, bark 75) and each SDK's validator rejects
+  the other's, so `ArkadeAdapter` now asks `isValidArkAddress` and `BarkAdapter`
+  asks the loaded bindings' `validateArkAddress`. The destination router still
+  classifies the whole HRP as `arkade` — it is SDK-free by design — so a spending
+  adapter must validate.
+
+## [1.0.0-beta.70] - 2026-09-17
+
+Liquid moves to LWK 0.19. A dependency release: the engine holds no direct LWK
+dependency, and the only code change is one type correction.
+
+### Changed
+- `@kaleidorg/wdk-wallet-liquid` bumped to 1.0.0-beta.9, which moves Liquid to
+  LWK 0.19 (`lwk_node`/`lwk_wasm` 0.19.0). Additive upstream release apart from
+  one field: `inspectPset` inputs now report `sighash` as optional, undefined
+  when LWK cannot resolve the spent output, where 0.18 always answered
+  SIGHASH_ALL. Hosts that bundle `lwk_wasm` themselves must move to 0.19.0.
+
+## [1.0.0-beta.69] - 2026-09-15
+
+A correctness release for one regression in beta.68: Arkade settings passed
+nested under `arkadeConfig` were dropped, which for a host that nests its
+`storage` means in-memory repositories and VTXO state lost on every restart.
+Nothing else in beta.68 is affected, and a host passing settings at the top
+level never was.
+
+### Fixed
+- **Arkade settings nested under `arkadeConfig` are read again.** The SDK-direct
+  rewrite (#87) read `storage`, `delegatorUrl`, `delegationEnabled`,
+  `boltzSwapsEnabled` and `eventSource` only at the top level of the connect
+  config, while the adapter it replaced accepted either shape — it spread
+  `arkadeConfig` wholesale into `Wallet.create`. A host passing them nested,
+  which Rate does, silently lost them: a dropped `storage` falls back to
+  in-memory repositories and loses VTXO state on every app restart. Every
+  passthrough now reads both shapes, top level first.
+
+## [1.0.0-beta.68] - 2026-09-15
+
+Corrections and coverage on top of beta.67. The one thing here a consumer can
+observe is the dependency removal: beta.67's notes claimed `@arkade-os/wdk` was
+no longer a peer and it was still declared, so installs still pulled it and the
+nested `@arkade-os/sdk` 0.4.35 with it. Nothing else changes runtime behaviour.
+
+### Added
+- **`RgbLibWdkAdapter.listUnspents()` and `countFreeColorableSlots()`** — the
+  only way to answer "can this wallet receive or spend an RGB allocation right
+  now". `createRgbUtxos` cannot: it broadcasts a transaction whose outputs are
+  unusable until they confirm.
+
+### Build
+- **A dispatchable workflow moves npm dist-tags** (`.github/workflows/dist-tag.yml`).
+  `latest` is what a bare `npm install` resolves to, and it drifts: it sat on
+  `1.0.0-beta.4` for months, then on `beta.63` while `beta` moved on. Fixing it
+  needed someone with npm credentials at a keyboard, which is why it kept not
+  happening. The token is already here for `publish.yml`; this makes using it a
+  dispatch. It refuses a version that is not published, and cannot publish
+  anything — `npm publish --tag` can only set a tag at publish time, so moving
+  one afterwards is `npm dist-tag add` or nothing.
+
+- **`@arkade-os/wdk` is actually removed now.** beta.67's notes said it was "no
+  longer a peer"; it was still declared as an optional peer and a devDependency,
+  while nothing in `src/` imported it. The claim that hosts could drop it was
+  true — the engine stopped using it in #87 — but the manifest still asked for
+  it, so `npm ls` and a fresh install still pulled it, and with it a nested
+  `@arkade-os/sdk` 0.4.35. Removed from `peerDependencies`,
+  `peerDependenciesMeta` and `devDependencies`; both lockfiles now carry zero
+  references to it.
+
+### Tests
+- **The RGB-L1 suite covers both receive modes and stops guessing about
+  colorable UTXOs.** A blinded recipient needs a free colorable UTXO; a witness
+  recipient needs none, because the sender creates the output — so witness is
+  the mode that works for a wallet that has never held RGB, and both are now
+  exercised. Preconditions wait for `createRgbUtxos` to confirm instead of
+  assuming it is instant, which is what left the transfer test passing or
+  failing on what earlier runs happened to leave on-chain.
+
+## [1.0.0-beta.67] - 2026-09-15
+
+Arkade settlement. VTXOs were never being renewed on any Node host, so they
+reached their batch expiry and the server swept them — while the adapter
+reported `connected: true` throughout and every other call kept working. Three
+separate causes, each fixed here, and the funds already lost to it came back.
+
+Items marked **BREAKING** change behaviour a host can observe; each carries its
+migration note. The peer floor moves to `@arkade-os/sdk` `^0.4.72` and
+`@arkade-os/wdk` is no longer a peer at all.
+
+### Changed
+- **BREAKING (peer): the Arkade adapter is built on `@arkade-os/sdk` directly.**
+  `@arkade-os/wdk` is no longer used by any code path. It hard-pins
+  `@arkade-os/sdk` at exactly `0.4.35`, which held the Arkade path behind
+  everything the SDK learned since — including per-connection `EventSource`
+  injection, which is what settlement needs. `arkade-os/wallet`, the reference
+  wallet, uses the SDK directly too.
+  - **The `@arkade-os/sdk` peer floor rises to `^0.4.72`.** Below it,
+    `RestArkProvider`'s `eventSource` option does not exist and is silently
+    ignored — and silently ignored here means settlement stops and VTXOs
+    expire, which is the failure this change exists to end. `@arkade-os/wdk` is
+    no longer a peer at all; hosts can drop it.
+  - **Addresses do not change.** Identities derive `WDK_COMPAT`
+    (`lib/arkade-identity`), verified byte-identical to what the WDK built for
+    the live wallets — same `tark1…`, same `tb1p…` boarding address.
+  - Providers are explicit (`arkProvider`, `indexerProvider`, `onchainProvider`)
+    rather than the deprecated URL fields, which is also the only way to pass an
+    SSE transport per connection instead of mutating a global.
+  - Boltz swaps are constructed by the adapter, so the opt-in from #81 finally
+    applies here: the swap manager's reconnecting WebSocket starts only when
+    `boltzSwapsEnabled` is set. The WDK always started one.
+  - `onboard`/`offboard` no longer mix versions — they handed a 0.4.35 `Wallet`
+    to a `Ramps` resolved from the top-level 0.4.72, 37 patch releases apart, on
+    the path that moves funds on-chain.
+  - `executeProtocolOperation` routes its own allowlist, split by owner: the
+    Lightning operations belong to the swaps client, the rest to the wallet.
+  - The class name and import path are unchanged. A rename is a migration hosts
+    would make for no behavioural gain.
+
+  Measured on the live wallets: `invalid scalar: out of range` — the
+  two-wallet-per-process SDK bug tracked in #74, which 0.4.35 still had —
+  **drops to zero**, and Alice's Arkade spendable balance went from 1,422,628 to
+  3,010,524 as her boarding funds finally settled.
+
+- **`sweepSparkL1Deposits()` takes an optional window.** It costs one
+  `get_utxos_for_address` per unused single-use deposit address, and Spark issues
+  a new address on every receive, so a host sweeping on a timer paid for the
+  whole (growing) set every tick. Pass `{ limit }` — and the previous result's
+  `nextOffset` — to walk the set a slice per sweep; the window wraps, so a
+  rotating caller still covers every address. The result gains `addressesTotal`
+  and `nextOffset`. Calling it with no options is unchanged: full scan,
+  `nextOffset: 0`.
+
+### Added
+- **`RgbLibWdkAdapter.issueAssetNia`**, matching the contract
+  `RgbLibWasmAdapter` shipped in #76 — same parameters, same guarantees, so a
+  host feature-detecting one API gets the same behaviour from either backing.
+  The bindings underneath disagree (the native one takes an options object, the
+  wasm one positional arguments), which is why the difference belongs in the
+  adapter rather than at every call site. An answer with no asset id is a
+  failure, not a hollow success: rgb-lib can return one when the wallet has
+  nothing to colour.
+- **Live RGB-L1 issuance and transfer tests** (#88). The suite's header had
+  claimed transfers were gated behind `RUN_SEND_TESTS` for months while no such
+  test existed and the flag was never read there, so NIA issuance and the
+  consignment exchange — the part that actually breaks — had no coverage at all.
+  The issuance test reuses an asset either wallet already holds — keyed on
+  `total`, since a sender's unconfirmed change reads `available: 0` while it
+  still owns nearly the whole supply — and issues when neither does, which is
+  every run on CI's ephemeral data directory and rarely on a persistent local
+  one. `RGB_FORCE_ISSUANCE=1` forces the issuing path. A shortfall in spendable
+  assignments skips the way a drained wallet does, including rgb-lib's own
+  `InsufficientAssignments` refusal. The transfer follows whoever holds the asset and
+  returns it in teardown, so the suite stays runnable whichever way the last run
+  left the balance.
+
+- **`lib/arkade-identity`** names the two incompatible Arkade derivations the
+  engine already shipped. `ArkadeAdapter` derives `m/86'/{coin}'/0'/0/0` and
+  `ArkadeWdkAdapter` derives `m/86'/{coin}/0'/0/{index}` — the coin-type level
+  is hardened in one and not the other, so the same mnemonic opens two
+  different wallets with two different address sets and nothing says so. A host
+  that switched adapters would find an empty wallet and its funds in the
+  derivation it left. The choice is now explicit (`WDK_COMPAT` /
+  `BIP86_HARDENED`) and the WDK values are frozen in tests, verified
+  byte-identical against the live wallets.
+
+### Fixed
+- **`listTransactions({ asset: 'BTC' })` answers the same on Liquid whether or
+  not the policy asset is known** (#73). Every adapter but Liquid labels its
+  bitcoin row `id: 'BTC'`; Liquid labels L-BTC with the policy-asset hex, which
+  is the better answer and stays. But the filter compared ids exactly, so a
+  BTC-scoped query returned L-BTC rows only while the adapter could *not*
+  identify the policy asset — its fallback labels them `'BTC'` — and dropped
+  them once it could. The same wallet, the same rows, a different answer
+  depending on adapter state.
+
+  `'BTC'` is the engine's protocol-neutral bitcoin id (`isBtcAssetId`), so it
+  now matches any row on a bitcoin layer as well as an exact id. Filtering on
+  the policy asset itself is unchanged, and a BTC filter still does not sweep
+  up L-USDT.
+
+- **Arkade VTXOs are renewed again, and the funds that had already expired came
+  back.** `ArkadeWdkAdapter` declared `delegatorUrl` and `delegationEnabled` in
+  its config type and read neither — the live suite had been passing a delegator
+  URL on every connect for months and the adapter dropped it. The delegator
+  settles on the wallet's behalf, so VTXOs are renewed whether or not this
+  process is around to join a round; that is the durable answer to #83, and a
+  better one than the `EventSource` flag alone.
+  - The delegator is wired through `Wallet.create` (the WDK spreads its config
+    straight through), using the canonical `delegateProvider` rather than the
+    deprecated `delegatorProvider` alias. On by default once a URL is set: the
+    failure mode of not delegating is funds expiring.
+  - **`ArkadeConfig.storage`** — the WDK substitutes in-memory repositories
+    whenever `storage` is absent and we never passed any, so every wallet
+    rebuilt its wallet *and contract* rows on each connect. The contract rows
+    are what the deprecated-signer migration reads. Now IndexedDB where the
+    runtime has it, in-memory with a stated warning where it does not.
+  - **`runVtxoLifecycle()`** on the adapter drives the existing
+    `runArkadeVtxoLifecycle` — renew, recover, boarding-expiry, delegate —
+    which nothing had been calling on this path.
+  - `getConnectionInfo().degraded` now covers storage and "no delegator and no
+    way to settle for yourself" alongside the missing `EventSource`.
+
+  Measured on the live mutinynet wallets: Bob's 76 stranded VTXOs renewed in one
+  transaction and his balance went from **0 spendable of 1,596,449 to fully
+  spendable**; the Arkade suite went from a permanently skipped send to 5/5
+  passing.
+
+- **Arkade settlement now works on Node, which means VTXOs stop expiring.**
+  `@arkade-os/sdk` reaches the Ark server's event stream through the global
+  `EventSource`, and it needs that stream to *complete a settle*, not merely to
+  observe one. Node has `EventSource` only behind `--experimental-eventsource`,
+  so on any Node host the SDK's periodic settle threw `EventSource is not
+  defined` on every poll, no VTXO was ever renewed, and the server swept the
+  funds at batch expiry — while the adapter reported `connected: true`
+  throughout. Measured on mutinynet over one 65-second poll window: 115 errors
+  without it, 1 with it (a round-timing error that retries).
+  - `ArkadeConfig.eventSource` accepts an implementation (`eventsource` from
+    npm, `undici`'s, your own); the adapter installs it globally, which is
+    where the SDK looks, and never overwrites one the runtime already has.
+  - When there is none, the adapter says so **once** at connect instead of 57
+    times a poll from inside the SDK, and `getConnectionInfo()` reports
+    `degraded: [...]` — because `connected` alone let a host believe its funds
+    were safe while the batch expiry ran down.
+  - Browsers and React Native are unaffected: they have the global.
+
+- **BREAKING: the Arkade adapter no longer starts the Boltz swaps client on
+  connect.** `ArkadeSwaps.create({ swapManager: true })` opens a WebSocket to the
+  Boltz Ark endpoint and reconnects for the life of the session; a host that
+  reaches Lightning another way paid for that loop just by connecting, filling
+  the console with `WebSocket connection timeout`. Set `boltzSwapsEnabled: true`
+  on `ArkadeConfig` to keep the old behaviour — everything that calls into
+  `arkadeSwapsClientManager` needs it. Hosts that never touch that client need
+  no change.
+
+### Build
+- **The postcss override is now enforced, not just declared** (#61). It lived in
+  package.json's `pnpm.overrides`, which npm ignores entirely and pnpm drops in
+  v11 — and both install paths are in CI (`pnpm install --frozen-lockfile` in
+  ci/publish, `npm ci` in integration), so the pin held only by the accident of
+  a committed lockfile. It is now declared once per package manager: top-level
+  `overrides` for npm, `pnpm-workspace.yaml` for pnpm.
+  `check:lockfiles` asserts the two declarations agree **and** that both
+  lockfiles resolved to them, because a pin that is declared and not applied is
+  worth no more than no pin at all.
+
+### Tests
+- **The live send tests put the sats back.** Every send test ran one way, Alice
+  to Bob, so each run left Alice short by the amount and a fee and nothing ever
+  returned it — she was the only wallet that paid and so the only wallet that
+  emptied, on a schedule set by how often CI ran. Teardown now sends the amount
+  back, only when a send happened and never failing the suite, which makes a run
+  cost its two fees instead of a wallet. `RETURN_TEST_FUNDS=0` opts out.
+- **The Arkade and RGB-L1 suites use our own Mutinynet indexer.** The public
+  `mutinynet.com/api` answers CI with a plain nginx 429 — our GitLab and GitHub
+  runners share one box, so one egress IP carries everyone's requests — and
+  `@utexo/rgb-sdk` renders that as "Failed to establish online connection",
+  which is how the RGB-L1 red went unread for weeks. `esplora.signet.kaleidoswap.com`
+  is the same chain (MutinyWallet/electrs `--signet-magic`), tip for tip.
+  `connectRgbL1` also gained the `withRetry` that Spark and Liquid already had.
+  Override with `MUTINYNET_ESPLORA_URL`, `ARKADE_ESPLORA_URL` or `RGB_INDEXER_URL`.
+- **Live-suite failures print their whole `cause` chain.** `@utexo/rgb-sdk`
+  wraps every `goOnline` failure as `Failed to establish online connection` and
+  hangs rgb-lib's actual reason off `cause`, so the suite reported an
+  unreachable network whatever the truth was — and that is how the RGB-L1 red
+  kept getting waved through as "mutinynet is flapping again" while the
+  endpoint was answering in 240ms.
+- **`print-funding-addresses` prints balances next to the addresses**, which is
+  the half that says whether a top-up is needed at all. It also documents
+  `--silent=false`: vitest hides console output from passing tests, and every
+  test in that file passes by design.
+
+## [1.0.0-beta.66] - 2026-09-13
+
 Security audit remediation (#71). Items marked **BREAKING** change behaviour a
 host can observe; each carries its migration note.
+
+### Build
+- **`@kaleidorg/swap-sdk` peer range accepts `^0.7.0`** (#80), the line that
+  carries the Arkade Intents corridor client in the core and
+  `kaleidoswapHttpTransport` on `./arkade`. Nothing the engine calls changed
+  shape; the venue's new `failed` phase is terminal for the store already.
+  The dev pin moves to 0.7.0 and `@arkade-os/sdk` to `^0.4.71`, the floor
+  that venue declares.
+- **`check:lockfiles` derives peer-only nodes from edges** (#80) instead of
+  npm's `peer` flag, which follows traversal order and flipped on 22
+  unrelated entries during the bump.
 
 ### Security
 - **Wallet identity is enforced across every singleton client manager.** The

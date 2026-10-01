@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BarkReactNativeBackend } from '../src/backends/BarkReactNativeBackend.js'
-import type { BarkConfig } from '../src/types/bark.js'
+import type { BarkReactNativeConfig } from '../src/types/bark-native.js'
 import type { NativeBarkModule, NativeBarkWallet } from '../src/backends/bark-native.js'
 
 const { load } = vi.hoisted(() => ({ load: vi.fn() }))
 vi.mock('../src/backends/bark-native.js', () => ({ loadBarkNative: load }))
 const mnemonic = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-const config: BarkConfig = {
+const config: BarkReactNativeConfig = {
   network: 'signet', mnemonic, dataDir: '/app/bark',
   serverUrl: 'https://ark.signet.2nd.dev', esploraUrl: 'https://esplora.signet.2nd.dev',
 }
@@ -67,7 +67,7 @@ describe('Bark React Native backend', () => {
     { serverUrl: 'http://example.com' }, { serverUrl: 'https://user:secret@example.com' },
     { esploraUrl: 'https://example.com?token=secret' }, { createIfMissing: 'true' },
   ])('rejects invalid configuration before loading native code: %j', async invalid => {
-    await expect(backend.connect({ ...config, ...invalid } as BarkConfig)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
+    await expect(backend.connect({ ...config, ...invalid } as BarkReactNativeConfig)).rejects.toMatchObject({ code: 'VALIDATION_ERROR' })
     expect(load).not.toHaveBeenCalled()
   })
 

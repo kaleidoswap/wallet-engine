@@ -244,7 +244,14 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
     // synced again — two full indexer round-trips, ~2× the cold-sync wait.
     await this.account.sync?.(this.online)
-    await this.account.refresh?.(this.online, null, [], true)
+    const result = await this.account.refresh?.(this.online, null, [], true)
+    // rgb-lib reports a transfer it cannot advance as a per-transfer `failure`,
+    // not a throw; unlogged, a receive that never settles leaves no trace (#108).
+    for (const [idx, t] of refreshEntries(result)) {
+      if (t?.failure != null) {
+        console.warn(`[RGB-L1] refresh could not advance transfer batch ${idx}:`, describeRgbLibError(t.failure))
+      }
+    }
     // Flush or the settled-transfer promotion lives only in memory and is lost
     // on the next MV3 cold start, resurfacing as stale balances on the next send.
     await this.flushState()
@@ -280,6 +287,82 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const found = (await this.listAssets()).find((a) => a.id === assetId)
     if (!found) throw new ProtocolError(`Unknown asset ${assetId}`, 'RGB_L1', 'NO_ASSET')
     return found
+  }
+
+  /**
+   * Issue a NIA (fungible) asset and return it in the same shape listAssets()
+   * yields. rgb-lib-wasm exposes issuance only on the wallet handle and returns
+   * a plain serde object, but a host that forwards the call without awaiting it
+   * (or reads it back through a structured clone) sees `{}` and reports a
+   * hollow success. Awaiting here, requiring an asset id, and carrying the
+   * issuance fields into `metadata` is what keeps that from reaching callers.
+   *
+   * Not part of IProtocolAdapter: only the wasm backing can issue, and only
+   * when the resolved rgb-lib build ships the binding. Callers feature-detect
+   * with `typeof adapter.issueAssetNia === 'function'` and fail closed, the
+   * same way the Liquid adapter derives its Simplicity operations.
+   */
+  async issueAssetNia(params: {
+    ticker: string
+    name: string
+    precision?: number
+    amounts: number[]
+  }): Promise<UnifiedAsset> {
+    this.assertConnected()
+    const wallet = this.account as unknown as {
+      issueAssetNia?: (
+        ticker: string,
+        name: string,
+        precision: number,
+        amounts: number[]
+      ) => unknown
+    }
+    if (typeof wallet?.issueAssetNia !== 'function') {
+      throw new ProtocolError(
+        'NIA issuance is not available in this rgb-lib-wasm build',
+        'RGB_L1',
+        'NOT_SUPPORTED'
+      )
+    }
+    if (!Array.isArray(params.amounts) || params.amounts.length === 0) {
+      throw new ProtocolError('At least one issuance amount is required', 'RGB_L1', 'BAD_REQUEST')
+    }
+    // Amounts cross into wasm as u64: anything but a positive safe integer would
+    // be silently truncated or rejected with an opaque binding error.
+    const amounts = params.amounts.map(Number)
+    if (!amounts.every((n) => Number.isSafeInteger(n) && n > 0)) {
+      throw new ProtocolError(
+        'Issuance amounts must be positive safe integers',
+        'RGB_L1',
+        'BAD_REQUEST',
+        { amounts: params.amounts }
+      )
+    }
+
+    let issued: unknown
+    try {
+      issued = await wallet.issueAssetNia(params.ticker, params.name, Number(params.precision ?? 0), amounts)
+    } catch (e) {
+      // rgb-lib-wasm throws bare strings; give hosts a stable code to match on.
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new ProtocolError(`NIA issuance failed: ${msg}`, 'RGB_L1', 'ISSUANCE_FAILED', { message: msg })
+    }
+    // Issuance mutates RGB state, which cannot be rebuilt from the seed.
+    await this.flushState()
+
+    const plain = plainFromWasm(issued)
+    const normalized = normalizeAsset(plain)
+    if (!normalized.asset_id) {
+      throw new ProtocolError(
+        'NIA issuance returned no asset id — the wallet may have no colorable UTXO',
+        'RGB_L1',
+        'ISSUANCE_FAILED'
+      )
+    }
+    const asset = rgbNiaAsset(normalized, RGB_L1_PROFILE)
+    const metadata = normalizeIssuanceMetadata(plain)
+    if (Object.keys(metadata).length > 0) asset.metadata = metadata
+    return asset
   }
 
   // --- Invoices -----------------------------------------------------------
@@ -366,7 +449,30 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
     this.assertConnected()
-    return this.account.listTransfers(options?.asset_id ?? null)
+    if (options?.asset_id) return this.account.listTransfers(options.asset_id)
+    return this.listAllTransfers()
+  }
+
+  /**
+   * Every transfer the wallet knows. rgb-lib's `listTransfers(null)` is not "all":
+   * it returns only transfers with no asset, and a blank-invoice receive leaves
+   * that set as soon as its consignment validates and gets an asset id (#107).
+   * Asset rows carry no asset id of their own, so tag them with it.
+   */
+  private async listAllTransfers(): Promise<any[]> {
+    const rows = (raw: any): any[] => (Array.isArray(raw) ? raw : raw?.transfers ?? [])
+    const res: any = await this.account.listAssets([])
+    const assets: any[] = Array.isArray(res) ? res : [...(res?.nia ?? []), ...(res?.ifa ?? [])]
+    const out: any[] = []
+    for (const a of assets) {
+      const assetId = normalizeAsset(a).asset_id
+      if (!assetId) continue
+      for (const t of rows(await this.account.listTransfers(assetId))) {
+        out.push({ ...t, assetId: t?.assetId ?? t?.asset_id ?? assetId })
+      }
+    }
+    out.push(...rows(await this.account.listTransfers(null)))
+    return out
   }
 
   // --- RGB-specific hooks (used by the RGB host surface) ------------------
@@ -623,8 +729,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
     this.assertConnected()
     const needle = String(params.invoice ?? '')
-    const raw: any = await this.account.listTransfers(null)
-    const transfers: any[] = Array.isArray(raw) ? raw : raw?.transfers ?? []
+    const transfers = await this.listAllTransfers()
     const match = transfers.find((t) => {
       const fields = [t?.recipientId, t?.recipient_id, t?.invoiceString, t?.invoice_string, t?.invoice]
       return fields.some((f) => f && String(f) === needle)
@@ -838,6 +943,54 @@ function normalizeRgbLibTransactionAmounts(t: any): {
 }
 
 /**
+ * Defensive copy of a raw rgb-lib-wasm return. Current builds hand back plain
+ * serde objects, so this is normally a spread; it also honours `toJSON` and
+ * walks prototype getters so a build that returns a wasm-bindgen class
+ * instance still normalizes instead of collapsing to `{}`.
+ */
+function plainFromWasm(value: unknown): Record<string, unknown> {
+  if (!value || typeof value !== 'object') return {}
+  const source = value as Record<string, unknown>
+  const toJson = (source as { toJSON?: unknown }).toJSON
+  if (typeof toJson === 'function') {
+    try {
+      return ((toJson as () => unknown).call(source) ?? {}) as Record<string, unknown>
+    } catch {
+      // fall through to the getter walk
+    }
+  }
+  const out: Record<string, unknown> = { ...source }
+  const proto = Object.getPrototypeOf(source) as object | null
+  for (const key of proto ? Object.getOwnPropertyNames(proto) : []) {
+    if (key === 'constructor' || key in out) continue
+    try {
+      const read = source[key]
+      if (typeof read !== 'function') out[key] = read
+    } catch {
+      // a wasm getter can throw on a freed pointer — skip it
+    }
+  }
+  return out
+}
+
+/**
+ * Issuance-only fields rgb-lib-wasm reports alongside the asset record (camelCase
+ * or snake_case), exposed on `UnifiedAsset.metadata` so hosts keep them.
+ */
+function normalizeIssuanceMetadata(a: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  const issuedSupply = firstFiniteNumber(a.issuedSupply, a.issued_supply)
+  if (issuedSupply !== null) out.issued_supply = issuedSupply
+  const timestamp = firstFiniteNumber(a.timestamp)
+  if (timestamp !== null) out.timestamp = timestamp
+  const addedAt = firstFiniteNumber(a.addedAt, a.added_at)
+  if (addedAt !== null) out.added_at = addedAt
+  const media = a.media
+  if (media !== null && media !== undefined) out.media = media
+  return out
+}
+
+/**
  * Normalize an rgb-lib-wasm asset record for `RgbCore.rgbNiaAsset` (it may use
  * camelCase `assetId` or snake_case `asset_id`).
  */
@@ -865,6 +1018,23 @@ function normalizeAssetBalance(a: any): RgbBalanceLike | undefined {
     spendable: a.spendable ?? a.available,
     offchain_outbound: a.offchain_outbound ?? a.offchainOutbound ?? a.locked,
     offchain_inbound: a.offchain_inbound ?? a.offchainInbound,
+  }
+}
+
+/** rgb-lib's RefreshResult: a `Map` from serde-wasm-bindgen, or a plain object. */
+function refreshEntries(result: unknown): Array<[string, any]> {
+  if (result instanceof Map) return [...result.entries()].map(([k, v]) => [String(k), v])
+  if (result && typeof result === 'object') return Object.entries(result)
+  return []
+}
+
+/** A serialized rgb-lib `Error` (`"Variant"` or `{ Variant: { details } }`) as one line. */
+function describeRgbLibError(failure: unknown): string {
+  if (typeof failure === 'string') return failure
+  try {
+    return JSON.stringify(failure, (_k, v) => (typeof v === 'bigint' ? v.toString() : v))
+  } catch {
+    return String(failure)
   }
 }
 

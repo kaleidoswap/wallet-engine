@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { resolveArkadePrivateKeyHex } from '../src/lib/arkade-client-manager'
 import { resolveSparkMnemonicOrSeed } from '../src/lib/spark-client-manager'
+import { BIP39_TEST_VECTOR_MNEMONIC, HEX_KEY_ALL_A, INVALID_NSEC } from './fixtures/mnemonics'
 
 /**
  * Fail-loud secret resolution (M2): a corrupted secret must throw, never silently
@@ -8,14 +9,12 @@ import { resolveSparkMnemonicOrSeed } from '../src/lib/spark-client-manager'
  * string, so without validation a typo'd phrase resolves to a wallet with no funds.
  */
 
-const VALID_MNEMONIC = 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
-// last char flipped → checksum fails
-const BAD_NSEC = 'nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe6'
-const HEX_KEY = 'a'.repeat(64)
+const BAD_NSEC = INVALID_NSEC
+const HEX_KEY = HEX_KEY_ALL_A
 
 describe('resolveArkadePrivateKeyHex (fail-loud)', () => {
   it('accepts a valid BIP39 mnemonic and a hex key', () => {
-    expect(resolveArkadePrivateKeyHex(VALID_MNEMONIC, true)).toMatch(/^[0-9a-f]{64}$/)
+    expect(resolveArkadePrivateKeyHex(BIP39_TEST_VECTOR_MNEMONIC, true)).toMatch(/^[0-9a-f]{64}$/)
     expect(resolveArkadePrivateKeyHex(HEX_KEY, true)).toBe(HEX_KEY)
   })
 
@@ -26,14 +25,14 @@ describe('resolveArkadePrivateKeyHex (fail-loud)', () => {
   it('throws on an invalid mnemonic instead of deriving a wrong wallet', () => {
     expect(() => resolveArkadePrivateKeyHex('definitely not a mnemonic', true)).toThrow(/invalid wallet secret/i)
     expect(() =>
-      resolveArkadePrivateKeyHex(VALID_MNEMONIC.replace(/about$/, 'abandon'), true),
+      resolveArkadePrivateKeyHex(BIP39_TEST_VECTOR_MNEMONIC.replace(/about$/, 'abandon'), true),
     ).toThrow(/invalid wallet secret/i)
   })
 })
 
 describe('resolveSparkMnemonicOrSeed (fail-loud)', () => {
   it('passes mnemonics/hex through unchanged (SDK validates those itself)', () => {
-    expect(resolveSparkMnemonicOrSeed(VALID_MNEMONIC)).toBe(VALID_MNEMONIC)
+    expect(resolveSparkMnemonicOrSeed(BIP39_TEST_VECTOR_MNEMONIC)).toBe(BIP39_TEST_VECTOR_MNEMONIC)
     expect(resolveSparkMnemonicOrSeed(HEX_KEY)).toBe(HEX_KEY)
   })
 

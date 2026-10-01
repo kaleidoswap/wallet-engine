@@ -18,7 +18,7 @@ export interface LiquidPsetReview {
   uniqueId: string
   inputCount: number
   outputCount: number
-  inputs: Array<{ index: number; txid: string; vout: number; sighash: number; issuanceAsset?: string; issuanceToken?: string }>
+  inputs: Array<{ index: number; txid: string; vout: number; sighash?: number; issuanceAsset?: string; issuanceToken?: string }>
   outputs: Array<{ index: number; scriptPubKey: string; amount?: string; assetId?: string; blinderIndex?: number }>
   fee: string
   balances: Array<{ assetId: string; amount: string }>

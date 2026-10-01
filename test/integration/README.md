@@ -31,6 +31,41 @@ Without `ALICE_MNEMONIC` + `BOB_MNEMONIC`, every suite reports as skipped.
 - **Send paths (opt-in):** Alice→Bob transfers move real test-network funds and
   are OFF unless you set `RUN_SEND_TESTS=1`.
 
+### The sats come back
+
+Every send test runs one way — Alice pays Bob — so before this each run left
+Alice short by the amount plus a fee and Bob up by the amount. Alice is the only
+wallet that ever pays, so Alice is the only wallet that ever empties, on a
+schedule set by how often CI runs. The suite was spending its own preconditions.
+
+Teardown now sends the same amount back, which makes a run cost the two fees it
+genuinely spent rather than a wallet. It runs only when a send actually
+happened, after the assertions have reported, and it never fails the suite: a
+return that does not go through is a funding fact for the next run to surface,
+not evidence about the adapter. `RETURN_TEST_FUNDS=0` leaves the balance where
+the test put it.
+
+The return leg is not enough on Arkade on its own — see below.
+
+### Arkade: settle before the batch expires
+
+Arkade VTXOs live in a batch with an expiry, and a VTXO that is not settled
+before it lapses is swept by the server. On 2026-09-08 that is what happened to
+these wallets: Bob's Arkade balance was 76 VTXOs of 100 sat — one per send test
+ever run — and every one of them reads `swept`, which is why his spendable
+balance is 0 while his total is not. Alice's single 1,422,628-sat VTXO passed
+the same expiry.
+
+The SDK settles periodically by itself, and for these wallets that settle is
+throwing (`Error during periodic settle: invalid scalar: out of range`, visible
+in any run's stderr) so nothing is renewed. Until that is fixed, Arkade funds
+here have a shelf life, and a returned 100 sat expires as surely as a sent one.
+
+Both wallets also hold ~1.59M sat in **confirmed boarding UTXOs that were never
+onboarded**. Those are on-chain and safe, and they are also invisible to
+`spendable` — which is the other reason a send can report `Insufficient funds`
+against a healthy-looking total.
+
 ### When a wallet runs dry
 
 A send test whose wallet cannot cover the amount plus a fee buffer **skips**,
@@ -72,6 +107,124 @@ dispatch input.
 Note that a zero **spendable** balance is not always an empty wallet: on Arkade,
 boarding UTXOs that were never onboarded read as 0 spendable while the funds are
 there. Check before sending sats — the fix may be an onboard, not a faucet.
+
+### The Mutinynet indexer is ours
+
+Both the Arkade and RGB-L1 suites default to `https://esplora.signet.kaleidoswap.com`,
+not the public `https://mutinynet.com/api`. The public one answers CI with a
+plain nginx **429**: our GitLab and GitHub runners share a box, so one egress IP
+carries everyone's requests. `@utexo/rgb-sdk` renders any `goOnline` failure as
+`Failed to establish online connection`, so that rate limit was indistinguishable
+from an outage and the RGB-L1 red went unread for weeks — the suite now prints
+the whole `cause` chain, which is how it surfaced.
+
+Ours is the same chain, not a similar one: MutinyWallet/electrs `new-index` with
+`--signet-magic`, the only esplora build that indexes Mutinynet's custom signet.
+Override with `MUTINYNET_ESPLORA_URL`, or per consumer with `ARKADE_ESPLORA_URL`
+/ `RGB_INDEXER_URL`.
+
+### RGB-L1 state is not derivable from the seed
+
+rgb-lib keeps its wallet in SQLite under `RGB_DATA_DIR`, and which assets a
+wallet holds is known **only** to that database — a seed does not reconstruct
+it. Delete the directory and the wallet forgets its assets, though the coins
+themselves are still on-chain.
+
+That matters for the issuance test, which reuses an asset either wallet already
+holds and issues only when neither does. A local run with a persistent
+`RGB_DATA_DIR` reuses; CI, whose data directory is ephemeral, issues a fresh
+asset each run. That costs one colorable UTXO and an on-chain fee per run —
+a few hundred signet sats against the ~1.59M each wallet holds, so thousands
+of runs — and the assets do not accumulate anywhere, because the database they
+are recorded in does not survive the runner.
+
+**Do not cache the CI data directory to avoid that.** It was tried, and it
+breaks the suite outright: the cached database is authoritative about which
+UTXOs the wallet owns, any other instance of the same seed spends some of
+them, and the next restore fails `goOnline` with
+
+```
+RgbLib(Inconsistency { details: "spent bitcoins with another wallet: [...]" })
+```
+
+An RGB database can only be shared by instances that are the sole users of
+their seed, which a test wallet run from CI and from laptops is not. `goOnline`
+takes a skip-consistency-check flag; suppressing this particular check would be
+hiding a real accounting disagreement about spent coins.
+
+`RGB_FORCE_ISSUANCE=1` issues regardless, for a run whose point is issuance.
+
+### Colorable UTXOs, and the two receive modes
+
+rgb-lib runs `maxAllocationsPerUtxo: 1` here, so each allocation occupies a
+whole colorable UTXO. Who needs one depends on the receive mode:
+
+| | sender | recipient |
+|---|---|---|
+| **blinded** receive | 1 (for the change) | 1 (to receive into) |
+| **witness** receive | 1 (for the change) | **0** — the sender creates the output |
+
+Witness receive is therefore the mode that works for a wallet that has never
+held RGB, and the suite covers both.
+
+A witness send also needs `witnessData: { amountSat }` from the **sender** — it
+is creating the output, so it has to say how many sats go in it. Without it
+rgb-lib refuses with `InvalidRecipientData { "missing witness data for a
+witness recipient" }`. A blinded invoice carries its own outpoint and needs
+none. 1000 sat matches rgb-lib's own colorable UTXOs and clears dust.
+
+**Witness receive can be verified once per (wallet, proxy), and then reports
+`RecipientIDAlreadyUsed` forever.** A witness recipient id is derived from the
+wallet's keychain with no outpoint to vary it, and this database is ephemeral
+per runner, so every run regenerates the same id. The transport proxy retains
+`recipient id → consignment` indefinitely, so the second use is rejected and
+stays rejected.
+
+That is why witness receive passed on the run that introduced it and has
+skipped on every run since. A **blinded** id derives from a real outpoint, which
+differs each run, and is unaffected.
+
+The suite's invoices use `durationSeconds: 120` rather than rgb-lib's 2000s
+default, which is good hygiene but is **not** the fix — expiry was the first
+theory and it was wrong: a run more than an hour later, with every window long
+past, still collided.
+
+Genuinely fixing it needs the recipient id to differ across runs — a proxy we
+control and can reset, or rgb-lib state that advances the keychain without
+reintroducing the `goOnline` inconsistency that killed caching. Until then the
+skip states the constraint rather than implying it is transient.
+
+`createRgbUtxos` **broadcasts a transaction**, and its outputs do not exist for
+the wallet until that transaction confirms. Creating one and immediately
+sending fails with `InsufficientAllocationSlots` — which reads like a broken
+transfer and means "the UTXO I just asked for has not arrived". `ensureColorableSlots`
+creates and then polls until the slots are real, and the suite prepares both
+wallets early so confirmation has the rest of the file to happen in.
+
+A second send in the same run has to **wait**: the first one's change is an
+unconfirmed allocation, so the sender's `available` reads 0 against a `total`
+of nearly the whole supply until it settles. Without waiting, whichever receive
+mode runs second always skips and never executes — covered on paper, reporting
+nothing.
+
+Settling takes **both sides**. A transfer goes `WAITING_COUNTERPARTY →
+WAITING_CONFIRMATIONS → SETTLED`, and the first step is the *recipient*
+refreshing and accepting the consignment — nothing the sender does moves it. So
+`waitForSpendableAsset` refreshes the counterparty too, and reports the
+transfer's state, so a timeout says where it got stuck instead of just that it
+did.
+
+This is the failure mode to expect from RGB tests generally: whether a wallet
+has a spare slot depends on what earlier runs left **on-chain**, which outlives
+the ephemeral rgb-lib database. The same commit can pass or fail depending on
+which run went first, so preconditions here wait rather than assume.
+
+Reuse keys off what a wallet **holds** (`total`), not what it can spend
+(`available`). They differ: after a transfer the sender's change allocation is
+unconfirmed, so `available` reads 0 against a `total` of nearly the whole
+supply. The transfer test skips on that shortfall the way the BTC suites skip a
+drained wallet, and `sendOrSkip` catches rgb-lib's own `InsufficientAssignments`
+refusal when the precondition is too optimistic.
 
 ### Skipping a protocol
 

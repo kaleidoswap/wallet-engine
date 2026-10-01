@@ -39,7 +39,9 @@ afterEach(() => {
 const ARK_ADDR = 'tark1qexampleexampleexampleexampleexampleexampleexampleexample'
 
 function connected<T extends object>(adapter: T, account: any, extra: Record<string, unknown> = {}): T {
-  Object.assign(adapter as any, { connected: true, account, ...extra })
+  // `wallet` as well as `account`: the Arkade adapter builds its SDK wallet
+  // directly, the others still go through a WDK account.
+  Object.assign(adapter as any, { connected: true, account, wallet: account, ...extra })
   return adapter
 }
 
@@ -55,7 +57,9 @@ describe('G-F1: ArkadeWdkAdapter Ark-transfer send — confirmed with empty txid
   })
 
   it('contrast: the on-chain path in the SAME file does throw on empty hash', async () => {
-    const adapter = connected(new ArkadeWdkAdapter(), { sendTransaction: async () => ({}) })
+    // `sendBitcoin` resolving to an empty txid is the SDK-direct shape of the
+    // same hazard: a send that reports success with nothing to reconcile.
+    const adapter = connected(new ArkadeWdkAdapter(), { sendBitcoin: async () => '' })
     await expect(
       adapter.sendBtcOnchain({ address: 'bc1qexampleexampleexampleexampleexampleexample', amount: 9_000 }),
     ).rejects.toThrow(/did not return a transaction id/i)
@@ -208,13 +212,19 @@ describe('G-F7: capabilities flags must match what the adapter actually does', (
   })
 
   it('b) [FIXED] ARKADE honours createInvoice({layer:BTC_LN}) instead of returning an Ark address', async () => {
-    const adapter = connected(new ArkadeWdkAdapter(), {
-      getAddress: async () => ARK_ADDR,
-      createLightningInvoice: async (amount: number) => ({
-        invoice: `lnbc${amount}1pboltz`,
-        paymentHash: 'ph-boltz',
-      }),
-    })
+    const adapter = connected(
+      new ArkadeWdkAdapter(),
+      { getAddress: async () => ARK_ADDR },
+      // Lightning receive belongs to the Boltz swaps client now, not the wallet.
+      {
+        swaps: {
+          createLightningInvoice: async ({ amount }: { amount: number }) => ({
+            invoice: `lnbc${amount}1pboltz`,
+            paymentHash: 'ph-boltz',
+          }),
+        },
+      },
+    )
     expect(adapter.capabilities).toContain('lightning-receive')
     const inv = await adapter.createInvoice({ amount: 1000, layer: 'BTC_LN' } as any)
     // Fixed by audit finding F-F8: was ARK_ADDR with paymentHash ''.

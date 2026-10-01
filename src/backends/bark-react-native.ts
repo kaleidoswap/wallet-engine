@@ -1,6 +1,6 @@
 export { BarkReactNativeBackend } from './BarkReactNativeBackend.js'
-export { BarkBackendError } from '../types/bark.js'
+export { BarkBackendError } from '../types/bark-native.js'
 export type {
-  BarkConfig, BarkBalance, BarkArkPaymentRequest, BarkArkPaymentResult,
+  BarkReactNativeConfig, BarkBalance, BarkArkPaymentRequest, BarkArkPaymentResult,
   BarkWalletInfo, BarkBackendErrorCode, BarkMovement,
-} from '../types/bark.js'
+} from '../types/bark-native.js'

@@ -86,7 +86,28 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     boarding: true,
     invoiceExpiry: true,
     needsChannelLiquidity: false,
-    wdkModule: '@arkade-os/wdk',
+    // The Arkade adapter builds on `@arkade-os/sdk` directly; `@arkade-os/wdk`
+    // is no longer a dependency of this path and installing it buys nothing.
+    wdkModule: '@arkade-os/sdk',
+    maturity: 'beta',
+  },
+  BARK: {
+    protocol: 'BARK',
+    layers: ['BTC_BARK', 'BTC_L1', 'BTC_LN'],
+    supportsOnchain: true, // boarding + offboard/sendOnchain
+    supportsLightning: true, // the Ark server gateways it — no Boltz, no channels
+    // The bindings expose payLightningOffer, but this adapter's send path does
+    // not route `lno1…` yet — see the B-F5 regression test.
+    supportsBolt12: false,
+    supportsAssets: false, // BTC only
+    supportsSwaps: false,
+    zeroFee: false,
+    // Bark hands out a fresh address per call and rotates key indices.
+    staticReceiveAddress: false,
+    boarding: true,
+    invoiceExpiry: true,
+    needsChannelLiquidity: false,
+    wdkModule: '@secondts/bark',
     maturity: 'beta',
   },
   RGB_LN: {

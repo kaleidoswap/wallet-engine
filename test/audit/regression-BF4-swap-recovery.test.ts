@@ -60,15 +60,15 @@ describe('B-F4: durable pre-execution swap recovery', () => {
     const client = {
       maker: {
         initSwap: async () => ({
-          swapstring: 'swap-string',
-          payment_hash: 'payment-live',
+          swapstring: '100000/rgb:USDT/5000/btc/1790000000/cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          payment_hash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
           access_token: 'bearer-live',
         }),
         executeSwap: async () => {
           const records = [...values.values()].map((raw) => JSON.parse(raw))
           executeSawDurableRecord = records.some((record) =>
             record.quoteId === quote.id &&
-            record.paymentHash === 'payment-live' &&
+            record.paymentHash === 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc' &&
             record.accessToken === 'bearer-live' &&
             record.state === 'executing',
           )
@@ -91,7 +91,7 @@ describe('B-F4: durable pre-execution swap recovery', () => {
       const restarted = connectedNative(client)
       expect(await restarted.listIncompleteSwaps()).toMatchObject([{
         quoteId: quote.id,
-        paymentHash: 'payment-live',
+        paymentHash: 'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
         accessToken: 'bearer-live',
         state: 'execution_unknown',
       }])

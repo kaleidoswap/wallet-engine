@@ -256,13 +256,112 @@ export class RgbLibWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return { psbt: signed ?? psbtHex, unchanged: !signed || signed === psbtHex }
   }
 
+  /**
+   * Unspent outputs with their RGB allocations.
+   *
+   * The only way to answer "can this wallet receive or spend an RGB allocation
+   * right now", which `createRgbUtxos` cannot: creating a colorable UTXO
+   * broadcasts a transaction, and the output is unusable until it confirms. A
+   * caller that treats creation as instantaneous gets
+   * `InsufficientAllocationSlots` from the send instead.
+   */
+  async listUnspents(): Promise<Array<{ utxo: { outpoint: { txid: string; vout: number }; btcAmount: number; colorable: boolean }; rgbAllocations: unknown[] }>> {
+    this.assertConnected()
+    return (await this.account.listUnspents()) ?? []
+  }
+
+  /** Colorable UTXOs carrying no allocation — the slots a receive or a change output can use. */
+  async countFreeColorableSlots(): Promise<number> {
+    const unspents = await this.listUnspents()
+    return unspents.filter((u) => u?.utxo?.colorable && (u.rgbAllocations?.length ?? 0) === 0).length
+  }
+
   async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }): Promise<{ success: boolean }> {
     this.assertConnected()
     await this.account.createUtxos(params)
     return { success: true }
   }
 
-  async sendAsset(params: { token: string; recipient: string; amount: number; feeRate?: number; minConfirmations?: number }): Promise<any> {
+  /**
+   * Issue a NIA (Non-Inflatable Asset).
+   *
+   * Parity with `RgbLibWasmAdapter.issueAssetNia`, which shipped first (#76) —
+   * same parameters, same guarantees — so a host can feature-detect one API and
+   * get the same contract from either backing. The call shapes underneath do
+   * not match (this one takes an options object, the wasm binding takes
+   * positional arguments), which is exactly why the difference belongs here
+   * rather than at every call site.
+   *
+   * Not part of `IProtocolAdapter`: only the RGB-L1 adapters can issue, so
+   * callers feature-detect with `typeof adapter.issueAssetNia === 'function'`.
+   */
+  async issueAssetNia(params: {
+    ticker: string
+    name: string
+    precision?: number
+    amounts: number[]
+  }): Promise<UnifiedAsset> {
+    this.assertConnected()
+    if (!Array.isArray(params.amounts) || params.amounts.length === 0) {
+      throw new ProtocolError('At least one issuance amount is required', 'RGB_L1', 'BAD_REQUEST')
+    }
+    const amounts = params.amounts.map(Number)
+    // Amounts cross into rgb-lib as u64; a non-integer or negative would be
+    // truncated or rejected with an opaque binding error further down.
+    if (!amounts.every((n) => Number.isSafeInteger(n) && n > 0)) {
+      throw new ProtocolError('Issuance amounts must be positive safe integers', 'RGB_L1', 'BAD_REQUEST', {
+        amounts: params.amounts,
+      })
+    }
+
+    let issued: any
+    try {
+      issued = await this.account.issueAssetNia({
+        ticker: params.ticker,
+        name: params.name,
+        precision: Number(params.precision ?? 0),
+        amounts,
+      })
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      throw new ProtocolError(`NIA issuance failed: ${msg}`, 'RGB_L1', 'ISSUANCE_FAILED', { message: msg })
+    }
+
+    const normalized = normalizeAsset(issued)
+    // Issuance needs a colorable UTXO. Without one rgb-lib can answer without
+    // an asset id, and a hollow success here would be reported as an issued
+    // asset that does not exist.
+    if (!normalized.asset_id) {
+      throw new ProtocolError(
+        'NIA issuance returned no asset id — the wallet may have no colorable UTXO',
+        'RGB_L1',
+        'ISSUANCE_FAILED',
+      )
+    }
+    return rgbNiaAsset(normalized, RGB_L1_PROFILE)
+  }
+
+  /**
+   * Send an RGB asset to an invoice.
+   *
+   * `witnessData` is required when the invoice is a **witness** receive: there
+   * the sender creates the output the asset lands on, so it has to say how many
+   * sats to put in it — rgb-lib refuses with `InvalidRecipientData { "missing
+   * witness data for a witness recipient" }` otherwise. A blinded invoice
+   * carries its own outpoint and needs none.
+   *
+   * `amountSat` is a real on-chain output and must clear dust; rgb-lib's own
+   * colorable UTXOs are 1000 sat, which is the sane default for a caller that
+   * has no reason to prefer another.
+   */
+  async sendAsset(params: {
+    token: string
+    recipient: string
+    amount: number
+    feeRate?: number
+    minConfirmations?: number
+    witnessData?: { amountSat: number; blinding?: number }
+  }): Promise<any> {
     this.assertConnected()
     return this.account.transfer(params)
   }

@@ -81,6 +81,10 @@ const RE = {
   // here — it belongs to BIP352 Silent Payments, so matching it as Spark would
   // misroute funds. Longest prefixes first.
   spark: /^(sparkrt|sparkt|sparkl|spark|sprt|spl)1[0-9a-z]{6,}$/i,
+  // Both Arks share this HRP — Arkade (@arkade-os/sdk) and bark (Second).
+  // The payloads differ (65 vs 75 bytes) and each SDK rejects the other's, so
+  // a destination classified `arkade` still has to be validated by whichever
+  // adapter is about to spend. See test/ark-address-disambiguation.test.ts.
   arkade: /^(ark|tark)1[0-9a-z]{6,}$/i,
   // Liquid bech32/blech32 (`lq1` confidential, `ex1` unconfidential, + testnet/
   // regtest). Legacy confidential base58 goes through

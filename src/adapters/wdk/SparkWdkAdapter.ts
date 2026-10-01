@@ -38,6 +38,7 @@ import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
 import { waitForLightningSendSettlement } from '../../lib/spark-lightning-settlement'
+import { sweepWindow } from '../../lib/spark-deposit-sweep-window'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import {
   formatAmount,
@@ -812,7 +813,13 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     return { status: 'claimed', txids: claimedTxids }
   }
 
-  async sweepSparkL1Deposits(): Promise<{ addressesChecked: number; claimedTxids: string[]; errors: string[] }> {
+  async sweepSparkL1Deposits(options?: { limit?: number; offset?: number }): Promise<{
+    addressesChecked: number
+    addressesTotal: number
+    nextOffset: number
+    claimedTxids: string[]
+    errors: string[]
+  }> {
     this.assertConnected()
     const wallet = this.rawWallet
 
@@ -822,15 +829,24 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     } catch (error: unknown) {
       return {
         addressesChecked: 0,
+        addressesTotal: 0,
+        nextOffset: 0,
         claimedTxids: [],
         errors: [error instanceof Error ? error.message : 'getUnusedDepositAddresses failed'],
       }
     }
-    if (!unused || unused.length === 0) return { addressesChecked: 0, claimedTxids: [], errors: [] }
+    if (!unused || unused.length === 0) {
+      return { addressesChecked: 0, addressesTotal: 0, nextOffset: 0, claimedTxids: [], errors: [] }
+    }
 
+    // One UTXO lookup per address, against a set that grows with every receive.
+    // A windowed caller walks it a slice at a time instead of paying for the
+    // whole set on every tick; `nextOffset` wraps so nothing is skipped forever.
+    const total = unused.length
+    const window = sweepWindow(unused, options)
     const claimedTxids: string[] = []
     const errors: string[] = []
-    for (const addr of unused) {
+    for (const addr of window.addresses) {
       try {
         const utxos = await wallet.getUtxosForDepositAddress(addr, 10, 0, true)
         if (!utxos || utxos.length === 0) continue
@@ -847,7 +863,13 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       }
     }
     if (claimedTxids.length > 0) invalidateSparkBalanceCache()
-    return { addressesChecked: unused.length, claimedTxids, errors }
+    return {
+      addressesChecked: window.addresses.length,
+      addressesTotal: total,
+      nextOffset: window.nextOffset,
+      claimedTxids,
+      errors,
+    }
   }
 
   // --- On-chain / asset send ---------------------------------------------
