@@ -1,3 +1,4 @@
+import { classifyDestination } from '../router/destination.js'
 import { BaseBarkAdapter } from './BaseBarkAdapter.js'
 import { BarkReactNativeBackend } from '../backends/BarkReactNativeBackend.js'
 import { positiveSats } from '../backends/bark-convert.js'
@@ -74,6 +75,11 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
     if (request.maxFeeSats !== undefined) throw new CapabilityError('Bark cannot enforce a payment fee cap', 'BARK')
     const wallet = this.backend.getWalletPort()
     const timestamp = this.runtime.now()
+    if (classifyDestination(target).kind === 'BTC_ONCHAIN') {
+      positiveSats(amountOverride!)
+      const txid = await wallet.sendOnchain(target, amountOverride!)
+      return { paymentHash: txid, txid, amount: amountOverride!, fee: 0, feeKnown: false, status: 'pending', timestamp }
+    }
     if (this.backend.isBarkAddress(target)) {
       positiveSats(amountOverride!)
       await this.backend.sendArkPayment({ address: target, amountSats: amountOverride! })

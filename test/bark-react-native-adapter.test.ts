@@ -98,6 +98,12 @@ describe('native Bark adapter', () => {
     expect(router.resolveReceive('BTC_BARK')[0].protocol).toBe('BARK')
   })
 
+  it('pays a routed Bitcoin address through the core payment contract', async () => {
+    const result = await adapter.sendPayment({ invoice: 'tb1qtestaddress', amount: 1000 })
+    expect(f.wallet.sendOnchain).toHaveBeenCalledWith('tb1qtestaddress', 1000n)
+    expect(result).toMatchObject({ txid: 'txid', status: 'pending', amount: 1000, feeKnown: false })
+  })
+
   it('normalizes history and filters by asset and status', async () => {
     const [tx] = await adapter.listTransactions({ asset: 'BTC', status: 'confirmed' })
     expect(tx.protocolData?.paymentHash).toBe(TEST_PAYMENT_HASH)

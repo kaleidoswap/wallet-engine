@@ -3081,6 +3081,10 @@ packages:
     resolution: {integrity: sha512-Z35jgnF9+4wHRaR9ulypUKOSEwNqksPxW/bJDOzNN4ERyVxzhPOvokjY3Zoi7B+rnD/LLXDYGiPMnPUxXL961g==}
     engines: {bare: '>=1.17.4'}
 
+  uint8array-tools@0.0.10:
+    resolution: {integrity: sha512-sSbrZqlr04w4p8KKpHw0ME/R4JzQaadum+BWhMlk2M7LrDyXWTfJOco3d1jNMdQNxgk5DDm88R3IWYH0nR+tzQ==}
+    engines: {node: '>=14.0.0'}
+
   uint8array-tools@0.0.8:
     resolution: {integrity: sha512-xS6+s8e0Xbx++5/0L+yyexukU7pz//Yg6IHg3BKhXotg1JcYtgxVcUctQ0HxLByiJzpAkNFawz1Nz5Xadzo82g==}
     engines: {node: '>=14.0.0'}
@@ -3136,8 +3140,8 @@ packages:
   varuint-bitcoin@1.1.2:
     resolution: {integrity: sha512-4EVb+w4rx+YfVM32HQX42AbbT7/1f5zwAYhIujKXKk8NQK+JfRVl3pqT3hjNn/L+RstigmGGKVwHA/P0wgITZw==}
 
-  varuint-bitcoin@2.0.0:
-    resolution: {integrity: sha512-6QZbU/rHO2ZQYpWFDALCDSRsXbAs1VOEmXAxtbtjLtKuMJ/FQ8YbhfxlaiKv5nklci0M6lZtlZyxo9Q+qNnyog==}
+  varuint-bitcoin@2.0.1:
+    resolution: {integrity: sha512-TTl5qSPJ3FzjuTHo0Ex9WUE3jTxnUsQHR38vIDhHApoVstzJK4gE20WqmTWOT5oo7ilvOSNejXt4CJrfDcqm5A==}
 
   vite@7.3.6:
     resolution: {integrity: sha512-4XP60spRGjSZFf1qYH+dJIkK2znL3zQfl9KkOV9MkkRR/3Dls0dxaBsQPTloEc5BLXWPL9vsOxopxyKoMmDueg==}
@@ -3589,7 +3593,7 @@ snapshots:
       '@bitcoinerlab/miniscript': 2.0.0
       lodash.memoize: 4.1.2
       uint8array-tools: 0.0.9
-      varuint-bitcoin: 2.0.0
+      varuint-bitcoin: 2.0.1
     optionalDependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
@@ -7029,6 +7033,8 @@ snapshots:
       - bare-url
       - react-native-b4a
 
+  uint8array-tools@0.0.10: {}
+
   uint8array-tools@0.0.8: {}
 
   uint8array-tools@0.0.9: {}
@@ -7069,9 +7075,9 @@ snapshots:
     dependencies:
       safe-buffer: 5.2.1
 
-  varuint-bitcoin@2.0.0:
+  varuint-bitcoin@2.0.1:
     dependencies:
-      uint8array-tools: 0.0.8
+      uint8array-tools: 0.0.10
 
   vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1):
     dependencies:

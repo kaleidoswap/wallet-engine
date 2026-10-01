@@ -223,7 +223,7 @@ describe('BarkAdapter payments', () => {
     const adapter = new BarkAdapter()
     await adapter.connect(CONFIG as never)
     await expect(
-      adapter.sendPayment({ invoice: 'bc1qw508d6qejxtdg4y5r3zarvary0c5xw7kv8f3t4' }),
+      adapter.sendPayment({ invoice: 'not-a-payment-destination' }),
     ).rejects.toThrow(/Unsupported bark destination/)
   })
 })

@@ -1,5 +1,6 @@
+import { classifyDestination } from '../router/destination.js'
 /**
- * Bark Protocol Adapter — Second's Ark implementation via `@secondts/bark`.
+ * Shared Bark protocol behavior over a domain-only wallet port.
  *
  * BTC only: no assets, no channels, no native swaps. Lightning send and
  * receive run through the Ark server's gateway, so this adapter needs no
@@ -305,6 +306,13 @@ export class BaseBarkAdapter implements IProtocolAdapter {
     if (!target) throw new ValidationError('A destination is required', 'BARK')
 
     if (request.maxFeeSats !== undefined) throw new CapabilityError('Bark cannot enforce a payment fee cap', 'BARK')
+    if (classifyDestination(target).kind === 'BTC_ONCHAIN') {
+      if (!Number.isSafeInteger(request.amount) || request.amount! <= 0 || request.amount! > 2_100_000_000_000_000) {
+        throw new ValidationError('An on-chain send requires positive integer satoshis', 'BARK')
+      }
+      const txid = await this.wallet().sendOnchain(target, request.amount!)
+      return { paymentHash: txid, txid, amount: request.amount!, fee: 0, feeKnown: false, status: 'pending', timestamp: Date.now() }
+    }
     if (isLightningInvoice(target)) return this.payLightning(target, request.amount)
     if (this.client.isBarkAddress(target)) return this.payArkoor(target, request.amount)
     throw new ValidationError(
