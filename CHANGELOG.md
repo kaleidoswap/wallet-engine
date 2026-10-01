@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+- Spark `getPaymentStatus` resolves Lightning sends through the SSP send
+  request. It used to look them up as transfers, never found them, and left
+  callers polling a payment that had already settled.
+- Paying a BOLT11 invoice this Spark wallet already submitted no longer fails
+  with the operator's raw `ALREADY_EXISTS` error. The adapter returns the
+  earlier attempt's status and preimage, or, when that attempt failed, says the
+  invoice cannot be paid again and a new one is needed.
+
 ## [1.0.0-beta.73] - 2026-10-01
 
 ### Added

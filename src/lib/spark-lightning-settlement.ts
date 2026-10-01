@@ -103,3 +103,86 @@ export async function waitForLightningSendSettlement(
   )
   return pending(last)
 }
+
+const LIGHTNING_SEND_ENTITY_PREFIX = 'SparkLightningSendRequest:'
+const USER_REQUEST_PAGE_SIZE = 50
+const USER_REQUEST_MAX_PAGES = 4
+
+/** Whether a payment id names an SSP lightning send request rather than a Spark transfer. */
+export function isLightningSendRequestId(id: string): boolean {
+  return id.startsWith(LIGHTNING_SEND_ENTITY_PREFIX)
+}
+
+/**
+ * The operators keep one preimage swap per payment hash, so a second
+ * `payLightningInvoice` for an invoice this wallet already submitted — settled,
+ * in flight, or failed and refunded — is rejected with ALREADY_EXISTS.
+ */
+export function isDuplicatePreimageSwapError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err)
+  return /preimage request already exists/i.test(msg) ||
+    (/ALREADY_EXISTS/.test(msg) && /preimage_swap/i.test(msg))
+}
+
+/**
+ * Find this wallet's existing lightning send request for `invoice`, newest
+ * first, or null when none is found (or the lookup is unavailable).
+ */
+export async function findLightningSendForInvoice(
+  wallet: unknown,
+  invoice: string,
+): Promise<Record<string, unknown> | null> {
+  const getUserRequests = (
+    wallet as { getUserRequests?: (params: Record<string, unknown>) => Promise<unknown> }
+  ).getUserRequests?.bind(wallet)
+  if (!getUserRequests) return null
+
+  const target = invoice.trim().toLowerCase()
+  let after: string | undefined
+  for (let page = 0; page < USER_REQUEST_MAX_PAGES; page++) {
+    let conn: { entities?: Record<string, unknown>[]; pageInfo?: { hasNextPage?: boolean; endCursor?: string } } | null
+    try {
+      conn = (await getUserRequests({
+        first: USER_REQUEST_PAGE_SIZE,
+        ...(after ? { after } : {}),
+        types: ['LIGHTNING_SEND'],
+      })) as typeof conn
+    } catch (err) {
+      log.warn('[SparkLightning] user request lookup failed:', err)
+      return null
+    }
+    const match = conn?.entities?.find(
+      (e) => String(e.encodedInvoice ?? '').toLowerCase() === target,
+    )
+    if (match) return match
+    if (!conn?.pageInfo?.hasNextPage || !conn.pageInfo.endCursor) return null
+    after = conn.pageInfo.endCursor
+  }
+  return null
+}
+
+/**
+ * Current status of a lightning send request, or null when the wallet cannot
+ * look it up or the SSP does not know the id.
+ */
+export async function getLightningSendStatus(
+  wallet: unknown,
+  id: string,
+): Promise<{ status: LightningSettlement['status']; feeSats: number; timestamp: number } | null> {
+  const lookup = (
+    wallet as { getLightningSendRequest?: (id: string) => Promise<unknown> }
+  ).getLightningSendRequest?.bind(wallet)
+  if (!lookup) return null
+  const req = (await lookup(id.includes(':') ? id.split(':').pop()! : id)) as
+    | Record<string, unknown>
+    | null
+    | undefined
+  if (!req) return null
+  const settled = readLightningSettlement(req)
+  const created = Date.parse(String(req.createdAt ?? ''))
+  return {
+    status: settled?.status ?? 'pending',
+    feeSats: settled?.feeSats ?? 0,
+    timestamp: Number.isFinite(created) ? created : 0,
+  }
+}
