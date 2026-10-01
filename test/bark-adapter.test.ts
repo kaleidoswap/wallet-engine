@@ -169,6 +169,13 @@ describe('BarkAdapter balances', () => {
 })
 
 describe('BarkAdapter payments', () => {
+  it('refuses a fee cap the SDK cannot enforce before sending', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    await expect(adapter.sendPayment({ invoice: INVOICE, maxFeeSats: 20 })).rejects.toThrow(/cannot enforce/)
+    expect(wallet.payLightningInvoice).not.toHaveBeenCalled()
+  })
+
   it('reads the paid variant`s snake_case payment_hash', async () => {
     const adapter = new BarkAdapter()
     await adapter.connect(CONFIG as never)

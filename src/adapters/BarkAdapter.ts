@@ -314,7 +314,12 @@ export class BarkAdapter implements IProtocolAdapter {
     const target = request.invoice?.trim()
     if (!target) throw new ValidationError('A destination is required', 'BARK')
 
-    if (isLightningInvoice(target)) return this.payLightning(target, request.amount)
+    if (isLightningInvoice(target)) {
+      if (request.maxFeeSats !== undefined) {
+        throw new CapabilityError('This Bark SDK cannot enforce maxFeeSats; no payment was sent', 'BARK')
+      }
+      return this.payLightning(target, request.amount)
+    }
     if (isBarkAddress(target)) return this.payArkoor(target, request.amount)
     throw new ValidationError(
       'Unsupported bark destination: expected a bolt11 invoice or a bark ark address',
