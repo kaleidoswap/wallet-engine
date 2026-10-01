@@ -24,6 +24,7 @@ import {
 } from "../lib/spark-sent-token-records";
 import { sparkClientManager } from "../lib/spark-client-manager";
 import { sweepWindow } from "../lib/spark-deposit-sweep-window";
+import { claimStaticDeposits, supportsStaticDeposits } from "../lib/spark-static-deposit";
 import { SparkConfig, SparkTransfer } from "../types/spark";
 import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
 import {
@@ -897,9 +898,10 @@ export class SparkAdapter implements IProtocolAdapter {
         };
       }
 
-      // BTC on-chain deposit address
+      // BTC on-chain deposit address: the reusable static one, so a sender
+      // paying it twice never strands the second deposit.
       if (!assetId || assetId === "BTC" || assetId.toLowerCase() === "btc") {
-        const address = await wallet.getSingleUseDepositAddress();
+        const address = await wallet.getStaticDepositAddress();
         return {
           address,
           format: "BTC_ADDRESS",
@@ -932,6 +934,14 @@ export class SparkAdapter implements IProtocolAdapter {
     }
     const wallet = sparkClientManager.getWallet();
 
+    if (supportsStaticDeposits(wallet) && address === (await wallet.getStaticDepositAddress())) {
+      const claim = await claimStaticDeposits(wallet, address);
+      if (claim.claimedTxids.length > 0) return { status: "claimed", txids: claim.claimedTxids };
+      if (claim.errors.length > 0) return { status: "error", error: claim.errors[claim.errors.length - 1] };
+      return { status: "awaiting" };
+    }
+
+    // Single-use address issued before receive moved to the static address.
     let utxos: Array<{ txid: string; vout: number }>;
     try {
       utxos = await wallet.getUtxosForDepositAddress(address, 10, 0, true);
@@ -960,11 +970,11 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   /**
-   * Sweep every previously-generated single-use deposit address still unclaimed and
-   * credit confirmed UTXOs paid to them. Each `getSingleUseDepositAddress()` call
-   * returns a NEW address, so a deposit to an earlier session's address would
-   * otherwise stay stranded — the deposit-screen poller only watches the current
-   * one. Run on unlock and when the deposit screen opens.
+   * Claim deposits to the static receive address, then sweep every
+   * previously-generated single-use deposit address still unclaimed. Receive
+   * used to issue a NEW single-use address each time, so a deposit to an earlier
+   * session's address would otherwise stay stranded. Run on unlock and when the
+   * deposit screen opens.
    */
   async sweepSparkL1Deposits(options?: { limit?: number; offset?: number }): Promise<{
     addressesChecked: number;
@@ -977,7 +987,20 @@ export class SparkAdapter implements IProtocolAdapter {
       throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
     }
     const wallet = sparkClientManager.getWallet();
+    const claimedTxids: string[] = [];
+    const errors: string[] = [];
 
+    if (supportsStaticDeposits(wallet)) {
+      try {
+        const claim = await claimStaticDeposits(wallet, await wallet.getStaticDepositAddress());
+        claimedTxids.push(...claim.claimedTxids);
+        errors.push(...claim.errors);
+      } catch (error: unknown) {
+        errors.push(error instanceof Error ? error.message : "static deposit claim failed");
+      }
+    }
+
+    // Single-use addresses issued before receive moved to the static address.
     let unused: string[];
     try {
       unused = await wallet.getUnusedDepositAddresses();
@@ -986,8 +1009,8 @@ export class SparkAdapter implements IProtocolAdapter {
         addressesChecked: 0,
         addressesTotal: 0,
         nextOffset: 0,
-        claimedTxids: [],
-        errors: [error instanceof Error ? error.message : "getUnusedDepositAddresses failed"],
+        claimedTxids,
+        errors: [...errors, error instanceof Error ? error.message : "getUnusedDepositAddresses failed"],
       };
     }
     if (!unused || unused.length === 0) {
@@ -995,8 +1018,8 @@ export class SparkAdapter implements IProtocolAdapter {
         addressesChecked: 0,
         addressesTotal: 0,
         nextOffset: 0,
-        claimedTxids: [],
-        errors: [],
+        claimedTxids,
+        errors,
       };
     }
 
@@ -1005,8 +1028,6 @@ export class SparkAdapter implements IProtocolAdapter {
     // whole set on every tick; `nextOffset` wraps so nothing is skipped forever.
     const total = unused.length;
     const window = sweepWindow(unused, options);
-    const claimedTxids: string[] = [];
-    const errors: string[] = [];
     for (const addr of window.addresses) {
       try {
         const utxos = await wallet.getUtxosForDepositAddress(addr, 10, 0, true);
