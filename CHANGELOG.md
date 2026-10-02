@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.75] - 2026-10-02
+
 ### Fixed
 - Spark `sendPayment` to a Bitcoin address (both adapters) withdraws on-chain
   again. spark-sdk's `isValidSparkAddress` throws on non-Spark input instead
