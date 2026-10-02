@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+- Spark `sendPayment` to a Bitcoin address (both adapters) withdraws on-chain
+  again. spark-sdk's `isValidSparkAddress` throws on non-Spark input instead
+  of returning false, so the Spark-address branch aborted the send with
+  "Invalid Spark address prefix" before it reached the withdrawal.
+- Static deposit claims treat the SSP's "Transaction not found." (and the
+  SDK's "No such mempool or blockchain transaction") as awaiting rather than
+  an error while the deposit tx is still unseen.
+
 ## [1.0.0-beta.74] - 2026-10-02
 
 ### Changed

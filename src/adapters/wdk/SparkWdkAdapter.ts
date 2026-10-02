@@ -55,6 +55,7 @@ import {
   rawTokenIdFromBytes,
   tokenRefsMatch,
   txHashFromBytes,
+  isSparkAddressSafe,
 } from '../../lib/spark-helpers'
 import { getSparkBalanceCached, invalidateSparkBalanceCache } from '../../lib/spark-balance-cache'
 import {
@@ -461,7 +462,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       }
 
       // 2) Spark address or Spark invoice (WDK account).
-      if (this.sdk?.isValidSparkAddress?.(destination)) {
+      if (isSparkAddressSafe(destination, this.sdk?.isValidSparkAddress)) {
         const network = this.sdk.getNetworkFromSparkAddress(destination)
         const decoded = this.sdk.decodeSparkAddress(destination, network)
 
@@ -999,7 +1000,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
 
     try {
       // Spark token invoice → fulfillSparkInvoice.
-      if (this.sdk?.isValidSparkAddress?.(destination)) {
+      if (isSparkAddressSafe(destination, this.sdk?.isValidSparkAddress)) {
         const network = this.sdk.getNetworkFromSparkAddress(destination)
         const decoded = this.sdk.decodeSparkAddress(destination, network)
         if (decoded.sparkInvoiceFields) {

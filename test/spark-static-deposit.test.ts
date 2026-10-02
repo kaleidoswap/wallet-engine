@@ -89,6 +89,18 @@ describe('claimStaticDeposits', () => {
   })
 })
 
+describe('isAwaitingConfirmationError', () => {
+  it('treats unseen and under-confirmed deposits as awaiting', async () => {
+    const { isAwaitingConfirmationError } = await import('../src/lib/spark-static-deposit')
+    // Verbatim from Spark regtest, before the deposit tx was indexed.
+    expect(isAwaitingConfirmationError('Failed to execute GraphQL query: Request StaticDepositQuote failed. [{"message":"Transaction not found."}]')).toBe(true)
+    expect(isAwaitingConfirmationError('Invalid transaction hex [field: txHex, value: {"error":"No such mempool or blockchain transaction"}]')).toBe(true)
+    expect(isAwaitingConfirmationError('deposit does not have enough confirmations')).toBe(true)
+    expect(isAwaitingConfirmationError('Fee larger than max fee')).toBe(false)
+    expect(isAwaitingConfirmationError('utxo amount minus fees is less than the dust amount')).toBe(false)
+  })
+})
+
 describe.each([
   ['SparkAdapter', nativeAdapter],
   ['SparkWdkAdapter', wdkAdapter],

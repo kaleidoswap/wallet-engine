@@ -63,3 +63,38 @@ describe('SparkWdkAdapter.sendPayment Lightning (amountless invoice parity)', ()
     })
   })
 })
+
+describe('SparkWdkAdapter.sendPayment on-chain destination', () => {
+  it('withdraws to a Bitcoin address instead of failing the Spark-address check', async () => {
+    const withdrawCalls: any[] = []
+    const adapter = new SparkWdkAdapter()
+    Object.assign(adapter as any, {
+      connected: true,
+      // spark-sdk's validator throws on non-Spark input rather than returning false.
+      sdk: {
+        isValidSparkAddress: () => {
+          throw new Error('Invalid Spark address prefix')
+        },
+      },
+      account: {
+        _wallet: {
+          getWithdrawalFeeQuote: async () => ({
+            id: 'quote-1',
+            l1BroadcastFeeMedium: { originalValue: 1440 },
+            userFeeMedium: { originalValue: 750 },
+          }),
+          withdraw: async (opts: any) => {
+            withdrawCalls.push(opts)
+            return { id: 'exit-1' }
+          },
+        },
+      },
+    })
+    const result = await adapter.sendPayment({
+      invoice: 'bcrt1pzflae0sdljvlsacfdce8aum8dtgd2f5fvpjujze8wa6azh45z8wsg0ulw9',
+      amount: 10_000,
+    } as any)
+    expect(withdrawCalls).toHaveLength(1)
+    expect(result.paymentHash).toBe('exit-1')
+  })
+})
