@@ -39,6 +39,7 @@ function fixtures() {
     validateArkoorAddress: vi.fn().mockResolvedValue(true), sendArkoorPayment: vi.fn().mockResolvedValue(undefined),
     bolt11Invoice: vi.fn().mockResolvedValue({ invoice: INVOICE, paymentHash: TEST_PAYMENT_HASH, amountSats: 1000n }),
     payLightningInvoice: vi.fn().mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: TEST_PREIMAGE } }),
+    payLightningOffer: vi.fn().mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: TEST_PREIMAGE } }),
     lightningSendState: vi.fn().mockResolvedValue({ tag: 'Unknown' }),
     lightningReceiveState: vi.fn().mockRejectedValue(new Error('unknown')),
     sendOnchain: vi.fn().mockResolvedValue('txid'), broadcastTx: vi.fn().mockResolvedValue('claim-txid'),
@@ -145,6 +146,21 @@ describe('native Bark adapter', () => {
   it('leaves a bad settlement proof unknown', async () => {
     f.wallet.payLightningInvoice.mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: '00'.repeat(32) } })
     expect(await adapter.sendPayment({ invoice: INVOICE })).toMatchObject({ status: 'unknown', feeKnown: false })
+  })
+
+  it('pays a BOLT12 offer through payLightningOffer and waits for the proof', async () => {
+    const offer = 'lno1qcp4256ypq'
+    expect(await adapter.sendPayment({ invoice: offer, amount: 1000 })).toMatchObject({ paymentHash: TEST_PAYMENT_HASH,
+      preimage: TEST_PREIMAGE, amount: 1000, status: 'confirmed' })
+    expect(f.wallet.payLightningOffer).toHaveBeenCalledWith(offer, 1000n, true)
+    expect(f.wallet.payLightningInvoice).not.toHaveBeenCalled()
+  })
+
+  it('pays a fixed-amount offer at its own amount and keeps a bad proof unknown', async () => {
+    expect(await adapter.sendPayment({ invoice: 'LNO1QCP4256YPQ' })).toMatchObject({ status: 'confirmed' })
+    expect(f.wallet.payLightningOffer).toHaveBeenCalledWith('LNO1QCP4256YPQ', undefined, true)
+    f.wallet.payLightningOffer.mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: '00'.repeat(32) } })
+    expect(await adapter.sendPayment({ invoice: 'lno1qcp4256ypq' })).toMatchObject({ status: 'unknown' })
   })
 
   it('preserves pending Lightning amount and fee without marking it settled', async () => {
