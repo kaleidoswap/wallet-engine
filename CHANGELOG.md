@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.74] - 2026-10-02
+
 ### Changed
 - Spark on-chain receive (`getReceiveAddress('BTC')`) returns the wallet's
   static deposit address instead of a fresh single-use one. It is reusable, so
