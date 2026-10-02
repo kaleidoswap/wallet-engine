@@ -37,7 +37,13 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
-import { waitForLightningSendSettlement } from '../../lib/spark-lightning-settlement'
+import {
+  findLightningSendForInvoice,
+  getLightningSendStatus,
+  isDuplicatePreimageSwapError,
+  isLightningSendRequestId,
+  waitForLightningSendSettlement,
+} from '../../lib/spark-lightning-settlement'
 import { sweepWindow } from '../../lib/spark-deposit-sweep-window'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import {
@@ -399,24 +405,48 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         // invoice itself, not on whether the caller supplied an amount.
         const decodedInvoice = decodeBolt11(destination)
         const invoiceIsAmountless = decodedInvoice.amountMsat == null
-        const result: any = await this.account.payLightningInvoice({
-          invoice: destination,
-          maxFeeSats: maxFee,
-          ...(invoiceIsAmountless && request.amount && request.amount > 0
-            ? { amountSatsToSend: request.amount }
-            : {}),
-        })
-        const id = String(result?.id ?? '')
         // Raw wallet access is best-effort: without it the poller degrades to
         // 'pending' rather than failing a payment that was already dispatched.
         const rawWallet = (this.account as any)?._wallet ?? {}
+        let result: any
+        let resubmitted = false
+        try {
+          result = await this.account.payLightningInvoice({
+            invoice: destination,
+            maxFeeSats: maxFee,
+            ...(invoiceIsAmountless && request.amount && request.amount > 0
+              ? { amountSatsToSend: request.amount }
+              : {}),
+          })
+        } catch (payError) {
+          if (!isDuplicatePreimageSwapError(payError)) throw payError
+          // This wallet already submitted this invoice: report that attempt
+          // instead of a raw gRPC error, so a retry never reads as a new payment.
+          result = await findLightningSendForInvoice(rawWallet, destination)
+          if (!result) {
+            throw new ProtocolError(
+              'This invoice was already submitted from this wallet. Check Activity before paying it again, or request a new invoice.',
+              'SPARK',
+              'LIGHTNING_INVOICE_ALREADY_SUBMITTED',
+              payError,
+            )
+          }
+          resubmitted = true
+        }
+        const id = String(result?.id ?? '')
         const settlement = await waitForLightningSendSettlement(rawWallet, id, result ?? {})
         if (settlement.status === 'failed') {
-          throw new ProtocolError(
-            `Lightning payment failed (${settlement.rawStatus})`,
-            'SPARK',
-            'LIGHTNING_PAYMENT_FAILED',
-          )
+          throw resubmitted
+            ? new ProtocolError(
+                `An earlier payment of this invoice failed (${settlement.rawStatus}) and Spark does not allow paying it again. Request a new invoice.`,
+                'SPARK',
+                'LIGHTNING_INVOICE_ALREADY_SUBMITTED',
+              )
+            : new ProtocolError(
+                `Lightning payment failed (${settlement.rawStatus})`,
+                'SPARK',
+                'LIGHTNING_PAYMENT_FAILED',
+              )
         }
         return {
           paymentHash: id,
@@ -509,6 +539,17 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
 
   async getPaymentStatus(paymentId: string): Promise<PaymentStatus> {
     this.assertConnected()
+    // Lightning sends are SSP requests, not transfers: getTransactionReceipt never finds them.
+    if (isLightningSendRequestId(paymentId)) {
+      let ln: Awaited<ReturnType<typeof getLightningSendStatus>>
+      try {
+        ln = await getLightningSendStatus((this.account as any)?._wallet ?? {}, paymentId)
+      } catch {
+        return { paymentHash: paymentId, status: 'unknown' }
+      }
+      if (!ln) return { paymentHash: paymentId, status: 'unknown' }
+      return { paymentHash: paymentId, status: ln.status, fee: ln.feeSats, timestamp: ln.timestamp }
+    }
     // Spark may return entity ids like "SparkLightningSendRequest:uuid"; getTransactionReceipt wants the uuid.
     const id = paymentId.includes(':') ? paymentId.split(':').pop()! : paymentId
     let t: any

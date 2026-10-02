@@ -54,7 +54,13 @@ import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
 /** Default maximum fee for Lightning payments (sats). */
 const DEFAULT_MAX_FEE_SATS = 1000;
 
-import { waitForLightningSendSettlement } from "../lib/spark-lightning-settlement";
+import {
+  findLightningSendForInvoice,
+  getLightningSendStatus,
+  isDuplicatePreimageSwapError,
+  isLightningSendRequestId,
+  waitForLightningSendSettlement,
+} from "../lib/spark-lightning-settlement";
 
 // Pure helpers live in ./helpers.ts; balance cache state in ./balance-cache.ts.
 // Both are re-exported here so existing call sites keep working.
@@ -671,26 +677,53 @@ export class SparkAdapter implements IProtocolAdapter {
         // invoice, not on whether the caller supplied an amount.
         const decodedInvoice = decodeBolt11(destination);
         const invoiceIsAmountless = decodedInvoice.amountMsat == null;
-        const result = await wallet.payLightningInvoice({
-          invoice: destination,
-          maxFeeSats: extReq.maxFee ?? DEFAULT_MAX_FEE_SATS,
-          ...(invoiceIsAmountless && request.amount && request.amount > 0
-            ? { amountSatsToSend: request.amount }
-            : {}),
-        } as Parameters<typeof wallet.payLightningInvoice>[0]);
-        const lnResult = result as unknown as Record<string, unknown>;
+        let lnResult: Record<string, unknown>;
+        let resubmitted = false;
+        try {
+          lnResult = (await wallet.payLightningInvoice({
+            invoice: destination,
+            maxFeeSats: extReq.maxFee ?? DEFAULT_MAX_FEE_SATS,
+            ...(invoiceIsAmountless && request.amount && request.amount > 0
+              ? { amountSatsToSend: request.amount }
+              : {}),
+          } as Parameters<typeof wallet.payLightningInvoice>[0])) as unknown as Record<
+            string,
+            unknown
+          >;
+        } catch (payError: unknown) {
+          if (!isDuplicatePreimageSwapError(payError)) throw payError;
+          // This wallet already submitted this invoice: report that attempt
+          // instead of a raw gRPC error, so a retry never reads as a new payment.
+          const existing = await findLightningSendForInvoice(wallet, destination);
+          if (!existing) {
+            throw new ProtocolError(
+              "This invoice was already submitted from this wallet. Check Activity before paying it again, or request a new invoice.",
+              "SPARK",
+              "LIGHTNING_INVOICE_ALREADY_SUBMITTED",
+              payError,
+            );
+          }
+          lnResult = existing;
+          resubmitted = true;
+        }
 
-        const id = result.id;
+        const id = String(lnResult.id ?? "");
         const amountSats = Number(decodedInvoice.amountSat ?? request.amount ?? 0);
-        const timestamp = parseSdkExpiryMs(result.createdAt) ?? Date.now();
+        const timestamp = parseSdkExpiryMs(lnResult.createdAt) ?? Date.now();
 
         const settlement = await waitForLightningSendSettlement(wallet, id, lnResult);
         if (settlement.status === "failed") {
-          throw new ProtocolError(
-            `Lightning payment failed (${settlement.rawStatus})`,
-            "SPARK",
-            "LIGHTNING_PAYMENT_FAILED",
-          );
+          throw resubmitted
+            ? new ProtocolError(
+                `An earlier payment of this invoice failed (${settlement.rawStatus}) and Spark does not allow paying it again. Request a new invoice.`,
+                "SPARK",
+                "LIGHTNING_INVOICE_ALREADY_SUBMITTED",
+              )
+            : new ProtocolError(
+                `Lightning payment failed (${settlement.rawStatus})`,
+                "SPARK",
+                "LIGHTNING_PAYMENT_FAILED",
+              );
         }
 
         return {
@@ -800,6 +833,20 @@ export class SparkAdapter implements IProtocolAdapter {
 
     try {
       const wallet = sparkClientManager.getWallet();
+
+      // Lightning sends are SSP requests, not transfers: getTransfer never finds them.
+      if (isLightningSendRequestId(paymentId)) {
+        const ln = await getLightningSendStatus(wallet, paymentId);
+        if (!ln) {
+          throw new ProtocolError(`Payment not found: ${paymentId}`, "SPARK", "PAYMENT_STATUS_ERROR");
+        }
+        return {
+          paymentHash: paymentId,
+          status: ln.status,
+          fee: ln.feeSats,
+          timestamp: ln.timestamp,
+        };
+      }
 
       // The Spark SDK may return entity IDs like "SparkLightningSendRequest:uuid"
       // but getTransfer expects a plain UUID.
