@@ -145,3 +145,20 @@ export function parseSdkExpiryMs(expiry: unknown): number | undefined {
   }
   return undefined
 }
+
+/**
+ * spark-sdk's `isValidSparkAddress` throws on anything that is not a Spark
+ * address (a bc1 address, for one) instead of returning false, which aborted
+ * sends before they reached the on-chain branch.
+ */
+export function isSparkAddressSafe(
+  destination: string,
+  validate: ((address: string) => boolean) | undefined,
+): boolean {
+  if (!validate) return false
+  try {
+    return validate(destination)
+  } catch {
+    return false
+  }
+}

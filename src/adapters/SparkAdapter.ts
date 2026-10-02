@@ -74,6 +74,7 @@ import {
   tokenRefsMatch,
   txHashFromBytes,
   withTimeout,
+  isSparkAddressSafe,
 } from "../lib/spark-helpers";
 import {
   getSparkBalanceCached,
@@ -738,7 +739,7 @@ export class SparkAdapter implements IProtocolAdapter {
       }
 
       // Spark address or Spark invoice
-      if (isValidSparkAddress(destination)) {
+      if (isSparkAddressSafe(destination, isValidSparkAddress)) {
         // Distinguish a plain Spark address from a Spark invoice by checking for sparkInvoiceFields
         const network = getNetworkFromSparkAddress(destination);
         const decoded = decodeSparkAddress(destination, network);
@@ -1342,7 +1343,7 @@ export class SparkAdapter implements IProtocolAdapter {
       }
 
       // Check if the destination is a Spark invoice (contains sparkInvoiceFields)
-      if (isValidSparkAddress(destination)) {
+      if (isSparkAddressSafe(destination, isValidSparkAddress)) {
         const network = getNetworkFromSparkAddress(destination);
         const decoded = decodeSparkAddress(destination, network);
 

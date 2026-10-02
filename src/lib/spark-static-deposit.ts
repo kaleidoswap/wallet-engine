@@ -50,9 +50,13 @@ export function supportsStaticDeposits(wallet: unknown): wallet is StaticDeposit
   )
 }
 
-/** The SSP rejects a claim until the deposit has enough confirmations. */
+/**
+ * The SSP rejects a claim until the deposit has enough confirmations, and
+ * reports "Transaction not found." (its indexer, or the SDK's own electrs lookup:
+ * "No such mempool or blockchain transaction") until it has seen the tx at all.
+ */
 export function isAwaitingConfirmationError(message: string): boolean {
-  return /confirm/i.test(message)
+  return /confirm|transaction not found|no such mempool or blockchain transaction/i.test(message)
 }
 
 /** Claim every unclaimed UTXO paid to this wallet's static deposit address. */
