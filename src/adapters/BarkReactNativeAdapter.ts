@@ -68,6 +68,33 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
       expiresAt: decoded.expiresAtUnixSeconds * 1000, description: request.description }
   }
 
+  /**
+   * BOLT12: Bark fetches the offer's invoice and pays it. The payment hash is known
+   * only once paid, so this waits for the outcome instead of returning pending.
+   */
+  private async payOffer(offer: string, amount: number | undefined, timestamp: number): Promise<PaymentResult> {
+    const wallet = this.backend.getWalletPort()
+    if (!wallet.payLightningOffer) throw new CapabilityError('This Bark backend cannot pay BOLT12 offers', 'BARK')
+    if (amount !== undefined) positiveSats(amount)
+    const result = await wallet.payLightningOffer({ offer, amountSats: amount, wait: true })
+    if (result.type === 'paid' && preimageMatchesPaymentHash(result.preimage, result.payment_hash)) {
+      let row: { effectiveBalanceDeltaSats: number; feeSats: number } | undefined
+      try {
+        const rows = await this.backend.getHistory()
+        row = rows.find(m => m.paymentHash === result.payment_hash && m.effectiveBalanceDeltaSats < 0)
+      } catch { /* settlement evidence remains authoritative */ }
+      // A fixed-amount offer sets the amount; the movement's debit minus its fee recovers it.
+      const paid = amount ?? (row ? -row.effectiveBalanceDeltaSats - row.feeSats : 0)
+      return { paymentHash: result.payment_hash, preimage: result.preimage, amount: paid,
+        fee: row?.feeSats ?? 0, feeKnown: row !== undefined, status: 'confirmed', timestamp }
+    }
+    if (result.type === 'inProgress') {
+      return { paymentHash: '', amount: result.send.amountSats, fee: result.send.feeSats, feeKnown: true,
+        status: 'pending', timestamp }
+    }
+    return { paymentHash: '', amount: amount ?? 0, fee: 0, feeKnown: false, status: 'unknown', timestamp }
+  }
+
   override async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
     const target = request.invoice?.trim().replace(/^lightning:/i, '')
     const amountOverride = request.amount
@@ -75,6 +102,7 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
     if (request.maxFeeSats !== undefined) throw new CapabilityError('Bark cannot enforce a payment fee cap', 'BARK')
     const wallet = this.backend.getWalletPort()
     const timestamp = this.runtime.now()
+    if (/^lno1/i.test(target)) return this.payOffer(target, amountOverride, timestamp)
     if (classifyDestination(target).kind === 'BTC_ONCHAIN') {
       positiveSats(amountOverride!)
       const txid = await wallet.sendOnchain(target, amountOverride!)

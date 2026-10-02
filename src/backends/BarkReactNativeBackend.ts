@@ -282,6 +282,9 @@ export class BarkReactNativeBackend {
       payLightningInvoice: r => this.mutate(async w => this.lightningStatus(await w.payLightningInvoice(
         r.invoice, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait,
       ))),
+      payLightningOffer: r => this.mutate(async w => this.lightningStatus(await w.payLightningOffer(
+        r.offer, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait,
+      ))),
       lightningSendState: hash => this.withWallet(async w => this.lightningStatus(await w.lightningSendState(hash))),
       lightningReceiveState: hash => this.withWallet(async w => {
         const r = await w.lightningReceiveState(hash)

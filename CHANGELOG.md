@@ -7,6 +7,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- Bark (React Native) pays BOLT12 offers: `sendPayment` routes `lno1…` to the
+  new `payLightningOffer` on the Bark wallet port and waits for the outcome,
+  since the payment hash is only known once the offer's invoice is paid. A
+  fixed-amount offer is paid at its own amount; its fee comes from history.
+
 ## [1.0.0-beta.75] - 2026-10-02
 
 ### Fixed

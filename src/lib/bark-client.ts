@@ -38,6 +38,8 @@ export interface BarkWalletPort {
     invoice: string; paymentHash: string; amountSats: number
   }>
   payLightningInvoice(request: { invoice: string; amountSats?: number; wait: boolean }): Promise<BarkLightningStatus>
+  /** BOLT12: fetches the offer's invoice and pays it. Backends without offer support omit it. */
+  payLightningOffer?(request: { offer: string; amountSats?: number; wait: boolean }): Promise<BarkLightningStatus>
   lightningSendState(hash: string): Promise<BarkLightningStatus>
   lightningReceiveState(hash: string): Promise<{ state: string; amountSats?: number; settledAt?: number }>
   sendArkoorPayment(address: string, amount: number): Promise<void>
