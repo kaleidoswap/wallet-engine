@@ -69,7 +69,7 @@ describe.skipIf(!HAVE_WALLETS)('funding addresses (Alice & Bob)', () => {
       const a = await connectSpark(w)
       try {
         const spark = await a.getReceiveAddress('SPARK')
-        const btc = await a.getReceiveAddress('btc') // single-use L1 deposit
+        const btc = await a.getReceiveAddress('btc') // static (reusable) L1 deposit
         const balance = held(await a.getBtcBalance())
         return [
           { wallet: w.name, fund: 'Spark (native)', balance, address: spark.address },

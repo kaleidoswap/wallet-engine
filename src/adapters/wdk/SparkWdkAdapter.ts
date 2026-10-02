@@ -45,6 +45,7 @@ import {
   waitForLightningSendSettlement,
 } from '../../lib/spark-lightning-settlement'
 import { sweepWindow } from '../../lib/spark-deposit-sweep-window'
+import { claimStaticDeposits, supportsStaticDeposits } from '../../lib/spark-static-deposit'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
 import {
   formatAmount,
@@ -214,9 +215,10 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       const address = await this.account.getAddress()
       return { address, format: 'SPARK_ADDRESS', asset: 'BTC' }
     }
-    // BTC on-chain deposit address (default).
+    // BTC on-chain deposit address (default): the reusable static one, so a
+    // sender paying it twice never strands the second deposit.
     if (!assetId || assetId.toLowerCase() === 'btc') {
-      const address = await this.account.getSingleUseDepositAddress()
+      const address = await this.account.getStaticDepositAddress()
       return { address, format: 'BTC_ADDRESS', asset: 'BTC' }
     }
     throw new ProtocolError('Spark only supports BTC', 'SPARK', 'UNSUPPORTED_ASSET')
@@ -831,6 +833,17 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     if (!address) return { status: 'error', error: 'address is required' }
     const wallet = this.rawWallet
 
+    if (supportsStaticDeposits(wallet) && address === (await wallet.getStaticDepositAddress())) {
+      const claim = await claimStaticDeposits(wallet, address)
+      if (claim.claimedTxids.length > 0) {
+        invalidateSparkBalanceCache()
+        return { status: 'claimed', txids: claim.claimedTxids }
+      }
+      if (claim.errors.length > 0) return { status: 'error', error: claim.errors[claim.errors.length - 1] }
+      return { status: 'awaiting' }
+    }
+
+    // Single-use address issued before receive moved to the static address.
     let utxos: Array<{ txid: string; vout: number }>
     try {
       utxos = await wallet.getUtxosForDepositAddress(address, 10, 0, true)
@@ -863,21 +876,36 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
   }> {
     this.assertConnected()
     const wallet = this.rawWallet
+    const claimedTxids: string[] = []
+    const errors: string[] = []
 
+    if (supportsStaticDeposits(wallet)) {
+      try {
+        const claim = await claimStaticDeposits(wallet, await wallet.getStaticDepositAddress())
+        claimedTxids.push(...claim.claimedTxids)
+        errors.push(...claim.errors)
+      } catch (error: unknown) {
+        errors.push(error instanceof Error ? error.message : 'static deposit claim failed')
+      }
+    }
+
+    // Single-use addresses issued before receive moved to the static address.
     let unused: string[]
     try {
       unused = await wallet.getUnusedDepositAddresses()
     } catch (error: unknown) {
+      if (claimedTxids.length > 0) invalidateSparkBalanceCache()
       return {
         addressesChecked: 0,
         addressesTotal: 0,
         nextOffset: 0,
-        claimedTxids: [],
-        errors: [error instanceof Error ? error.message : 'getUnusedDepositAddresses failed'],
+        claimedTxids,
+        errors: [...errors, error instanceof Error ? error.message : 'getUnusedDepositAddresses failed'],
       }
     }
     if (!unused || unused.length === 0) {
-      return { addressesChecked: 0, addressesTotal: 0, nextOffset: 0, claimedTxids: [], errors: [] }
+      if (claimedTxids.length > 0) invalidateSparkBalanceCache()
+      return { addressesChecked: 0, addressesTotal: 0, nextOffset: 0, claimedTxids, errors }
     }
 
     // One UTXO lookup per address, against a set that grows with every receive.
@@ -885,8 +913,6 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
     // whole set on every tick; `nextOffset` wraps so nothing is skipped forever.
     const total = unused.length
     const window = sweepWindow(unused, options)
-    const claimedTxids: string[] = []
-    const errors: string[] = []
     for (const addr of window.addresses) {
       try {
         const utxos = await wallet.getUtxosForDepositAddress(addr, 10, 0, true)

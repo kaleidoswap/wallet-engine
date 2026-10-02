@@ -247,15 +247,20 @@ export interface IBackupOperations {
 export interface ISparkOperations {
   /** Create a Spark-native invoice. */
   createSparkInvoice(request: InvoiceRequest): Promise<Invoice>
-  /** Auto-claim a Spark L1 (single-use) deposit. `awaiting` while no UTXO is confirmed yet. */
+  /**
+   * Auto-claim deposits to a Spark L1 address: the static receive address, or a
+   * single-use one issued earlier. `awaiting` while nothing is claimable yet
+   * (static deposits need the SSP's confirmations, 3 by default).
+   */
   claimSparkL1Deposit(params: { address: string }): Promise<{
     status: 'awaiting' | 'claimed' | 'error'
     txids?: string[]
     error?: string
   }>
   /**
-   * Sweep previously-generated single-use Spark deposit addresses with unclaimed
-   * UTXOs. Costs one UTXO lookup per address scanned, and the address set only
+   * Claim unclaimed deposits to the static receive address, then sweep
+   * previously-generated single-use Spark deposit addresses with unclaimed
+   * UTXOs. Costs one UTXO lookup per single-use address scanned, and that set only
    * grows, so a caller on a timer should window it: pass `limit` (and the
    * previous result's `nextOffset`) to walk the set a slice at a time. Unbounded
    * when no `limit` is given.

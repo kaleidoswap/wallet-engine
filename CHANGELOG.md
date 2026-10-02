@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+- Spark on-chain receive (`getReceiveAddress('BTC')`) returns the wallet's
+  static deposit address instead of a fresh single-use one. It is reusable, so
+  a second deposit to the same address is no longer stranded.
+  `claimSparkL1Deposit` and `sweepSparkL1Deposits` claim it through the SSP
+  quote (`claimStaticDepositWithMaxFee`, capped at 5,000 sats) once the deposit
+  has the SSP's confirmations, and keep claiming single-use addresses issued
+  before this change.
+
 ### Fixed
 - Spark `getPaymentStatus` resolves Lightning sends through the SSP send
   request. It used to look them up as transfers, never found them, and left
