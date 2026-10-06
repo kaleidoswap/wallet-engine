@@ -1,8 +1,9 @@
 /**
  * Boltz Swap Client Manager
  *
- * Singleton owning the `@kaleidorg/swap-sdk` wasm module and one `BoltzClient`
- * pointed at a KaleidoSwap maker (`/v2`). This is the cross-chain rail — BTC <->
+ * Singleton owning the `@kaleidorg/swap-sdk` wasm module and one swap client
+ * (`SwapClient` from 0.9.0, `BoltzClient` before) pointed at a KaleidoSwap maker
+ * (`/v2`). This is the cross-chain rail — BTC <->
  * L-BTC — distinct from the RFQ rail in `swap/KaleidoswapSwap`.
  *
  * Init is non-blocking (the wasm blob is ~5MB): callers use `getClient()` and fall
@@ -44,13 +45,25 @@ export interface BoltzClientConfig {
   wasmInput?: unknown;
 }
 
-/** The subset of the SDK module surface this engine uses. */
+/** Constructor of the SDK's maker client. */
+export interface BoltzClientCtor {
+  new (baseUrl: string, timeoutSecs?: bigint | null): BoltzClientLike;
+  forNetwork(network: string): BoltzClientLike;
+}
+
+/**
+ * The subset of the SDK module surface this engine uses.
+ *
+ * swap-sdk 0.9.0 renamed `BoltzClient` to `SwapClient` with no alias, and in the
+ * same release renamed the claim/refund `boltzBaseUrl` field to `makerBaseUrl`.
+ * Both spellings are accepted so a host can stay on 0.7.x or move to 0.10.x.
+ */
 export interface BoltzSdkModule {
   init(input?: unknown): Promise<void>;
-  BoltzClient: {
-    new (baseUrl: string, timeoutSecs?: bigint | null): BoltzClientLike;
-    forNetwork(network: string): BoltzClientLike;
-  };
+  /** swap-sdk >= 0.9.0. */
+  SwapClient?: BoltzClientCtor;
+  /** swap-sdk < 0.9.0. */
+  BoltzClient?: BoltzClientCtor;
   SwapScript: {
     fromChain(
       chainKind: string,
@@ -100,7 +113,36 @@ export interface SwapMasterKeyLike {
 const PACKAGE_NAME = "@kaleidorg/swap-sdk";
 
 /**
- * Default maker per network, mirroring the SDK's `BoltzClient.forNetwork`.
+ * Whether the loaded SDK uses the 0.9.0+ vocabulary (`SwapClient`,
+ * `makerBaseUrl`). The two renames shipped together, so the exported client
+ * name decides both.
+ */
+export function usesMakerVocabulary(mod: BoltzSdkModule): boolean {
+  return typeof mod.SwapClient === "function";
+}
+
+/** The maker client constructor, whichever name the loaded SDK exports it under. */
+export function resolveSwapClientCtor(mod: BoltzSdkModule): BoltzClientCtor {
+  const ctor = mod.SwapClient ?? mod.BoltzClient;
+  if (typeof ctor !== "function") {
+    throw new Error(
+      `${PACKAGE_NAME} exports neither SwapClient nor BoltzClient — unsupported SDK version`,
+    );
+  }
+  return ctor;
+}
+
+/**
+ * The maker base URL under the claim/refund `TxParams` key the loaded SDK reads:
+ * `makerBaseUrl` from 0.9.0 (which throws when it is missing), `boltzBaseUrl`
+ * before. Only one key is sent so neither version sees a field it does not know.
+ */
+export function makerBaseUrlParam(mod: BoltzSdkModule, baseUrl: string): Record<string, string> {
+  return usesMakerVocabulary(mod) ? { makerBaseUrl: baseUrl } : { boltzBaseUrl: baseUrl };
+}
+
+/**
+ * Default maker per network, mirroring the SDK's `SwapClient.forNetwork`.
  * Duplicated because claim/refund `TxParams` need the base URL as a string and the
  * client does not expose the one it resolved. "mainnet"/"testnet" are absent on
  * purpose: no KaleidoSwap maker runs there, and a default must never fall back to
@@ -161,13 +203,14 @@ class BoltzSwapClientManager {
     try {
       // @ts-ignore — declared as an optional peer dep; resolved at runtime.
       const mod: BoltzSdkModule = await loadWdkModule(PACKAGE_NAME, () => import(PACKAGE_NAME));
+      const SwapClient = resolveSwapClientCtor(mod);
       await mod.init(config.wasmInput);
       const client = config.baseUrl
-        ? new mod.BoltzClient(
+        ? new SwapClient(
             config.baseUrl,
             config.timeoutSecs == null ? null : BigInt(config.timeoutSecs),
           )
-        : mod.BoltzClient.forNetwork(config.network);
+        : SwapClient.forNetwork(config.network);
       // dispose() may have run while the wasm was loading — discard if so.
       if (generation !== this._generation) {
         client.free?.();

@@ -13,6 +13,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   since the payment hash is only known once the offer's invoice is paid. A
   fixed-amount offer is paid at its own amount; its fee comes from history.
 
+### Changed
+- Chain swaps work with `@kaleidorg/swap-sdk` 0.10. The optional peer range
+  widens to `^0.1.1 || ^0.3.0 || ^0.7.0 || ^0.10.0`. swap-sdk 0.9.0 renamed
+  `BoltzClient` to `SwapClient` and the claim/refund `boltzBaseUrl` field to
+  `makerBaseUrl`, with no aliases, so the engine now picks whichever client
+  the loaded SDK exports and sends only the field name that version reads.
+  Hosts on 0.7.x keep working unchanged. A host that also uses
+  `@kaleidorg/swap-sdk/arkade` on 0.10 needs `@arkade-os/sdk >=0.4.74` and
+  `@arkade-os/swap ^0.0.20`, which that SDK's own peer ranges require.
+
 ## [1.0.0-beta.75] - 2026-10-02
 
 ### Fixed
