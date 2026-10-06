@@ -19,6 +19,7 @@
 import { Quote, QuoteRequest, Layer, ProtocolError } from '../types/base'
 import {
   boltzSwapClientManager,
+  makerBaseUrlParam,
   resolveBoltzBaseUrl,
   type SwapMasterKeyLike,
   type SwapScriptLike,
@@ -520,7 +521,10 @@ export class BoltzChainSwap {
       outputAddress: record.destinationAddress,
       swapId: record.swapId,
       keysSecretHex,
-      boltzBaseUrl: resolveBoltzBaseUrl(boltzSwapClientManager.getConfig()),
+      ...makerBaseUrlParam(
+        boltzSwapClientManager.getSdk(),
+        resolveBoltzBaseUrl(boltzSwapClientManager.getConfig())
+      ),
       network: boltzSwapClientManager.getConfig().network,
       bitcoinEsploraUrl: this.config.bitcoinEsploraUrl,
       liquidEsploraUrl: this.config.liquidEsploraUrl,
