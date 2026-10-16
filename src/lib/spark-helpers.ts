@@ -167,25 +167,38 @@ export function isSparkAddressSafe(
   }
 }
 
-/** BOLT11 network a Spark wallet on `network` can pay (Spark regtest settles over `lnbcrt`). */
+/**
+ * BOLT11 network a Spark wallet on `network` can pay. Spark regtest and local
+ * wallets settle over `lnbcrt`. Keys are lowercase; callers may pass the
+ * spark-sdk's uppercase names.
+ */
 const SPARK_BOLT11_NETWORK: Record<string, NonNullable<Bolt11ValidationPolicy['expectedNetworkId']>> = {
   mainnet: 'bitcoin',
   testnet: 'testnet',
   signet: 'signet',
   regtest: 'regtest',
+  local: 'regtest',
 }
 
 /**
  * Decode a BOLT11 for a Spark wallet: checksum, signature, required fields,
  * network and expiry are all enforced. Throws a SPARK ProtocolError whose code is
  * the LightningPaymentError code (INVALID_INVOICE / NETWORK_MISMATCH /
- * INVOICE_EXPIRED), never a summary built from the HRP alone.
+ * INVOICE_EXPIRED), or UNKNOWN_NETWORK when the wallet network is not one we can
+ * check against — never a summary built from the HRP alone.
  */
 export function decodeSparkBolt11(invoice: string, network: string): DecodedInvoice {
-  const expectedNetworkId = SPARK_BOLT11_NETWORK[network]
+  const expectedNetworkId = SPARK_BOLT11_NETWORK[(network ?? '').toLowerCase()]
+  if (!expectedNetworkId) {
+    throw new ProtocolError(
+      `Cannot validate a Lightning invoice for Spark network "${network}"`,
+      'SPARK',
+      'UNKNOWN_NETWORK',
+    )
+  }
   let decoded
   try {
-    decoded = validateBolt11Invoice(invoice, expectedNetworkId ? { expectedNetworkId } : {})
+    decoded = validateBolt11Invoice(invoice, { expectedNetworkId })
   } catch (error) {
     const code = error instanceof LightningPaymentError ? error.code : 'INVALID_INVOICE'
     const message = error instanceof Error ? error.message : 'BOLT11 invoice is invalid'

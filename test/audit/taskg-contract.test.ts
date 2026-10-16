@@ -397,7 +397,8 @@ describe('G-F14: LiquidWdkAdapter must not double-list L-BTC when getNetworkInfo
 // ---------------------------------------------------------------------------
 describe('G-F15: SparkAdapter.decodeInvoice must decode a bolt11 amount (decoder already in scope)', () => {
   it('lnbc2500u… decodes to 250_000 sats', async () => {
-    const adapter = new SparkAdapter() // decodeInvoice has no connection requirement
+    const adapter = new SparkAdapter()
+    ;(adapter as any).config = { protocol: 'SPARK', network: 'mainnet' }
     const d = await adapter.decodeInvoice(bolt11Fixture({ hrp: 'lnbc2500u', timestamp: Math.floor(Date.now() / 1000) }))
     // ACTUAL (bug): amount undefined, paymentHash '', expiresAt 0 (:648-667).
     expect(d.amount).toBe(250_000)

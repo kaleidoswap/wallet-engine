@@ -640,7 +640,11 @@ export class SparkAdapter implements IProtocolAdapter {
     const lower = input.trim().toLowerCase();
 
     if (lower.startsWith("ln")) {
-      return decodeSparkBolt11(input.trim(), this.config?.network ?? "mainnet");
+      // The network check needs the wallet's network; never assume mainnet.
+      if (!this.config) {
+        throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
+      }
+      return decodeSparkBolt11(input.trim(), this.config.network ?? "mainnet");
     }
 
     // Spark address or BTC address

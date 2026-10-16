@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import { SparkAdapter } from '../src/adapters/SparkAdapter'
 import { SparkWdkAdapter } from '../src/adapters/wdk/SparkWdkAdapter'
+import { decodeSparkBolt11 } from '../src/lib/spark-helpers'
 import { bolt11Fixture, TEST_PAYMENT_HASH } from './fixtures/bolt11'
 
 /**
@@ -9,15 +10,17 @@ import { bolt11Fixture, TEST_PAYMENT_HASH } from './fixtures/bolt11'
  */
 const NOW_MS = 1_700_000_100_000
 
-function nativeAdapter(network: 'mainnet' | 'regtest' | 'signet') {
+type Network = 'mainnet' | 'regtest' | 'signet' | 'local' | 'MAINNET' | 'REGTEST'
+
+function nativeAdapter(network: Network) {
   const adapter = new SparkAdapter()
   ;(adapter as unknown as { config: { protocol: string; network: string } }).config = { protocol: 'SPARK', network }
   return adapter
 }
 
-function wdkAdapter(network: 'mainnet' | 'regtest' | 'signet') {
+function wdkAdapter(network: Network) {
   const adapter = new SparkWdkAdapter()
-  ;(adapter as unknown as { network: string }).network = network
+  Object.assign(adapter as unknown as object, { network, connected: true, account: {} })
   return adapter
 }
 
@@ -75,10 +78,52 @@ describe.each(ADAPTERS)('%s.decodeInvoice BOLT11 validation', (_name, make) => {
     })
   })
 
+  it('accepts the spark-sdk uppercase network names', async () => {
+    vi.useFakeTimers({ now: NOW_MS })
+    await expect(make('MAINNET').decodeInvoice(bolt11Fixture({ hrp: 'lnbc10u' }))).resolves.toMatchObject({ amount: 1000 })
+    await expect(make('MAINNET').decodeInvoice(bolt11Fixture({ hrp: 'lnbcrt10u' }))).rejects.toMatchObject({
+      code: 'NETWORK_MISMATCH',
+    })
+    await expect(make('REGTEST').decodeInvoice(bolt11Fixture({ hrp: 'lnbc10u' }))).rejects.toMatchObject({
+      code: 'NETWORK_MISMATCH',
+    })
+  })
+
+  it('checks a local wallet against regtest invoices', async () => {
+    vi.useFakeTimers({ now: NOW_MS })
+    await expect(make('local').decodeInvoice(bolt11Fixture({ hrp: 'lnbcrt10u' }))).resolves.toMatchObject({ amount: 1000 })
+    await expect(make('local').decodeInvoice(bolt11Fixture({ hrp: 'lnbc10u' }))).rejects.toMatchObject({
+      code: 'NETWORK_MISMATCH',
+    })
+  })
+
   it('rejects an expired invoice', async () => {
     vi.useFakeTimers({ now: (1_700_000_000 + 3600) * 1000 })
     await expect(make('mainnet').decodeInvoice(bolt11Fixture({ hrp: 'lnbc10u' }))).rejects.toMatchObject({
       code: 'INVOICE_EXPIRED',
     })
+  })
+})
+
+describe('Spark BOLT11 decode fails closed without a known network', () => {
+  it('SparkAdapter refuses to decode before connect instead of assuming mainnet', async () => {
+    vi.useFakeTimers({ now: NOW_MS })
+    await expect(new SparkAdapter().decodeInvoice(bolt11Fixture({ hrp: 'lnbc10u' }))).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+    })
+  })
+
+  it('SparkWdkAdapter refuses to decode before connect instead of assuming mainnet', async () => {
+    vi.useFakeTimers({ now: NOW_MS })
+    await expect(new SparkWdkAdapter().decodeInvoice(bolt11Fixture({ hrp: 'lnbc10u' }))).rejects.toMatchObject({
+      code: 'NOT_CONNECTED',
+    })
+  })
+
+  it.each(['', 'bogus', 'mutinynet'])('rejects wallet network %j with UNKNOWN_NETWORK', (network) => {
+    vi.useFakeTimers({ now: NOW_MS })
+    expect(() => decodeSparkBolt11(bolt11Fixture({ hrp: 'lnbc10u' }), network)).toThrow(
+      expect.objectContaining({ code: 'UNKNOWN_NETWORK' }),
+    )
   })
 })

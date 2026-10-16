@@ -37,7 +37,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   and expiry, and return the real payment hash and expiry. A corrupted invoice
   used to be shown as payable for whatever amount its prefix encoded; it now
   throws a `ProtocolError` with code `INVALID_INVOICE`, `NETWORK_MISMATCH` or
-  `INVOICE_EXPIRED`.
+  `INVOICE_EXPIRED`. Both now need a connected wallet to decode a BOLT11
+  (`NOT_CONNECTED`), since the network check uses the wallet's network rather
+  than assuming mainnet. Uppercase spark-sdk network names are accepted, `local`
+  is checked as regtest, and any other network fails with `UNKNOWN_NETWORK`.
 - `ProtocolManager` reads the spend-cap amount from a checksum-verified BOLT11.
   An invoice that fails to decode has no known amount, so any cap denies it
   (`AMOUNT_UNKNOWN`), and a sub-satoshi amount rounds up rather than down.
