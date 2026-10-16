@@ -3,6 +3,7 @@ import { ProtocolManager } from '../../src/manager/ProtocolManager'
 import { PolicyError } from '../../src/policy'
 import type { IProtocolAdapter } from '../../src/adapters/IProtocolAdapter'
 import { PROTOCOL_OPERATIONS } from '../../src/capabilities/operations'
+import { bolt11Fixture } from '../fixtures/bolt11'
 
 /**
  * Audit finding F-F1 — the policy checked an amount the adapters discard.
@@ -16,8 +17,8 @@ import { PROTOCOL_OPERATIONS } from '../../src/capabilities/operations'
  * the large one.
  */
 // lnbc10m… encodes 10 mBTC = 1,000,000 sats.
-const BIG_INVOICE = 'lnbc10m1pexampleinvoice'
-const AMOUNTLESS = 'lnbc1pexampleinvoice'
+const BIG_INVOICE = bolt11Fixture({ hrp: 'lnbc10m' })
+const AMOUNTLESS = bolt11Fixture({ hrp: 'lnbc' })
 
 function managerWith(policy: any) {
   const paid: any[] = []

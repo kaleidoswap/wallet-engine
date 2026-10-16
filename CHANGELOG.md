@@ -7,6 +7,11 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- `sparkAddressNetwork(address)` and `ClassifiedDestination.sparkNetwork`: the
+  spark-sdk network (`MAINNET`/`TESTNET`/`REGTEST`/`SIGNET`/`LOCAL`) a Spark
+  address belongs to, so a host can refuse a Spark send to another network.
+
 ### Changed
 - The engine is tested against `@kaleidorg/swap-sdk` 0.12. Hosts using the
   Arkade venue with `@arkade-os/swap` 0.0.21 or later should run swap-sdk 0.11
@@ -20,6 +25,22 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - Liquid Testnet USDt (`LIQUID_TESTNET_USDT_ASSET_ID`) is now a known asset: `listAssets`
   and `getAssetBalance` report ticker `USDt`, name `Tether USD` and precision 8
   instead of a truncated-id ticker and default metadata.
+- `classifyDestination` recognises a Spark address only when it is valid
+  bech32m with a spark-sdk HRP and an identity-key payload holding a valid
+  public key. A Spark address with an extra or changed character used to be
+  classified as `SPARK` from its prefix; it is now `UNKNOWN`. The HRP list now
+  matches the SDK: `sparks`/`sps` (signet), `spt` (testnet) and legacy `sp`
+  (mainnet) were missing. A BIP352 Silent Payment address (`sp1q…`) is still
+  never read as Spark.
+- `SparkAdapter.decodeInvoice` and `SparkWdkAdapter.decodeInvoice` validate the
+  BOLT11 checksum, signature, network (from the adapter's configured network)
+  and expiry, and return the real payment hash and expiry. A corrupted invoice
+  used to be shown as payable for whatever amount its prefix encoded; it now
+  throws a `ProtocolError` with code `INVALID_INVOICE`, `NETWORK_MISMATCH` or
+  `INVOICE_EXPIRED`.
+- `ProtocolManager` reads the spend-cap amount from a checksum-verified BOLT11.
+  An invoice that fails to decode has no known amount, so any cap denies it
+  (`AMOUNT_UNKNOWN`), and a sub-satoshi amount rounds up rather than down.
 
 ## [1.0.0-beta.77] - 2026-10-20
 

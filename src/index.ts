@@ -96,8 +96,10 @@ export {
 } from './router'
 export {
   classifyDestination,
+  sparkAddressNetwork,
   type ClassifiedDestination,
   type DestinationKind,
+  type SparkAddressNetwork,
 } from './router/destination'
 export {
   DEFAULT_RAIL_ORDER,

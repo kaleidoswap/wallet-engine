@@ -4,7 +4,11 @@
  */
 
 import { bech32m } from '@scure/base'
-import type { TransactionStatus } from '../types/base'
+import type { DecodedInvoice, TransactionStatus } from '../types/base'
+import { ProtocolError } from '../types/base'
+import { validateBolt11Invoice, type Bolt11ValidationPolicy } from './bolt11'
+import { roundedMsatToSat, toSafeAmountNumber } from '../lightning/amounts'
+import { LightningPaymentError } from '../lightning/errors'
 import { normalizeTxHash } from './spark-sent-token-records'
 
 // Amount display formatting is centralized in ./amount (was duplicated here).
@@ -160,5 +164,46 @@ export function isSparkAddressSafe(
     return validate(destination)
   } catch {
     return false
+  }
+}
+
+/** BOLT11 network a Spark wallet on `network` can pay (Spark regtest settles over `lnbcrt`). */
+const SPARK_BOLT11_NETWORK: Record<string, NonNullable<Bolt11ValidationPolicy['expectedNetworkId']>> = {
+  mainnet: 'bitcoin',
+  testnet: 'testnet',
+  signet: 'signet',
+  regtest: 'regtest',
+}
+
+/**
+ * Decode a BOLT11 for a Spark wallet: checksum, signature, required fields,
+ * network and expiry are all enforced. Throws a SPARK ProtocolError whose code is
+ * the LightningPaymentError code (INVALID_INVOICE / NETWORK_MISMATCH /
+ * INVOICE_EXPIRED), never a summary built from the HRP alone.
+ */
+export function decodeSparkBolt11(invoice: string, network: string): DecodedInvoice {
+  const expectedNetworkId = SPARK_BOLT11_NETWORK[network]
+  let decoded
+  try {
+    decoded = validateBolt11Invoice(invoice, expectedNetworkId ? { expectedNetworkId } : {})
+  } catch (error) {
+    const code = error instanceof LightningPaymentError ? error.code : 'INVALID_INVOICE'
+    const message = error instanceof Error ? error.message : 'BOLT11 invoice is invalid'
+    throw new ProtocolError(`Invalid Lightning invoice: ${message}`, 'SPARK', code, error)
+  }
+  const amountMsat = decoded.amountMsat
+  const expiresAt = decoded.expiresAtUnixSeconds * 1000
+  return {
+    paymentHash: decoded.paymentHash,
+    ...(amountMsat != null
+      ? {
+          amount: toSafeAmountNumber(roundedMsatToSat(amountMsat), 'sat'),
+          ...(BigInt(amountMsat) <= BigInt(Number.MAX_SAFE_INTEGER) ? { amountMsat: Number(amountMsat) } : {}),
+        }
+      : {}),
+    expiresAt,
+    destination: invoice,
+    payment_hash: decoded.paymentHash,
+    expires_at: expiresAt,
   }
 }

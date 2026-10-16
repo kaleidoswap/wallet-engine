@@ -56,6 +56,7 @@ import {
   tokenRefsMatch,
   txHashFromBytes,
   isSparkAddressSafe,
+  decodeSparkBolt11,
 } from '../../lib/spark-helpers'
 import { getSparkBalanceCached, invalidateSparkBalanceCache } from '../../lib/spark-balance-cache'
 import {
@@ -383,10 +384,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
     const dest = invoice.trim()
-    if (isBolt11(dest)) {
-      const { amountSat } = decodeBolt11(dest)
-      return { paymentHash: '', amount: amountSat, expiresAt: 0, destination: dest }
-    }
+    if (isBolt11(dest)) return decodeSparkBolt11(dest, this.network)
     // Spark invoice/address — no on-device decode; surface the raw value.
     return { paymentHash: '', expiresAt: 0, destination: dest }
   }
