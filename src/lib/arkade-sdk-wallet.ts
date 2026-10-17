@@ -90,10 +90,8 @@ export function flattenArkadeConfig(cfg: Record<string, any>): Record<string, an
     arkServerUrl: pick('arkServerUrl'),
     esploraUrl: pick('esploraUrl'),
     indexerUrl: pick('indexerUrl'),
-    swapProviderUrl: pick('swapProviderUrl'),
     delegatorUrl: pick('delegatorUrl'),
     delegationEnabled: pick('delegationEnabled'),
-    boltzSwapsEnabled: pick('boltzSwapsEnabled'),
     storage: pick('storage'),
     eventSource: pick('eventSource'),
   }

@@ -108,7 +108,7 @@ actually load that adapter's subpath.
 | `…/swap` | `@kaleidorg/wdk-protocol-swap-kaleidoswap` |
 | `…/swap` (`BoltzChainSwap`, Arkade intents) | `@kaleidorg/swap-sdk` (see [versions](#kaleidorgswap-sdk-versions)) |
 | `…/format` | `kaleido-sdk` |
-| legacy `…/adapters/spark` \| `/arkade` \| `/rgb` \| `/flashnet` | `@buildonspark/spark-sdk` \| `@arkade-os/sdk` (+`@arkade-os/boltz-swap`) \| `kaleido-sdk` \| `@flashnet/sdk` |
+| legacy `…/adapters/spark` \| `/arkade` \| `/rgb` \| `/flashnet` | `@buildonspark/spark-sdk` \| `@arkade-os/sdk` \| `kaleido-sdk` \| `@flashnet/sdk` |
 
 ```bash
 # RGB/RLN + Liquid only, for example

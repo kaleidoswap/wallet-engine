@@ -18,7 +18,7 @@ import {
 } from "../lib/arkade-snapshot-cache";
 import { arkadeClientManager } from "../lib/arkade-client-manager";
 import { arkadeIntentsClientManager } from "../lib/arkade-intents-client-manager";
-import { arkadeSwapsClientManager } from "../lib/arkade-swaps-client-manager";
+import { cleanupLegacyArkadeSwapsDb } from "../lib/legacy-arkade-swaps-cleanup";
 import {
   Ramps,
   isSpendable,
@@ -68,6 +68,7 @@ import {
   SwapResult,
   ProtocolError,
   ConnectionError,
+  ErrorCode,
   TransactionStatus,
 } from "../types/base";
 
@@ -78,6 +79,19 @@ function isLightningInvoice(value: string): boolean {
   // Strip a `lightning:` URI prefix if present.
   const body = lower.startsWith("lightning:") ? lower.slice("lightning:".length) : lower;
   return /^ln(bc|tb|bcrt|sb)/.test(body);
+}
+
+/**
+ * Lightning on Arkade goes through the Arkade Intents venue
+ * (`arkadeIntentsClientManager`), whose quote → confirm → fund flow the host
+ * drives. The adapter has no Lightning path of its own since Boltz was removed.
+ */
+function lightningNotSupported(direction: "send" | "receive"): ProtocolError {
+  return new ProtocolError(
+    `Arkade Lightning ${direction} is not supported by the adapter; use Arkade Intents`,
+    "ARKADE",
+    ErrorCode.NOT_SUPPORTED,
+  );
 }
 
 function stripLightningPrefix(value: string): string {
@@ -126,16 +140,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
       this.assetDetailsCache.clear();
       log.info("[ArkadeAdapter] Connected to Arkade successfully");
 
-      // Initialize the Boltz swap client in the background, if the host asked
-      // for it. Failures are non-fatal — swaps just stay unavailable until the
-      // next connect. Off by default because the client holds a WebSocket open
-      // (and retries it forever) whether or not anything ever swaps.
-      if (arkadeConfig.boltzSwapsEnabled) {
-        const wallet = arkadeClientManager.getWallet();
-        arkadeSwapsClientManager.initialize(wallet).catch((error: unknown) => {
-          log.warn("[ArkadeAdapter] Boltz swaps init failed (Lightning swaps unavailable):", error);
-        });
-      }
+      // Boltz swaps are retired; drop their store unless it still tracks funds.
+      void cleanupLegacyArkadeSwapsDb();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Arkade: ${msg}`, "ARKADE");
@@ -143,11 +149,10 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async disconnect(): Promise<void> {
-    // Dispose swap clients first (stops SwapManager monitoring, closes the Intents
-    // transport) so neither uses the wallet after teardown. Defensive: Intents is
-    // host-initialized, so this no-ops when the host never wired it.
+    // Close the Intents transport first so it never uses the wallet after
+    // teardown. Defensive: Intents is host-initialized, so this no-ops when the
+    // host never wired it.
     await arkadeIntentsClientManager.dispose();
-    await arkadeSwapsClientManager.dispose();
     await arkadeClientManager.disconnect();
     this.config = null;
     this.assetDetailsCache.clear();
@@ -347,12 +352,12 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // Payment Operations
   // =========================================================================
 
-  /** Honor an explicit Lightning layer instead of returning an Ark address. */
+  /** Never answer a Lightning request with an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
-    if (request.layer === "BTC_LN") return this.createArkadeLightningInvoice(request);
+    if (request.layer === "BTC_LN") throw lightningNotSupported("receive");
     try {
       const wallet = arkadeClientManager.getWallet();
       const address: string = await wallet.getAddress();
@@ -366,52 +371,6 @@ export class ArkadeAdapter implements IProtocolAdapter {
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ProtocolError(`Failed to create invoice: ${msg}`, "ARKADE", "CREATE_INVOICE_ERROR");
-    }
-  }
-
-  /**
-   * Boltz reverse-swap Lightning invoice that lands the funds here as a VTXO.
-   * Requires amount > 0 — Boltz can't issue an amountless invoice. The embedded
-   * `SwapManager` claims the VHTLC once the LN payment settles.
-   */
-  async createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
-    if (!request.amount || request.amount <= 0) {
-      throw new ProtocolError(
-        "Amount is required for Boltz Lightning invoices into Arkade",
-        "ARKADE",
-        "INVALID_AMOUNT",
-      );
-    }
-    if (!arkadeSwapsClientManager.isInitialized()) {
-      throw new ProtocolError(
-        "Lightning swaps are not ready yet. Try again in a moment.",
-        "ARKADE",
-        "SWAPS_NOT_READY",
-      );
-    }
-    try {
-      const swaps = arkadeSwapsClientManager.getClient();
-      const result = await swaps.createLightningInvoice({
-        amount: request.amount,
-        description: request.description,
-      });
-      return {
-        invoice: result.invoice,
-        paymentHash: result.paymentHash ?? "",
-        amount: request.amount,
-        expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
-        description: request.description ?? "Boltz reverse swap into Arkade",
-      };
-    } catch (error: unknown) {
-      const msg = error instanceof Error ? error.message : String(error);
-      throw new ProtocolError(
-        `Failed to create Boltz Lightning invoice: ${msg}`,
-        "ARKADE",
-        "CREATE_INVOICE_ERROR",
-      );
     }
   }
 
@@ -451,66 +410,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
 
-    // Lightning invoice → Boltz submarine swap. The swap library takes the amount
-    // from the invoice, so amountless invoices cannot be paid this way (Boltz
-    // rejects with "0 is less than minimal of 333"). Reject early with a clear
-    // error rather than surfacing that.
-    if (isLightningInvoice(request.invoice)) {
-      if (!arkadeSwapsClientManager.isInitialized()) {
-        throw new ProtocolError(
-          "Lightning swaps are not ready yet. Try again in a moment.",
-          "ARKADE",
-          "SWAPS_NOT_READY",
-        );
-      }
-      const invoiceBody = stripLightningPrefix(request.invoice);
-      try {
-        const swaps = arkadeSwapsClientManager.getClient();
-        const result = await swaps.sendLightningPayment({ invoice: invoiceBody });
-        // Neither a txid nor a preimage means nothing came back that evidences the
-        // payment — that is a send failure, not a pending payment with an empty id.
-        if (!result?.txid && !result?.preimage) {
-          throw new ProtocolError(
-            "Arkade Lightning send returned no transaction id and no preimage",
-            "ARKADE",
-            "SEND_ERROR",
-          );
-        }
-        return {
-          // Keep the settlement secret separate from the public lookup identifier.
-          paymentHash: result.txid ?? "",
-          preimage: result.preimage,
-          amount: result.amount ?? request.amount ?? 0,
-          fee: 0,
-          // Boltz submarine swap; the swap can still fail in the HODL/claim
-          // phase. Caller polls `getPaymentStatus` to reach a terminal state.
-          status: "pending" as TransactionStatus,
-          timestamp: Date.now(),
-        };
-      } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error);
-        // Translate Boltz error strings to actionable messages.
-        if (/less than minimal/i.test(msg)) {
-          throw new ProtocolError(
-            "Arkade can't pay amountless Lightning invoices. Please use a different route or ask the recipient for an invoice with an amount.",
-            "ARKADE",
-            "INVALID_AMOUNT",
-          );
-        }
-        if (/vHTLC.*already exists/i.test(msg)) {
-          throw new ProtocolError(
-            "A swap for this invoice is already in progress. Wait for it to complete or refund before retrying.",
-            "ARKADE",
-            "SWAP_IN_PROGRESS",
-          );
-        }
-        throw new ProtocolError(
-          `Failed to send Lightning payment via Boltz: ${msg}`,
-          "ARKADE",
-          "SEND_PAYMENT_ERROR",
-        );
-      }
-    }
+    // Checked before the amount so a bolt11 never falls through to sendBitcoin.
+    if (isLightningInvoice(request.invoice)) throw lightningNotSupported("send");
 
     // Non-Lightning destinations: existing Ark / on-chain BTC path.
     if (!request.amount || request.amount <= 0) {

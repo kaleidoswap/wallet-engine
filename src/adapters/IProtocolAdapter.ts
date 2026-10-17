@@ -358,11 +358,6 @@ export interface ISparkOperations {
 
 /** Arkade-specific operations. */
 export interface IArkadeOperations {
-  /**
-   * Lightning invoice paying into Arkade via a Boltz reverse swap. Needs a
-   * positive `request.amount`.
-   */
-  createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice>
   /** List virtual transaction outputs. */
   getVtxos(): Promise<Record<string, unknown>[]>
   /** List boarding UTXOs. */

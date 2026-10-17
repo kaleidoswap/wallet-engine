@@ -17,7 +17,7 @@ and cannot drift from them: `check:audit-index` runs in CI.
 closed. Not necessarily the commit that changed `src/` — some findings were
 fixed first and pinned afterwards.
 
-## Regressions (44)
+## Regressions (41)
 
 A specific finding, and the test that keeps it fixed.
 
@@ -25,7 +25,6 @@ A specific finding, and the test that keeps it fixed.
 | --- | --- | --- | --- |
 | `A1-A2` | `initialize()` returned any in-flight promise regardless of which wallet it was for, so a wallet switch during a pending SDK handshake left wallet B's session running on wallet A's wallet. | [`regression-A1-A2-client-manager-teardown.test.ts`](./regression-A1-A2-client-manager-teardown.test.ts) | `7b95f0a` |
 | `A5` | `SparkWdkAdapter.connect()` adopts its raw SparkWallet into the module-level `sparkClientManager` singleton (SparkWdkAdapter.ts:174) but did not override `disconnect()`. | [`regression-A5-adopted-wallet-release.test.ts`](./regression-A5-adopted-wallet-release.test.ts) | `7c26f7e` |
-| `A7` | `ArkadeSwapsClientManager.initialize()` opened with `if (this.client) return Promise.resolve()`, with no comparison of WHICH wallet the existing client was built for. | [`regression-A7-swaps-wallet-identity.test.ts`](./regression-A7-swaps-wallet-identity.test.ts) | `b1b5e09` |
 | `AF4` | secret shape can sign | [`regression-AF4-nsec-hex-signing.test.ts`](./regression-AF4-nsec-hex-signing.test.ts) | `9a8e581` |
 | `AF6` | canonical zbase32 signatures | [`regression-AF6-zbase32-canonical.test.ts`](./regression-AF6-zbase32-canonical.test.ts) | `e755d75` |
 | `AF9` | disconnectAll() must not report a successful lock over a live adapter | [`regression-AF9-disconnect-all-reports-failure.test.ts`](./regression-AF9-disconnect-all-reports-failure.test.ts) | `8f15d36` |
@@ -54,10 +53,8 @@ A specific finding, and the test that keeps it fixed.
 | `GF8` | the Spark adapters must not return more rows than | [`regression-GF8-spark-paging.test.ts`](./regression-GF8-spark-paging.test.ts) | `115afb1` |
 | `GF10` | `ArkadeAdapter.refreshBalances()` was an empty no-op whose comment claimed "Balances are fetched live on each call". | [`regression-GF10-arkade-refresh.test.ts`](./regression-GF10-arkade-refresh.test.ts) | `542e442` |
 | `GF10` | balance refresh failures are observable additively | [`regression-GF10-refresh-results.test.ts`](./regression-GF10-refresh-results.test.ts) | `006b5f1` |
-| `GF11` | a) a SECRET (the payment preimage — proof of payment) landed in the field hosts persist, log and display as the payment's public identifier; | [`regression-GF11-arkade-preimage.test.ts`](./regression-GF11-arkade-preimage.test.ts) | `ee9e8ee` |
 | `GF14` | Liquid history survives policy lookup outage accurately | [`regression-GF14-liquid-history-policy.test.ts`](./regression-GF14-liquid-history-policy.test.ts) | `7533c2c` |
 | `GF15` | Arkade decodeInvoice fails closed | [`regression-GF15-arkade-decode.test.ts`](./regression-GF15-arkade-decode.test.ts) | `985b035` |
-| `N1` | the A7 fix does not survive a wallet switch that RACES the initial Boltz handshake. | [`regression-N1-swaps-inflight-identity.test.ts`](./regression-N1-swaps-inflight-identity.test.ts) | `eb24211` |
 | `N3` | `ArkadeClientManager`'s incoming-funds listener guard is set only AFTER the async subscribe resolves, so the guard does not guard. | [`regression-N3-listener-accumulation.test.ts`](./regression-N3-listener-accumulation.test.ts) | `7be0563` |
 | `N4` | `SparkClientManager.getReadonlyClient()` has no teardown/identity guard, so the A2 resurrection shape survives in the same file that was fixed for it. | [`regression-N4-readonly-client-teardown.test.ts`](./regression-N4-readonly-client-teardown.test.ts) | `86baf88` |
 | `N6` | flight | [`regression-N6-swap-single-flight.test.ts`](./regression-N6-swap-single-flight.test.ts) | `05adf00` |
@@ -79,7 +76,7 @@ defect is *absent*.
 | `A` | ArkadeClientManager teardown race | [`probe-A-arkade-and-nsec.test.ts`](./probe-A-arkade-and-nsec.test.ts) |
 | `A` | ProtocolManager.disconnectAll() used to resolve successfully after its 2s bounded timeout even when an adapter's teardown never ran, leaving a live, still-connected (still signing-capable) adapter reachable through getAdapter() — which is unrestricted when no policy is configured (the default). | [`probe-A-protocol-manager-stalled-teardown.test.ts`](./probe-A-protocol-manager-stalled-teardown.test.ts) |
 | `A` | 185) is documented as the metadata source "for display in the confirmation popup" and its doc comment promises "estimated value transferred", but it returns only input/output COUNTS — a host using it cannot show amount or destination for a drain PSBT. | [`probe-A-psbt-meta.test.ts`](./probe-A-psbt-meta.test.ts) |
-| `A` | ArkadeSwapsClientManager.initialize() early-returns when a client already exists, so a wallet switch that re-runs ArkadeAdapter.connect() (without a dispose in between — ProtocolManager.connect() calls adapter.connect() directly, never adapter.disconnect()) leaves the Boltz swaps client bound to the PREVIOUS wallet's keys. | [`probe-A-swaps-flashnet-identity.test.ts`](./probe-A-swaps-flashnet-identity.test.ts) |
+| `A` | FlashnetClientManager.initialize() reuses an in-flight initPromise with no wallet-identity check, so a wallet switch (initialize(B) while initialize(A) is pending) is silently dropped and the Flashnet client stays bound to wallet A's SparkWallet (and its keys). | [`probe-A-swaps-flashnet-identity.test.ts`](./probe-A-swaps-flashnet-identity.test.ts) |
 | `A` | signature strings must have one canonical length. | [`probe-A-zbase32-malleability.test.ts`](./probe-A-zbase32-malleability.test.ts) |
 | `N` | the Arkade snapshot cache does NOT have the O6 defect that was fixed in the Spark balance cache (aac6ac6). | [`probe-N-arkade-snapshot-cache.test.ts`](./probe-N-arkade-snapshot-cache.test.ts) |
 | `N` | two swaps racing on one route / one quote. | [`probe-N-concurrent-swaps.test.ts`](./probe-N-concurrent-swaps.test.ts) |

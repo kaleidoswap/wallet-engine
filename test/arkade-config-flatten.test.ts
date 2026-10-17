@@ -39,20 +39,16 @@ describe('flattenArkadeConfig', () => {
     const flat = flattenArkadeConfig({
       arkadeConfig: {
         indexerUrl: 'https://indexer',
-        swapProviderUrl: 'https://boltz',
         delegatorUrl: 'https://delegator',
         delegationEnabled: false,
-        boltzSwapsEnabled: true,
         eventSource: impl,
         storage,
       },
     })
 
     expect(flat.indexerUrl).toBe('https://indexer')
-    expect(flat.swapProviderUrl).toBe('https://boltz')
     expect(flat.delegatorUrl).toBe('https://delegator')
     expect(flat.delegationEnabled).toBe(false)
-    expect(flat.boltzSwapsEnabled).toBe(true)
     expect(flat.eventSource).toBe(impl)
     expect(flat.storage).toBe(storage)
   })

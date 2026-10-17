@@ -53,8 +53,6 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
   ARKADE: [
     'onchain-send',
     'onchain-receive',
-    'lightning-send',
-    'lightning-receive',
     'asset-send',
     'asset-receive',
     'arkade-onboard',

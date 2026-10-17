@@ -12,14 +12,42 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   spark-sdk network (`MAINNET`/`TESTNET`/`REGTEST`/`SIGNET`/`LOCAL`) a Spark
   address belongs to, so a host can refuse a Spark send to another network.
 
+### Removed
+- **Breaking:** the Arkade Boltz swap integration. Boltz has retired its Ark
+  service, and Lightning on Arkade now runs over Arkade Intents. Gone:
+  the `@arkade-os/boltz-swap` optional peer, `arkadeSwapsClientManager` and
+  `ArkadeSwapsInitOptions` (from `adapters/arkade` and `adapters/native`),
+  `ArkadeConfig.boltzSwapsEnabled`, the `swapProviderUrl` passthrough,
+  `createArkadeLightningInvoice` (also dropped from `IArkadeOperations`), and the
+  `ArkadeWdkAdapter` ops `waitForLightningPayment`, `getLightningLimits` and
+  `getLightningFees`. The BTC <-> L-BTC chain swaps (`BoltzChainSwap`,
+  `boltzSwapClientManager`) are unaffected.
+
 ### Changed
-- The engine is tested against `@kaleidorg/swap-sdk` 0.12. Hosts using the
-  Arkade venue with `@arkade-os/swap` 0.0.21 or later should run swap-sdk 0.11
-  or later: on 0.10 that venue never claimed a receive and threw on every send
-  refund (`contracts.getContractsWithVtxos is not a function`), and the error
-  was swallowed. swap-sdk 0.12 also waits 15 minutes on an `unknown` lockup
-  read past the deadline before cancelling a `prepared` swap, so a late
-  funding or a lagging indexer no longer strands it as cancelled.
+- The optional `@kaleidorg/swap-sdk` peer range admits `^0.11.0` and
+  `^0.12.0`, and the engine is tested against 0.12. On `@arkade-os/swap`
+  0.0.21 and later, the 0.10 Arkade venue never claimed a receive and threw
+  on every send refund (`contracts.getContractsWithVtxos is not a function`),
+  and the manager swallowed the error. 0.11 passes the wallet's contract
+  manager to the swap manager, so hosts on `@arkade-os/swap` 0.0.21+ should
+  move to 0.11 or later.
+- swap-sdk 0.12's Arkade venue waits 15 minutes on an `unknown` lockup read
+  past the deadline before cancelling a `prepared` swap, so a late funding or
+  a lagging indexer no longer strands it as cancelled.
+- Both Arkade adapters reject a BOLT11 `sendPayment` and a
+  `createInvoice({ layer: 'BTC_LN' })` with `NOT_SUPPORTED` before touching the
+  wallet, and never return an Ark address as a Lightning invoice. Drive
+  Lightning through `arkadeIntentsClientManager` instead. ARKADE no longer
+  declares `supportsLightning`, the `BTC_LN` layer or the `lightning-send` /
+  `lightning-receive` operations, so the router stops offering it as a direct
+  BOLT11 route.
+
+### Added
+- `cleanupLegacyArkadeSwapsDb()`: deletes the old Boltz IndexedDB store
+  (`kaleidoswap-arkade-swaps`) when it is absent or holds only final swaps, and
+  keeps it with a warning when a swap may still hold funds in a VHTLC.
+  `ArkadeAdapter.connect()` runs it once per process; it no-ops without
+  `indexedDB`.
 
 ### Fixed
 - Liquid Testnet USDt (`LIQUID_TESTNET_USDT_ASSET_ID`) is now a known asset: `listAssets`

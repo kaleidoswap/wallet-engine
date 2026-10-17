@@ -224,30 +224,19 @@ describe('F8: ARKADE declares lightning-receive but core createInvoice returns a
     const inv = await adapter.createInvoice({ amount: 5000 })
     expect(inv.invoice).toBe('ark1qreceiver…') // NOT lnbc…
     expect(inv.invoice.startsWith('ln')).toBe(false)
-    // The actual Lightning path exists on the optional-group method
-    // createArkadeLightningInvoice (ArkadeWdkAdapter.ts).
-    expect(typeof (adapter as any).createArkadeLightningInvoice).toBe('function')
   })
 
-  it('[FIXED] a BTC_LN request honours InvoiceRequest.layer and returns a bolt11', async () => {
+  it('[FIXED] ARKADE no longer declares lightning-receive, and a BTC_LN request is refused', async () => {
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
       wallet: { getAddress: async () => 'ark1qreceiver…' },
-      // Lightning receive is the Boltz swaps client's, not the wallet's, since
-      // the Arkade path builds on the SDK directly.
-      swaps: {
-        createLightningInvoice: async ({ amount }: { amount: number }) => ({
-          invoice: `lnbc${amount}1pboltz`,
-          paymentHash: 'ph-boltz',
-        }),
-      },
     })
-    const inv = await adapter.createInvoice({ amount: 5000, layer: 'BTC_LN' })
-    // ARKADE declares `lightning-receive`; a caller asking for that layer must not
-    // get an Ark address a host would render as a Lightning QR.
-    expect(inv.invoice.startsWith('lnbc')).toBe(true)
-    expect(inv.paymentHash).toBe('ph-boltz')
+    expect(adapter.capabilities).not.toContain('lightning-receive')
+    // Boltz is gone; an Ark address must never stand in for a Lightning invoice.
+    await expect(adapter.createInvoice({ amount: 5000, layer: 'BTC_LN' })).rejects.toMatchObject({
+      code: 'NOT_SUPPORTED',
+    })
   })
 
   it('[FIXED] a request with no layer still returns the Ark address (unchanged default)', async () => {

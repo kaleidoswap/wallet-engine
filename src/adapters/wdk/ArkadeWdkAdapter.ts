@@ -2,8 +2,8 @@
  * ArkadeWdkAdapter
  * ----------------
  * Arkade on the `IProtocolAdapter` contract. Arkade is a VTXO-based Bitcoin L2:
- * off-chain Ark transfers, an on-chain "boarding" address for funding, and
- * Lightning via Boltz swaps.
+ * off-chain Ark transfers and an on-chain "boarding" address for funding.
+ * Lightning goes through the host-driven Arkade Intents venue, not this adapter.
  *
  * Built on `@arkade-os/sdk` **directly**. It used to wrap `@arkade-os/wdk`,
  * which hard-pins the SDK at exactly `0.4.35` and so held the Arkade path
@@ -41,6 +41,7 @@ import {
   TransactionFilter,
   TransactionStatus,
   ProtocolError,
+  ErrorCode,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
@@ -60,6 +61,15 @@ const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(va
 const isLightningInvoice = (value: string): boolean => {
   const body = value.trim().toLowerCase().replace(/^lightning:/, '')
   return /^ln(bc|tb|bcrt|sb)/.test(body)
+}
+
+/** Lightning on Arkade is the host-driven Arkade Intents venue's, not this adapter's. */
+function lightningNotSupported(direction: 'send' | 'receive'): ProtocolError {
+  return new ProtocolError(
+    `Arkade Lightning ${direction} is not supported by the adapter; use Arkade Intents`,
+    'ARKADE',
+    ErrorCode.NOT_SUPPORTED,
+  )
 }
 
 const ARKADE_TRANSACTION_BTC: UnifiedAsset = {
@@ -92,25 +102,15 @@ export interface ArkadeAdapterConfig extends BaseProtocolConfig {
   mnemonic: string
   /** BIP-44 account index (default 0). */
   accountIndex?: number
-  /** Arkade wallet config (ark server URL, indexer URL, swap provider URL, …) passed through to the module. */
+  /** Arkade wallet config (ark server URL, indexer URL, …) passed through to the module. */
   arkadeConfig?: Record<string, any>
 }
 
 /**
- * Operations reachable via `executeProtocolOperation`, and where each is served.
- *
- * The base class dispatches an allowlist against a WDK account; there isn't one
- * any more, so Arkade routes its own. Splitting by owner is the point: the
- * Lightning operations only exist when a swap provider is configured, and
- * saying so beats a `TypeError` from an absent method.
- *
- * VTXO-lifecycle ops are typed adapter methods, so intentionally not here.
+ * Operations reachable via `executeProtocolOperation`. The base class dispatches
+ * an allowlist against a WDK account; there isn't one any more, so Arkade routes
+ * its own. VTXO-lifecycle ops are typed adapter methods, so intentionally not here.
  */
-const ARKADE_SWAP_OPS: ReadonlySet<string> = new Set([
-  'waitForLightningPayment',
-  'getLightningLimits',
-  'getLightningFees',
-])
 const ARKADE_WALLET_OPS: ReadonlySet<string> = new Set([
   'notifyIncomingFunds',
   'getBoardingAddress',
@@ -128,9 +128,6 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   /** The `@arkade-os/sdk` Wallet. Built here, not reached into. */
   private wallet: any = null
-
-  /** Boltz swaps client, when a swap provider is configured. */
-  private swaps: any = null
 
   /** Cached `getInfo()` — the fee table the offchain estimates come from. */
   private arkInfo: any = null
@@ -168,7 +165,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   /**
-   * Tear down the wallet and the swaps client.
+   * Tear down the wallet.
    *
    * The base teardown disposes an account and a manager, and this adapter has
    * neither. Signing state is dropped before the fallible third-party cleanup
@@ -177,19 +174,12 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
    */
   async disconnect(): Promise<void> {
     const wallet = this.wallet
-    const swaps = this.swaps
     this.wallet = null
-    this.swaps = null
     this.arkInfo = null
     this.connected = false
     this.mnemonic = null
 
-    const results = await Promise.allSettled([
-      Promise.resolve().then(() => swaps?.dispose?.()),
-      Promise.resolve().then(() => wallet?.dispose?.()),
-    ])
-    const failure = results.find((r): r is PromiseRejectedResult => r.status === 'rejected')
-    if (failure) throw failure.reason
+    await wallet?.dispose?.()
   }
 
   // --- Connection ---------------------------------------------------------
@@ -197,9 +187,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     const cfg = config as ArkadeAdapterConfig & {
       arkServerUrl?: string
       esploraUrl?: string
-      swapProviderUrl?: string
       indexerUrl?: string
-      boltzSwapsEnabled?: boolean
       eventSource?: unknown
       delegatorUrl?: string
       delegationEnabled?: boolean
@@ -214,10 +202,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     // Settings may arrive at the top level or nested under `arkadeConfig`;
     // hosts use both. See `flattenArkadeConfig`.
     const flat = flattenArkadeConfig(cfg as Record<string, any>)
-    const { arkServerUrl, esploraUrl, swapProviderUrl } = flat as {
+    const { arkServerUrl, esploraUrl } = flat as {
       arkServerUrl?: string
       esploraUrl?: string
-      swapProviderUrl?: string
     }
 
     // @ts-ignore — optional peer, resolved at runtime in the consuming app.
@@ -248,25 +235,6 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
     this.arkInfo = await this.wallet.arkProvider.getInfo()
 
-    // Boltz swaps, for the Lightning legs. Opt-in: `ArkadeSwaps.create` with a
-    // swap manager opens a WebSocket that reconnects for the life of the
-    // session, which is pure noise for a host reaching Lightning another way
-    // (the same reasoning as #81, which the WDK path could not honour because
-    // the WDK always started one).
-    if (swapProviderUrl) {
-      // @ts-ignore — optional peer, resolved at runtime.
-      const boltz: any = await loadWdkModule('@arkade-os/boltz-swap', () => import('@arkade-os/boltz-swap'))
-      const swapProvider = new boltz.BoltzSwapProvider({
-        apiUrl: swapProviderUrl,
-        network: this.arkInfo?.network,
-        referralId: 'kaleidoswap-wallet-engine',
-      })
-      this.swaps = await boltz.ArkadeSwaps.create({
-        wallet: this.wallet,
-        swapProvider,
-        ...(flat.boltzSwapsEnabled ? { swapManager: { autoStart: true, pollInterval: 5_000 } } : {}),
-      })
-    }
     this.connected = true
   }
 
@@ -450,10 +418,10 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   // --- Invoices -----------------------------------------------------------
-  /** Honor the requested layer so Lightning callers never receive an Ark address. */
+  /** Never answer a Lightning request with an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
-    if (request.layer === 'BTC_LN') return this.createArkadeLightningInvoice(request)
+    if (request.layer === 'BTC_LN') throw lightningNotSupported('receive')
     const address: string = await this.rawWallet.getAddress()
     return {
       invoice: address,
@@ -461,33 +429,6 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       amount: request.amount,
       expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
       description: request.description ?? 'Arkade receiving address',
-    }
-  }
-
-  /**
-   * Boltz reverse-swap Lightning invoice landing funds here as a VTXO. Requires
-   * amount > 0 (Boltz can't issue an amountless invoice); the embedded SwapManager
-   * claims the VHTLC once the payment settles.
-   */
-  async createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice> {
-    this.assertConnected()
-    if (!request.amount || request.amount <= 0) {
-      throw new ProtocolError('Amount is required for Boltz Lightning invoices into Arkade', 'ARKADE', 'INVALID_AMOUNT')
-    }
-    // createLightningInvoice(amountSats, description?) — POSITIONAL args; via Boltz reverse swap.
-    if (!this.swaps?.createLightningInvoice) {
-      throw new ProtocolError('Arkade Lightning receive needs a swapProviderUrl', 'ARKADE', 'NOT_SUPPORTED')
-    }
-    const r: any = await this.swaps.createLightningInvoice({
-      amount: request.amount,
-      description: request.description,
-    })
-    return {
-      invoice: r?.invoice ?? '',
-      paymentHash: r?.paymentHash ?? '',
-      amount: request.amount,
-      expiresAt: Date.now() + (request.expirySeconds ?? 3600) * 1000,
-      description: request.description ?? 'Boltz reverse swap into Arkade',
     }
   }
 
@@ -505,43 +446,8 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const dest = request.invoice.trim()
 
-    // Lightning send via Boltz submarine swap (Arkade → Lightning), if the account exposes the swap client.
-    if (isLightningInvoice(dest)) {
-      const swaps: any = this.swaps
-      if (!swaps?.sendLightningPayment) {
-        throw new ProtocolError('Arkade Lightning send not available in this module version', 'ARKADE', 'NOT_SUPPORTED')
-      }
-      const invoiceBody = dest.toLowerCase().startsWith('lightning:') ? dest.slice('lightning:'.length) : dest
-      try {
-        const result: any = await swaps.sendLightningPayment({ invoice: invoiceBody })
-        // A preimage is settlement proof, not the public history identifier.
-        if (!result?.txid && !result?.preimage) {
-          throw new ProtocolError(
-            'Arkade Lightning send returned no transaction id and no preimage',
-            'ARKADE',
-            'SEND_ERROR',
-          )
-        }
-        return {
-          paymentHash: result?.txid ?? '',
-          preimage: result?.preimage,
-          amount: Number(result?.amount ?? request.amount ?? 0),
-          fee: 0,
-          status: 'pending',
-          timestamp: Date.now(),
-        }
-      } catch (error: unknown) {
-        const msg = error instanceof Error ? error.message : String(error)
-        if (/less than minimal/i.test(msg)) {
-          throw new ProtocolError(
-            "Arkade can't pay amountless Lightning invoices. Ask the recipient for an invoice with an amount.",
-            'ARKADE',
-            'INVALID_AMOUNT',
-          )
-        }
-        throw new ProtocolError(`Failed to send Lightning payment via Boltz: ${msg}`, 'ARKADE', 'SEND_PAYMENT_ERROR')
-      }
-    }
+    // Checked before the amount so a bolt11 never falls through to sendBitcoin.
+    if (isLightningInvoice(dest)) throw lightningNotSupported('send')
 
     if (request.amount == null) {
       throw new ProtocolError('Arkade send requires an explicit amount', 'ARKADE', 'NO_AMOUNT')
@@ -668,7 +574,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async listChannels(): Promise<any[]> {
     // Distinguish an unsupported channel model from an unavailable wallet.
     this.assertConnected()
-    return [] // Arkade has no LN channels (LN via Boltz swaps)
+    return [] // Arkade has no LN channels
   }
 
   async listPayments(): Promise<any> {
@@ -752,19 +658,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return verifyLnMessage(message, signature)
   }
 
-  /** Escape hatch for Arkade-specific ops (waitForLightningPayment, getLightningLimits, …) — allowlisted. */
+  /** Escape hatch for Arkade-specific wallet ops (getBoardingAddress, …) — allowlisted. */
   async executeProtocolOperation(operation: string, params: any): Promise<any> {
     this.assertConnected()
-    if (ARKADE_SWAP_OPS.has(operation)) {
-      if (!this.swaps) {
-        throw new ProtocolError(
-          `Arkade operation '${operation}' needs a swapProviderUrl`,
-          'ARKADE',
-          'NOT_SUPPORTED',
-        )
-      }
-      return this.callOn(this.swaps, operation, params)
-    }
     if (ARKADE_WALLET_OPS.has(operation)) return this.callOn(this.rawWallet, operation, params)
     throw new ProtocolError(`ARKADE operation not allowed: '${operation}'`, 'ARKADE', 'NO_OP')
   }

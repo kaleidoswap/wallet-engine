@@ -212,25 +212,14 @@ describe('G-F7: capabilities flags must match what the adapter actually does', (
     await expect(adapter.signLiquidPset({ pset: 'AAAA' } as any)).rejects.toThrow(/NOT_SUPPORTED|Simplicity/i)
   })
 
-  it('b) [FIXED] ARKADE honours createInvoice({layer:BTC_LN}) instead of returning an Ark address', async () => {
-    const adapter = connected(
-      new ArkadeWdkAdapter(),
-      { getAddress: async () => ARK_ADDR },
-      // Lightning receive belongs to the Boltz swaps client now, not the wallet.
-      {
-        swaps: {
-          createLightningInvoice: async ({ amount }: { amount: number }) => ({
-            invoice: `lnbc${amount}1pboltz`,
-            paymentHash: 'ph-boltz',
-          }),
-        },
-      },
-    )
-    expect(adapter.capabilities).toContain('lightning-receive')
-    const inv = await adapter.createInvoice({ amount: 1000, layer: 'BTC_LN' } as any)
-    // Fixed by audit finding F-F8: was ARK_ADDR with paymentHash ''.
-    expect(inv.invoice.startsWith('lnbc')).toBe(true)
-    expect(inv.paymentHash).toBe('ph-boltz')
+  it('b) [FIXED] ARKADE refuses createInvoice({layer:BTC_LN}) instead of returning an Ark address', async () => {
+    const adapter = connected(new ArkadeWdkAdapter(), { getAddress: async () => ARK_ADDR })
+    // Lightning moved to the host-driven Arkade Intents venue with the Boltz removal.
+    expect(adapter.capabilities).not.toContain('lightning-receive')
+    // Was ARK_ADDR with paymentHash '' (audit finding F-F8).
+    await expect(adapter.createInvoice({ amount: 1000, layer: 'BTC_LN' } as any)).rejects.toMatchObject({
+      code: 'NOT_SUPPORTED',
+    })
     // …and with no layer the Ark address is still the answer.
     expect((await adapter.createInvoice({ amount: 1000 } as any)).invoice).toBe(ARK_ADDR)
   })
