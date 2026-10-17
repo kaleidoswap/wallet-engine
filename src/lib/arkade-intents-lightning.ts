@@ -95,7 +95,22 @@ export interface ArkadeLightningSwap {
   fundingTxid?: string
   resolvedTxid?: string
   failureReason?: string
+  /** Sends: earliest unix second a refund without the solver can be pushed. */
+  refundAvailableAt?: number
+  /** Set when `status === 'needs_recovery'`: what the host must do next. */
+  recoveryHint?: string
 }
+
+/**
+ * How long past `refund_locktime` the Ark server can still reject the refund
+ * push: the CLTV matures against median-time-past, which trails wall clock.
+ * Mirrors `REFUND_MTP_LAG_SECONDS` in `@arkade-os/swap` (2 h).
+ */
+export const REFUND_MTP_LAG_SECONDS = 2 * 3600
+
+const RECOVERY_HINT =
+  "The lockup's batch was swept, so no offchain refund can move it. Run the wallet's VTXO recovery " +
+  '(or a unilateral exit of the listed outpoints) and call refundLightningSend again.'
 
 export interface ArkadeLightningSendQuote {
   /** The rfq_id; pass to `executeSend`. */
@@ -134,7 +149,15 @@ export interface ArkadeLightningReceive {
   invoiceExpiresAt: number
 }
 
-export type ArkadeIntentsRefusalKind = 'below_minimum' | 'above_maximum' | 'no_capacity' | 'out_of_range' | 'other'
+export type ArkadeIntentsRefusalKind =
+  | 'below_minimum'
+  | 'above_maximum'
+  | 'no_capacity'
+  | 'out_of_range'
+  /** `quote_conflict`: the solver already holds a swap for this payment hash
+   * (it keeps one per hash once quoted, and cannot pay its own invoice). */
+  | 'already_quoted'
+  | 'other'
 
 /**
  * The solver declined to quote. `reason` is the solver's own code
@@ -241,6 +264,7 @@ export class ArkadeIntentsLightning {
   private timer: ReturnType<typeof setInterval> | null = null
   private card: { limits: CardLimits; at: number } | null = null
   private initPromise: Promise<ArkadeIntentsVenueLike | null> | null = null
+  private resumed = false
 
   constructor(private readonly deps: ArkadeIntentsLightningDeps) {}
 
@@ -275,6 +299,14 @@ export class ArkadeIntentsLightning {
       return null
     })
     const venue = await this.initPromise
+    if (venue && !this.timer && !this.resumed) {
+      // Resume whatever a previous session left pending (claims, refunds now
+      // due). Also for a venue the host initialized: before, only a venue this
+      // class built got the immediate pass, so a host-built one waited a full
+      // interval before resuming.
+      this.resumed = true
+      void this.reconcile().catch((error: unknown) => log.warn('[ArkadeIntents] Resume reconcile failed:', error))
+    }
     if (venue) this.startReconcileLoop()
     return venue !== null
   }
@@ -296,8 +328,6 @@ export class ArkadeIntentsLightning {
       transport,
       ...(this.deps.store ? { store: this.deps.store } : {}),
     })
-    // Resume whatever a previous session left pending.
-    void this.reconcile().catch(() => {})
     return arkadeIntentsClientManager.getVenue()
   }
 
@@ -313,6 +343,7 @@ export class ArkadeIntentsLightning {
     if (this.timer) clearInterval(this.timer)
     this.timer = null
     this.initPromise = null
+    this.resumed = false
     this.card = null
   }
 
@@ -425,7 +456,14 @@ export class ArkadeIntentsLightning {
     let limit = num(e?.limit)
     let kind: ArkadeIntentsRefusalKind = 'other'
     if (reason === 'exposure_cap') kind = 'no_capacity'
-    else if (reason === 'amount_out_of_range') {
+    else if (reason === 'quote_conflict') {
+      return new ArkadeIntentsRefusalError(
+        'The solver already has a swap for this invoice (it keeps one per payment hash once quoted, ' +
+          'and cannot pay an invoice it issued itself). Ask the payee for a new invoice.',
+        { reason, kind: 'already_quoted', actual },
+        error,
+      )
+    } else if (reason === 'amount_out_of_range') {
       kind = 'out_of_range'
       const card = limit == null ? await this.cardLimits() : null
       if (limit != null) kind = actual < limit ? 'below_minimum' : 'above_maximum'
@@ -457,6 +495,8 @@ export class ArkadeIntentsLightning {
   async quoteSend(invoice: string, opts: { maxFeeSats?: number } = {}): Promise<ArkadeLightningSendQuote> {
     const facts = await this.checkInvoice(invoice)
     const venue = await this.venue()
+    const existing = await this.existingSwapFor(facts, opts)
+    if (existing) return existing
     await this.checkCardLimits(facts.amountSats)
     let prepared: Record<string, any>
     try {
@@ -499,6 +539,71 @@ export class ArkadeIntentsLightning {
       )
     }
     return quote
+  }
+
+  /**
+   * A payment hash this wallet already has a swap for. The solver keeps one
+   * swap per hash once quoted, so asking again only earns `quote_conflict`;
+   * worse, a hash that is already funded must never be paid a second time.
+   * A still-valid quote is handed back as is (re-quoting is idempotent).
+   */
+  private async existingSwapFor(
+    facts: { raw: string; paymentHash: string; amountSats: number; expiresAt: number },
+    opts: { maxFeeSats?: number },
+  ): Promise<ArkadeLightningSendQuote | null> {
+    const id = await this.store().idForPaymentHash(facts.paymentHash)
+    const record = id ? await this.store().get(id) : undefined
+    if (!record) return null
+    if (record.route !== SEND_ROUTE) {
+      throw new ProtocolError(
+        'This invoice was issued for one of this wallet\'s own Lightning receives; a wallet cannot pay itself through the solver',
+        'ARKADE',
+        'SELF_PAYMENT',
+      )
+    }
+    const q = (record.quote ?? {}) as Record<string, unknown>
+    const validUntil = num(q.valid_until)
+    if (record.phase === 'prepared' && validUntil != null && validUntil > this.now()) {
+      const fundAmountSats = num(record.fundAmountSats) ?? 0
+      const toAmount = num(q.to_amount) ?? facts.amountSats
+      const quote: ArkadeLightningSendQuote = {
+        id: record.id,
+        invoice: facts.raw,
+        paymentHash: facts.paymentHash,
+        invoiceAmountSats: facts.amountSats,
+        fundAmountSats,
+        feeSats: fundAmountSats - toAmount,
+        maxFeeSats: this.feeCeiling(facts.amountSats, opts.maxFeeSats),
+        validUntil,
+        refundLocktime: num(q.refund_locktime),
+        invoiceExpiresAt: facts.expiresAt,
+      }
+      if (quote.feeSats > quote.maxFeeSats) {
+        throw new ProtocolError(
+          `Solver fee ${quote.feeSats} sats exceeds the ceiling of ${quote.maxFeeSats} sats`,
+          'ARKADE',
+          'FEE_TOO_HIGH',
+          quote,
+        )
+      }
+      return quote
+    }
+    switch (record.phase) {
+      case 'settled':
+        throw new ProtocolError('This invoice was already paid from this wallet', 'ARKADE', 'INVOICE_ALREADY_PAID')
+      case 'funded':
+      case 'needs_recovery':
+        throw new ProtocolError(
+          `A payment of this invoice is already in progress (swap ${record.id}); it was not paid twice`,
+          'ARKADE',
+          'INVOICE_IN_PROGRESS',
+        )
+      default:
+        throw new ArkadeIntentsRefusalError(
+          `This invoice was already quoted (swap ${record.id}, ${record.phase}) and the solver keeps one swap per payment hash. Ask the payee for a new invoice.`,
+          { reason: 'quote_conflict', kind: 'already_quoted', actual: facts.amountSats },
+        )
+    }
   }
 
   /**
@@ -623,9 +728,51 @@ export class ArkadeIntentsLightning {
     return { ...report, failed: report.failed ?? [] }
   }
 
-  /** Push a refund for a stalled send (no-op until the refund locktime). */
+  /**
+   * Take back a stalled send. The venue first checks whether the solver
+   * already settled or refunded it; otherwise the trader's own
+   * `refundWithoutReceiver` (trader + Ark operator co-sign) can only be
+   * pushed once `refund_locktime` has passed, so before that this throws
+   * `REFUND_NOT_YET` with `refundAvailableAt`. Idempotent: a refunded swap is
+   * returned as is, and nothing is ever pushed twice.
+   */
   async refundSend(id: string): Promise<ArkadeLightningSwap> {
-    return this.toSwap(await (await this.venue()).refundSend(id))
+    const venue = await this.venue()
+    const before = await this.store().get(id)
+    if (!before) throw new ProtocolError(`No Arkade Intents swap ${id}`, 'ARKADE', 'SWAP_NOT_FOUND')
+    if (before.route !== SEND_ROUTE) {
+      throw new ProtocolError(
+        'A Lightning receive has nothing of this wallet\'s to refund: an unpaid invoice just expires',
+        'ARKADE',
+        'NOT_REFUNDABLE',
+      )
+    }
+    switch (before.phase) {
+      case 'refunded':
+        return this.toSwap(before)
+      case 'settled':
+        throw new ProtocolError('The payment settled; there is nothing to refund', 'ARKADE', 'ALREADY_SETTLED')
+      case 'prepared':
+      case 'cancelled':
+        throw new ProtocolError('This swap was never funded; there is nothing to refund', 'ARKADE', 'NOTHING_TO_REFUND')
+    }
+    const after = this.toSwap(await venue.refundSend(id))
+    if (after.status !== 'pending') return after
+    const at = after.refundAvailableAt
+    if (at != null && this.now() < at) {
+      const error = new ProtocolError(
+        `Refund not possible yet: the solver has not returned the funds, and the refund without it unlocks at ${new Date(at * 1000).toISOString()}`,
+        'ARKADE',
+        'REFUND_NOT_YET',
+        { refundAvailableAt: at, swap: after },
+      )
+      Object.assign(error, { refundAvailableAt: at })
+      throw error
+    }
+    // Past the locktime: the push is in flight, or the Ark server still waits
+    // for median-time-past to catch up (up to REFUND_MTP_LAG_SECONDS). The
+    // background reconcile keeps retrying.
+    return after
   }
 
   async getSwap(id: string): Promise<ArkadeLightningSwap | null> {
@@ -669,6 +816,8 @@ export class ArkadeIntentsLightning {
       fundingTxid: typeof record.fundingTxid === 'string' ? record.fundingTxid : undefined,
       resolvedTxid: typeof record.resolvedTxid === 'string' ? record.resolvedTxid : undefined,
       failureReason: typeof record.failureReason === 'string' ? record.failureReason : undefined,
+      ...(send && num(quote.refund_locktime) != null ? { refundAvailableAt: num(quote.refund_locktime) } : {}),
+      ...(record.phase === 'needs_recovery' ? { recoveryHint: RECOVERY_HINT } : {}),
     }
   }
 }

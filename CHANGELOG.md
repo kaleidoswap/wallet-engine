@@ -72,13 +72,29 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `cancelled`, `failed` or `needs_recovery`; funding is never `confirmed`.
 - `ArkadeIntentsRefusalError` (`code: 'INTENTS_REFUSED'`): the solver's
   `reason` plus `kind` (`below_minimum`, `above_maximum`, `no_capacity`,
-  `out_of_range`, `other`) and, when known, `limit` / `actual` / `unit`. Limits
+  `out_of_range`, `already_quoted`, `other`) and, when known, `limit` / `actual` / `unit`. Limits
   come from the solver's signed card (`GET /v1/card`), since `@arkade-os/swap`
   drops them for `amount_out_of_range` / `exposure_cap`. Other errors:
   `INVOICE_NETWORK_MISMATCH`, `INVOICE_EXPIRED`, `INVALID_AMOUNT`,
   `FEE_TOO_HIGH`, `QUOTE_EXPIRED`, `QUOTE_USED`, `NOT_CONFIGURED`, `CONFIG`.
 - `ArkadeIntentsConfig.covclaimdPubkey` (optional, 66 hex) lets the solver's
   claim daemon claim receives while the wallet is offline.
+- Arkade Lightning refunds: `refundLightningSend` returns a swap the solver
+  already settled or refunded, and otherwise pushes the trader's own refund
+  (trader + Ark operator) once `refund_locktime` has passed. Before that it
+  fails `REFUND_NOT_YET` with `refundAvailableAt` (the KaleidoSwap maker quotes
+  about 25 h and does not refund an Arkade lockup itself when its Lightning
+  payment fails). A double refund pushes once; settled, unfunded and receive
+  swaps fail `ALREADY_SETTLED`, `NOTHING_TO_REFUND` and `NOT_REFUNDABLE`. Swaps
+  carry `refundAvailableAt`, and `recoveryHint` when `needs_recovery`.
+  `REFUND_MTP_LAG_SECONDS` is exported.
+- Re-quoting an invoice is idempotent: a still-valid quote is returned
+  instead of asking the solver again (which answers `quote_conflict`, since it
+  keeps one swap per payment hash). An expired quote fails as an
+  `already_quoted` refusal, an invoice in flight or paid fails
+  `INVOICE_IN_PROGRESS` / `INVOICE_ALREADY_PAID` (never paid twice), and one
+  of this wallet's own receive invoices fails `SELF_PAYMENT`. The solver's
+  `quote_conflict` maps to `kind: 'already_quoted'` with a clear message.
 - `ARKADE_LIGHTNING_OPERATIONS`, `CONDITIONAL_OPERATIONS` and
   `liveOperationAvailable` in `capabilities/operations`.
 
