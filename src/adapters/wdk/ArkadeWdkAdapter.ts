@@ -2,8 +2,8 @@
  * ArkadeWdkAdapter
  * ----------------
  * Arkade on the `IProtocolAdapter` contract. Arkade is a VTXO-based Bitcoin L2:
- * off-chain Ark transfers and an on-chain "boarding" address for funding.
- * Lightning goes through the host-driven Arkade Intents venue, not this adapter.
+ * off-chain Ark transfers, an on-chain "boarding" address for funding, and
+ * Lightning over Arkade Intents (see `lib/arkade-intents-lightning`).
  *
  * Built on `@arkade-os/sdk` **directly**. It used to wrap `@arkade-os/wdk`,
  * which hard-pins the SDK at exactly `0.4.35` and so held the Arkade path
@@ -41,11 +41,10 @@ import {
   TransactionFilter,
   TransactionStatus,
   ProtocolError,
-  ErrorCode,
 } from '../../types/base'
 import { getCapabilities } from '../../capabilities'
 import { BaseWdkAdapter } from './BaseWdkAdapter'
-import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
+import { PROTOCOL_OPERATIONS, ARKADE_LIGHTNING_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { ensureEventSource, EVENT_SOURCE_MISSING_REASON } from '../../lib/arkade-eventsource'
 import { createArkadeSdkWallet, flattenArkadeConfig } from '../../lib/arkade-sdk-wallet'
@@ -56,20 +55,20 @@ import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } 
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
+import { arkadeIntentsClientManager } from '../../lib/arkade-intents-client-manager'
+import {
+  ArkadeIntentsLightning,
+  transactionStatusOf,
+  type ArkadeIntentsConfig,
+  type ArkadeLightningReconcileReport,
+  type ArkadeLightningSendQuote,
+  type ArkadeLightningSwap,
+} from '../../lib/arkade-intents-lightning'
 
 const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(value.trim())
 const isLightningInvoice = (value: string): boolean => {
   const body = value.trim().toLowerCase().replace(/^lightning:/, '')
   return /^ln(bc|tb|bcrt|sb)/.test(body)
-}
-
-/** Lightning on Arkade is the host-driven Arkade Intents venue's, not this adapter's. */
-function lightningNotSupported(direction: 'send' | 'receive'): ProtocolError {
-  return new ProtocolError(
-    `Arkade Lightning ${direction} is not supported by the adapter; use Arkade Intents`,
-    'ARKADE',
-    ErrorCode.NOT_SUPPORTED,
-  )
 }
 
 const ARKADE_TRANSACTION_BTC: UnifiedAsset = {
@@ -119,7 +118,12 @@ const ARKADE_WALLET_OPS: ReadonlySet<string> = new Set([
 
 export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = 'ARKADE'
-  readonly capabilities = PROTOCOL_OPERATIONS.ARKADE
+  /** Lightning operations appear only while an Arkade Intents venue is live. */
+  get capabilities() {
+    return this.intents?.isAvailable()
+      ? [...PROTOCOL_OPERATIONS.ARKADE, ...ARKADE_LIGHTNING_OPERATIONS]
+      : PROTOCOL_OPERATIONS.ARKADE
+  }
   readonly supportedLayers: Layer[] = getCapabilities('ARKADE').layers
 
 
@@ -128,6 +132,9 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   /** The `@arkade-os/sdk` Wallet. Built here, not reached into. */
   private wallet: any = null
+
+  /** Lightning over Arkade Intents for this connection. */
+  private intents: ArkadeIntentsLightning | null = null
 
   /** Cached `getInfo()` — the fee table the offchain estimates come from. */
   private arkInfo: any = null
@@ -174,6 +181,10 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
    */
   async disconnect(): Promise<void> {
     const wallet = this.wallet
+    const intents = this.intents
+    this.intents = null
+    intents?.stop()
+    if (intents) await arkadeIntentsClientManager.dispose()
     this.wallet = null
     this.arkInfo = null
     this.connected = false
@@ -235,7 +246,18 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
     this.arkInfo = await this.wallet.arkProvider.getInfo()
 
+    const intentsConfig = flat.intents as ArkadeIntentsConfig | undefined
+    const wallet = this.wallet
+    this.intents = new ArkadeIntentsLightning({
+      config: intentsConfig ?? {},
+      getWallet: () => wallet,
+      getNetwork: async () => String(this.arkInfo?.network ?? ''),
+      arkServerUrl: String(arkServerUrl ?? ''),
+      fund: async (address, amount) => String(await this.rawWallet.sendBitcoin({ address, amount })),
+    })
+
     this.connected = true
+    if (intentsConfig) await this.intents.start()
   }
 
   /** False when the runtime has no `EventSource`; see `lib/arkade-eventsource`. */
@@ -421,7 +443,16 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   /** Never answer a Lightning request with an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
-    if (request.layer === 'BTC_LN') throw lightningNotSupported('receive')
+    if (request.layer === 'BTC_LN') {
+      const receive = await this.requireIntents().createReceive(request.amount ?? 0)
+      return {
+        invoice: receive.invoice,
+        paymentHash: receive.paymentHash,
+        amount: receive.payAmountSats,
+        expiresAt: receive.invoiceExpiresAt * 1000,
+        description: request.description ?? 'Lightning into Arkade via Arkade Intents',
+      }
+    }
     const address: string = await this.rawWallet.getAddress()
     return {
       invoice: address,
@@ -441,13 +472,61 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return { paymentHash: '', expiresAt: 0, destination: dest }
   }
 
+  // --- Lightning over Arkade Intents -------------------------------------
+  private requireIntents(): ArkadeIntentsLightning {
+    this.assertConnected()
+    if (!this.intents) throw new ProtocolError('Lightning on Arkade needs Arkade Intents', 'ARKADE', 'NOT_CONFIGURED')
+    return this.intents
+  }
+
+  /** Quote paying a bolt11 from Arkade. Persists the quote; moves nothing. */
+  async quoteLightningSend(invoice: string, opts?: { maxFeeSats?: number }): Promise<ArkadeLightningSendQuote> {
+    return this.requireIntents().quoteSend(invoice, opts)
+  }
+
+  /** Fund a quote the user approved. Resolves `pending`; poll `getLightningSwap`. */
+  async executeLightningSend(quoteId: string): Promise<ArkadeLightningSwap> {
+    return this.requireIntents().executeSend(quoteId)
+  }
+
+  async getLightningSwap(id: string): Promise<ArkadeLightningSwap | null> {
+    return this.requireIntents().getSwap(id)
+  }
+
+  async listLightningSwaps(): Promise<ArkadeLightningSwap[]> {
+    return this.requireIntents().listSwaps()
+  }
+
+  async refundLightningSend(id: string): Promise<ArkadeLightningSwap> {
+    return this.requireIntents().refundSend(id)
+  }
+
+  /** One claim/refund pass; call from the host scheduler (e.g. an MV3 alarm). */
+  async reconcileLightningSwaps(): Promise<ArkadeLightningReconcileReport | null> {
+    return this.requireIntents().reconcile()
+  }
+
   // --- Send ---------------------------------------------------------------
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
     this.assertConnected()
     const dest = request.invoice.trim()
 
     // Checked before the amount so a bolt11 never falls through to sendBitcoin.
-    if (isLightningInvoice(dest)) throw lightningNotSupported('send')
+    if (isLightningInvoice(dest)) {
+      // Calling sendPayment is the approval; the fee ceiling is checked before funding.
+      const intents = this.requireIntents()
+      const quote = await intents.quoteSend(dest, { maxFeeSats: request.maxFeeSats })
+      const swap = await intents.executeSend(quote.id)
+      return {
+        paymentHash: quote.paymentHash,
+        txid: swap.fundingTxid,
+        amount: quote.invoiceAmountSats,
+        fee: quote.feeSats,
+        feeKnown: true,
+        status: transactionStatusOf(swap.status) as TransactionStatus,
+        timestamp: Date.now(),
+      }
+    }
 
     if (request.amount == null) {
       throw new ProtocolError('Arkade send requires an explicit amount', 'ARKADE', 'NO_AMOUNT')
@@ -502,6 +581,17 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
 
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     this.assertConnected()
+    const swap = await this.intents?.findByPaymentHash(paymentHash)
+    if (swap) {
+      return {
+        paymentHash,
+        status: transactionStatusOf(swap.status) as TransactionStatus,
+        amount: swap.lightningAmountSats,
+        fee: swap.feeSats,
+        timestamp: swap.createdAt * 1000,
+        ...(swap.failureReason ? { error: swap.failureReason } : {}),
+      }
+    }
     try {
       // Arkade WDK's receipt is raw transaction hex (`string`), with no
       // confirmation fields. Transaction history is the declared source for

@@ -3,6 +3,7 @@
 import { ProtocolAdapterRegistry, IProtocolAdapter } from '../adapters/IProtocolAdapter'
 import { ProtocolType, Layer } from '../types/base'
 import { getCapabilities } from '../capabilities'
+import { liveOperationAvailable } from '../capabilities/operations'
 import { classifyDestination, ClassifiedDestination } from './destination'
 import { parseUnifiedReceiveURI, type UnifiedReceiveParams } from '../receive/unifiedReceive'
 import {
@@ -13,16 +14,25 @@ import {
   railOfKind,
 } from './preference'
 
+/** Gate for operations a protocol offers only once set up (Arkade Lightning needs an Intents solver). */
+function adapterOffers(
+  protocol: ProtocolType,
+  adapter: IProtocolAdapter,
+  operation: 'lightning-send' | 'lightning-receive',
+): boolean {
+  return liveOperationAvailable(protocol, operation, adapter.capabilities)
+}
+
 /** Capability-based direct settlement, including alternate protocol paths. */
-function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination): boolean {
+function canSettleDirectly(protocol: ProtocolType, dest: ClassifiedDestination, adapter: IProtocolAdapter): boolean {
   const caps = getCapabilities(protocol)
   switch (dest.kind) {
     case 'BOLT11':
     case 'LN_ADDRESS':
-      return caps.supportsLightning
+      return caps.supportsLightning && adapterOffers(protocol, adapter, 'lightning-send')
     case 'BOLT12':
       // BOLT12 payment is distinct from generic Lightning support.
-      return caps.supportsLightning && caps.supportsBolt12
+      return caps.supportsLightning && caps.supportsBolt12 && adapterOffers(protocol, adapter, 'lightning-send')
     case 'BTC_ONCHAIN':
     case 'BIP21':
       return caps.supportsOnchain
@@ -103,7 +113,7 @@ export class CrossProtocolRouter {
       // `direct` is verified against the capability manifest, not assumed: lite
       // mode's auto-route must never claim a protocol can pay directly when the
       // manifest disagrees.
-      const direct = canSettleDirectly(protocol, classified)
+      const direct = canSettleDirectly(protocol, classified, adapter)
       routes.push({ protocol, adapter, layer: classified.layer, direct })
     }
 
@@ -159,7 +169,7 @@ export class CrossProtocolRouter {
           protocol,
           adapter,
           layer: classified.layer,
-          direct: canSettleDirectly(protocol, classified),
+          direct: canSettleDirectly(protocol, classified, adapter),
           // The parameter name is only a hint; a mismatched value must be
           // labelled by what the selected adapter will actually pay.
           rail: railOfKind(classified.kind),
@@ -190,6 +200,7 @@ export class CrossProtocolRouter {
       if (!caps.layers.includes(layer)) continue
       const adapter = this.connected(protocol)
       if (!adapter) continue
+      if (layer === 'BTC_LN' && !adapterOffers(protocol, adapter, 'lightning-receive')) continue
       out.push({ protocol, adapter, layer })
     }
     return out

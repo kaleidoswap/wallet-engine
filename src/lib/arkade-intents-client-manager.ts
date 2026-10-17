@@ -27,6 +27,7 @@ export interface ArkadeIntentsVenueLike {
     refunded: string[];
     cancelled: string[];
     needsRecovery: string[];
+    failed?: string[];
     pending: string[];
     errors: { id: string; error: unknown }[];
   }>;
@@ -47,6 +48,16 @@ export interface ArkadeIntentsInitOptions {
    * (e.g. `IndexedDbAssetSwapRepository` from `@arkade-os/swap`).
    */
   assetSwapRepository?: unknown;
+}
+
+/** Load `@kaleidorg/swap-sdk/arkade` through the host-injectable module loader. */
+export function loadArkadeIntentsModule(): Promise<any> {
+  return loadWdkModule(VENUE_MODULE, () => {
+    // Non-literal on purpose — see the module doc. Hosts register a
+    // loader; this fallback covers node/Vite where the subpath resolves.
+    const specifier = VENUE_MODULE;
+    return import(/* @vite-ignore */ specifier);
+  });
 }
 
 /** The guard's single slot: the wallet-bound venue handshake. */
@@ -78,12 +89,7 @@ class ArkadeIntentsClientManager {
   ): Promise<void> {
     attempt.mark();
     try {
-      const mod = await loadWdkModule(VENUE_MODULE, () => {
-        // Non-literal on purpose — see the module doc. Hosts register a
-        // loader; this fallback covers node/Vite where the subpath resolves.
-        const specifier = VENUE_MODULE;
-        return import(/* @vite-ignore */ specifier);
-      });
+      const mod = await loadArkadeIntentsModule();
       const venue = new mod.ArkadeIntentsVenue({
         wallet,
         arkServerUrl: options.arkServerUrl,

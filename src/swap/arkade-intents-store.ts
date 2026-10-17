@@ -34,6 +34,8 @@ export interface ArkadeIntentsRecord {
 }
 
 const KEY_PREFIX = 'arkade:intents:swap:'
+/** BOLT11 payment hash -> rfq_id, so `getPaymentStatus(paymentHash)` finds the swap. */
+const HASH_PREFIX = 'arkade:intents:ln:'
 
 /**
  * `IStorageProvider`-backed implementation of the venue's `ArkadeSwapStore` port.
@@ -71,15 +73,27 @@ export class ArkadeIntentsStore {
 
   /** Every record whose phase is `prepared` or `funded`. */
   async listPending(): Promise<ArkadeIntentsRecord[]> {
+    return (await this.list()).filter((record) => PENDING_PHASES.has(record.phase))
+  }
+
+  /** Every record, any phase. */
+  async list(): Promise<ArkadeIntentsRecord[]> {
     const keys = await this.storage.keys()
-    const pending: ArkadeIntentsRecord[] = []
+    const records: ArkadeIntentsRecord[] = []
     for (const key of keys) {
       if (!key.startsWith(KEY_PREFIX)) continue
       const raw = await this.storage.get(key)
       if (raw == null) continue
-      const record = JSON.parse(raw) as ArkadeIntentsRecord
-      if (PENDING_PHASES.has(record.phase)) pending.push(record)
+      records.push(JSON.parse(raw) as ArkadeIntentsRecord)
     }
-    return pending
+    return records
+  }
+
+  async linkPaymentHash(paymentHash: string, id: string): Promise<void> {
+    await this.storage.set(HASH_PREFIX + paymentHash.toLowerCase(), id)
+  }
+
+  async idForPaymentHash(paymentHash: string): Promise<string | undefined> {
+    return (await this.storage.get(HASH_PREFIX + paymentHash.toLowerCase())) ?? undefined
   }
 }

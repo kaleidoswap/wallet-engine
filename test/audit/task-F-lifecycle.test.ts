@@ -226,16 +226,17 @@ describe('F8: ARKADE declares lightning-receive but core createInvoice returns a
     expect(inv.invoice.startsWith('ln')).toBe(false)
   })
 
-  it('[FIXED] ARKADE no longer declares lightning-receive, and a BTC_LN request is refused', async () => {
+  it('[FIXED] without an Intents venue ARKADE does not declare lightning-receive, and a BTC_LN request is refused', async () => {
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
       wallet: { getAddress: async () => 'ark1qreceiver…' },
     })
     expect(adapter.capabilities).not.toContain('lightning-receive')
-    // Boltz is gone; an Ark address must never stand in for a Lightning invoice.
+    // An Ark address must never stand in for a Lightning invoice; BTC_LN
+    // needs Arkade Intents (see test/arkade-intents-lightning.test.ts).
     await expect(adapter.createInvoice({ amount: 5000, layer: 'BTC_LN' })).rejects.toMatchObject({
-      code: 'NOT_SUPPORTED',
+      code: 'NOT_CONFIGURED',
     })
   })
 

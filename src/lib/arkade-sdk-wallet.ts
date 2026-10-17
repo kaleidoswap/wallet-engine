@@ -93,6 +93,7 @@ export function flattenArkadeConfig(cfg: Record<string, any>): Record<string, an
     delegatorUrl: pick('delegatorUrl'),
     delegationEnabled: pick('delegationEnabled'),
     storage: pick('storage'),
+    intents: pick('intents'),
     eventSource: pick('eventSource'),
   }
 }

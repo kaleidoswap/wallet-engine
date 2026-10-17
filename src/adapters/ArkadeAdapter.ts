@@ -20,6 +20,13 @@ import { arkadeClientManager } from "../lib/arkade-client-manager";
 import { arkadeIntentsClientManager } from "../lib/arkade-intents-client-manager";
 import { cleanupLegacyArkadeSwapsDb } from "../lib/legacy-arkade-swaps-cleanup";
 import {
+  ArkadeIntentsLightning,
+  transactionStatusOf,
+  type ArkadeLightningReconcileReport,
+  type ArkadeLightningSendQuote,
+  type ArkadeLightningSwap,
+} from "../lib/arkade-intents-lightning";
+import {
   Ramps,
   isSpendable,
   isValidArkAddress,
@@ -30,7 +37,7 @@ import {
   type Asset as ArkAsset,
 } from "@arkade-os/sdk";
 import { ArkadeConfig } from "../types/arkade";
-import { PROTOCOL_OPERATIONS } from "../capabilities/operations";
+import { PROTOCOL_OPERATIONS, ARKADE_LIGHTNING_OPERATIONS } from "../capabilities/operations";
 import {
   formatSats,
   formatUnits,
@@ -81,19 +88,6 @@ function isLightningInvoice(value: string): boolean {
   return /^ln(bc|tb|bcrt|sb)/.test(body);
 }
 
-/**
- * Lightning on Arkade goes through the Arkade Intents venue
- * (`arkadeIntentsClientManager`), whose quote → confirm → fund flow the host
- * drives. The adapter has no Lightning path of its own since Boltz was removed.
- */
-function lightningNotSupported(direction: "send" | "receive"): ProtocolError {
-  return new ProtocolError(
-    `Arkade Lightning ${direction} is not supported by the adapter; use Arkade Intents`,
-    "ARKADE",
-    ErrorCode.NOT_SUPPORTED,
-  );
-}
-
 function stripLightningPrefix(value: string): string {
   const trimmed = value.trim();
   return trimmed.toLowerCase().startsWith("lightning:")
@@ -115,10 +109,17 @@ export class ArkadeAdapter implements IProtocolAdapter {
   readonly protocolName: ProtocolType = "ARKADE";
   readonly supportedLayers: Layer[] = ["BTC_ARKADE", "BTC_L1", "ARKADE_ARKADE"];
   readonly version = "1.0.0";
-  readonly capabilities = PROTOCOL_OPERATIONS.ARKADE;
+  /** Lightning operations appear only while an Arkade Intents venue is live. */
+  get capabilities() {
+    return this.intents?.isAvailable()
+      ? [...PROTOCOL_OPERATIONS.ARKADE, ...ARKADE_LIGHTNING_OPERATIONS]
+      : PROTOCOL_OPERATIONS.ARKADE;
+  }
 
   private config: ArkadeConfig | null = null;
   private assetDetailsCache = new Map<string, Record<string, unknown> | null>();
+  private intents: ArkadeIntentsLightning | null = null;
+  private arkNetwork: string | null = null;
 
   // =========================================================================
   // Connection Management
@@ -142,6 +143,18 @@ export class ArkadeAdapter implements IProtocolAdapter {
 
       // Boltz swaps are retired; drop their store unless it still tracks funds.
       void cleanupLegacyArkadeSwapsDb();
+
+      this.arkNetwork = null;
+      this.intents = new ArkadeIntentsLightning({
+        config: arkadeConfig.intents ?? {},
+        getWallet: () => arkadeClientManager.getWallet(),
+        getNetwork: () => this.getArkNetwork(),
+        arkServerUrl: arkadeConfig.arkServerUrl,
+        fund: async (address, amount) =>
+          String((await this.sendBtcOnchain({ address, amount })).txid ?? ""),
+      });
+      // Opt-in: a host that wires its own venue still gets the Lightning paths.
+      if (arkadeConfig.intents) await this.intents.start();
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Arkade: ${msg}`, "ARKADE");
@@ -152,6 +165,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
     // Close the Intents transport first so it never uses the wallet after
     // teardown. Defensive: Intents is host-initialized, so this no-ops when the
     // host never wired it.
+    this.intents?.stop();
+    this.intents = null;
     await arkadeIntentsClientManager.dispose();
     await arkadeClientManager.disconnect();
     this.config = null;
@@ -357,7 +372,16 @@ export class ArkadeAdapter implements IProtocolAdapter {
     if (!this.isConnected()) {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
-    if (request.layer === "BTC_LN") throw lightningNotSupported("receive");
+    if (request.layer === "BTC_LN") {
+      const receive = await this.requireIntents().createReceive(request.amount ?? 0);
+      return {
+        invoice: receive.invoice,
+        paymentHash: receive.paymentHash,
+        amount: receive.payAmountSats,
+        expiresAt: receive.invoiceExpiresAt * 1000,
+        description: request.description ?? "Lightning into Arkade via Arkade Intents",
+      };
+    }
     try {
       const wallet = arkadeClientManager.getWallet();
       const address: string = await wallet.getAddress();
@@ -411,7 +435,22 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
 
     // Checked before the amount so a bolt11 never falls through to sendBitcoin.
-    if (isLightningInvoice(request.invoice)) throw lightningNotSupported("send");
+    if (isLightningInvoice(request.invoice)) {
+      // Calling sendPayment is the approval to pay this invoice; the fee is
+      // bounded by `maxFeeSats` (or the configured ceiling) before funding.
+      const intents = this.requireIntents();
+      const quote = await intents.quoteSend(request.invoice, { maxFeeSats: request.maxFeeSats });
+      const swap = await intents.executeSend(quote.id);
+      return {
+        paymentHash: quote.paymentHash,
+        txid: swap.fundingTxid,
+        amount: quote.invoiceAmountSats,
+        fee: quote.feeSats,
+        feeKnown: true,
+        status: transactionStatusOf(swap.status) as TransactionStatus,
+        timestamp: Date.now(),
+      };
+    }
 
     // Non-Lightning destinations: existing Ark / on-chain BTC path.
     if (!request.amount || request.amount <= 0) {
@@ -442,6 +481,55 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
   }
 
+  // =========================================================================
+  // Lightning over Arkade Intents
+  // =========================================================================
+
+  private requireIntents(): ArkadeIntentsLightning {
+    if (!this.isConnected()) throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
+    if (!this.intents) {
+      throw new ProtocolError("Lightning on Arkade needs Arkade Intents", "ARKADE", "NOT_CONFIGURED");
+    }
+    return this.intents;
+  }
+
+  private async getArkNetwork(): Promise<string> {
+    if (!this.arkNetwork) {
+      const info = await arkadeClientManager.getWallet().arkProvider.getInfo();
+      this.arkNetwork = String(info?.network ?? "");
+    }
+    return this.arkNetwork;
+  }
+
+  /** Quote paying a bolt11 from Arkade. Persists the quote; moves nothing. */
+  async quoteLightningSend(invoice: string, opts?: { maxFeeSats?: number }): Promise<ArkadeLightningSendQuote> {
+    return this.requireIntents().quoteSend(invoice, opts);
+  }
+
+  /** Fund a quote the user approved. Resolves `pending`; poll `getLightningSwap`. */
+  async executeLightningSend(quoteId: string): Promise<ArkadeLightningSwap> {
+    const swap = await this.requireIntents().executeSend(quoteId);
+    invalidateArkadeSnapshotCache();
+    return swap;
+  }
+
+  async getLightningSwap(id: string): Promise<ArkadeLightningSwap | null> {
+    return this.requireIntents().getSwap(id);
+  }
+
+  async listLightningSwaps(): Promise<ArkadeLightningSwap[]> {
+    return this.requireIntents().listSwaps();
+  }
+
+  async refundLightningSend(id: string): Promise<ArkadeLightningSwap> {
+    return this.requireIntents().refundSend(id);
+  }
+
+  /** One claim/refund pass; call from the host scheduler (e.g. an MV3 alarm). */
+  async reconcileLightningSwaps(): Promise<ArkadeLightningReconcileReport | null> {
+    return this.requireIntents().reconcile();
+  }
+
   /** Resolve public payment IDs against transaction history. */
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     // Disconnection is a lookup failure, not evidence that payment is pending.
@@ -450,6 +538,17 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
     if (!paymentHash) {
       return { paymentHash, status: "pending" as TransactionStatus };
+    }
+    const swap = await this.intents?.findByPaymentHash(paymentHash);
+    if (swap) {
+      return {
+        paymentHash,
+        status: transactionStatusOf(swap.status) as TransactionStatus,
+        amount: swap.lightningAmountSats,
+        fee: swap.feeSats,
+        timestamp: swap.createdAt * 1000,
+        ...(swap.failureReason ? { error: swap.failureReason } : {}),
+      };
     }
     try {
       const wallet = arkadeClientManager.getWallet();

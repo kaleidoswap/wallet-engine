@@ -24,6 +24,25 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `boltzSwapClientManager`) are unaffected.
 
 ### Changed
+- Lightning on Arkade runs over Arkade Intents in both directions, on both
+  Arkade adapters. Set `ArkadeConfig.intents` (`{}` takes the defaults: the
+  KaleidoSwap signet maker on mutinynet/signet, a 3% fee ceiling, a 30 s
+  reconcile loop) to start the venue on connect; without it, a venue the host
+  initialized through `arkadeIntentsClientManager` is used.
+  - `sendPayment({ invoice: bolt11 })` quotes, checks the solver fee against
+    `maxFeeSats` (or `intents.maxFeeBps`), funds the lockup and returns
+    `pending` with the BOLT11 payment hash, the funding txid and the fee. The
+    call itself is the approval; the manager's spending policy still applies
+    to the invoice amount. `getPaymentStatus(paymentHash)` follows the swap.
+  - `createInvoice({ layer: 'BTC_LN' })` returns the solver's BOLT11 (never an
+    Ark address) and arms the claim watcher. Claims and refunds run while
+    connected and resume after a restart from the persisted records.
+  - Invoices must match the Ark network (`lntbs` on mutinynet/signet, `lnbc`
+    on mainnet), carry an amount and be unexpired.
+  - ARKADE declares `supportsLightning` and the `BTC_LN` layer again. The
+    adapters list `lightning-send` / `lightning-receive` only while a venue is
+    live, and the router checks that live list before offering ARKADE as a
+    direct BOLT11 route or a `BTC_LN` receive.
 - The optional `@kaleidorg/swap-sdk` peer range admits `^0.11.0` and
   `^0.12.0`, and the engine is tested against 0.12. On `@arkade-os/swap`
   0.0.21 and later, the 0.10 Arkade venue never claimed a receive and threw
@@ -34,13 +53,6 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - swap-sdk 0.12's Arkade venue waits 15 minutes on an `unknown` lockup read
   past the deadline before cancelling a `prepared` swap, so a late funding or
   a lagging indexer no longer strands it as cancelled.
-- Both Arkade adapters reject a BOLT11 `sendPayment` and a
-  `createInvoice({ layer: 'BTC_LN' })` with `NOT_SUPPORTED` before touching the
-  wallet, and never return an Ark address as a Lightning invoice. Drive
-  Lightning through `arkadeIntentsClientManager` instead. ARKADE no longer
-  declares `supportsLightning`, the `BTC_LN` layer or the `lightning-send` /
-  `lightning-receive` operations, so the router stops offering it as a direct
-  BOLT11 route.
 
 ### Added
 - `cleanupLegacyArkadeSwapsDb()`: deletes the old Boltz IndexedDB store
@@ -48,6 +60,25 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   keeps it with a warning when a swap may still hold funds in a VHTLC.
   `ArkadeAdapter.connect()` runs it once per process; it no-ops without
   `indexedDB`.
+- Two-step Arkade Lightning API on `IArkadeOperations`:
+  `quoteLightningSend(invoice, { maxFeeSats? })` persists a quote and moves
+  nothing (fund amount, solver fee, ceiling, `validUntil`, `refundLocktime`);
+  `executeLightningSend(quoteId)` funds an approved quote and returns
+  `pending`. Also `getLightningSwap`, `listLightningSwaps`,
+  `refundLightningSend` and `reconcileLightningSwaps` (for host schedulers such
+  as an MV3 alarm). Swap status is `quoted`, `pending`, `settled`, `refunded`,
+  `cancelled`, `failed` or `needs_recovery`; funding is never `confirmed`.
+- `ArkadeIntentsRefusalError` (`code: 'INTENTS_REFUSED'`): the solver's
+  `reason` plus `kind` (`below_minimum`, `above_maximum`, `no_capacity`,
+  `out_of_range`, `other`) and, when known, `limit` / `actual` / `unit`. Limits
+  come from the solver's signed card (`GET /v1/card`), since `@arkade-os/swap`
+  drops them for `amount_out_of_range` / `exposure_cap`. Other errors:
+  `INVOICE_NETWORK_MISMATCH`, `INVOICE_EXPIRED`, `INVALID_AMOUNT`,
+  `FEE_TOO_HIGH`, `QUOTE_EXPIRED`, `QUOTE_USED`, `NOT_CONFIGURED`, `CONFIG`.
+- `ArkadeIntentsConfig.covclaimdPubkey` (optional, 66 hex) lets the solver's
+  claim daemon claim receives while the wallet is offline.
+- `ARKADE_LIGHTNING_OPERATIONS`, `CONDITIONAL_OPERATIONS` and
+  `liveOperationAvailable` in `capabilities/operations`.
 
 ### Fixed
 - Liquid Testnet USDt (`LIQUID_TESTNET_USDT_ASSET_ID`) is now a known asset: `listAssets`

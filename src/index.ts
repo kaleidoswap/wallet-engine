@@ -69,7 +69,15 @@ export type {
 export { PROTOCOL_CAPABILITIES, getCapabilities, protocolsForLayer, type ProtocolCapabilities } from './capabilities'
 
 // Operation-level capability manifest (per-adapter `capabilities` field)
-export { PROTOCOL_OPERATIONS, getProtocolOperations, protocolSupportsOperation, type ProtocolCapability } from './capabilities/operations'
+export {
+  PROTOCOL_OPERATIONS,
+  ARKADE_LIGHTNING_OPERATIONS,
+  CONDITIONAL_OPERATIONS,
+  getProtocolOperations,
+  liveOperationAvailable,
+  protocolSupportsOperation,
+  type ProtocolCapability,
+} from './capabilities/operations'
 
 // Platform ports (injected per host)
 export type { IStorageProvider, IRuntimeProvider, PlatformContext, Logger } from './ports'

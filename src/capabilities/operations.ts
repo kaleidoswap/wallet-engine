@@ -87,6 +87,30 @@ export const PROTOCOL_OPERATIONS: Record<ProtocolType, readonly ProtocolCapabili
   BTC: ['onchain-send', 'onchain-receive'],
 }
 
+/**
+ * Arkade's Lightning operations. Not in the static list: they run over the
+ * Arkade Intents venue, so an Arkade adapter appends them only while one is live.
+ */
+export const ARKADE_LIGHTNING_OPERATIONS: readonly ProtocolCapability[] = ['lightning-send', 'lightning-receive']
+
+/**
+ * Operations a protocol offers only after per-connection setup. A route that
+ * needs one must find it in the connected adapter's live `capabilities`.
+ */
+export const CONDITIONAL_OPERATIONS: Partial<Record<ProtocolType, readonly ProtocolCapability[]>> = {
+  ARKADE: ARKADE_LIGHTNING_OPERATIONS,
+}
+
+/** True unless `operation` is conditional for `protocol` and `live` lacks it. */
+export function liveOperationAvailable(
+  protocol: ProtocolType,
+  operation: ProtocolCapability,
+  live: readonly ProtocolCapability[] | undefined,
+): boolean {
+  if (!CONDITIONAL_OPERATIONS[protocol]?.includes(operation)) return true
+  return Array.isArray(live) && live.includes(operation)
+}
+
 export function getProtocolOperations(protocol: ProtocolType): readonly ProtocolCapability[] {
   return PROTOCOL_OPERATIONS[protocol] ?? []
 }

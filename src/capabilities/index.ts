@@ -75,10 +75,11 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
   },
   ARKADE: {
     protocol: 'ARKADE',
-    layers: ['BTC_ARKADE', 'ARKADE_ARKADE'],
+    layers: ['BTC_ARKADE', 'ARKADE_ARKADE', 'BTC_LN'],
     supportsOnchain: true, // boarding
-    // Not the adapter's: Lightning runs over the host-driven Arkade Intents venue.
-    supportsLightning: false,
+    // Via Arkade Intents; a connected adapter lists `lightning-send` /
+    // `lightning-receive` only while a solver venue is live.
+    supportsLightning: true,
     supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true,
     supportsSwaps: false,
