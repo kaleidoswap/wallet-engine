@@ -444,7 +444,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
     this.assertConnected()
     if (request.layer === 'BTC_LN') {
-      const receive = await this.requireIntents().createReceive(request.amount ?? 0)
+      const receive = await this.requireIntents().createReceive(request.amount ?? 0, { amountSide: 'from' })
       return {
         invoice: receive.invoice,
         paymentHash: receive.paymentHash,

@@ -538,8 +538,16 @@ export class ArkadeIntentsLightning {
     }
   }
 
-  /** LN -> Ark: a hold invoice from the solver. The claim runs from `reconcile`. */
-  async createReceive(amountSats: number, opts: { maxFeeSats?: number } = {}): Promise<ArkadeLightningReceive> {
+  /**
+   * LN -> Ark: a hold invoice from the solver. The claim runs from `reconcile`.
+   * `amountSide: 'to'` (default) fixes the sats credited on Arkade and lets the
+   * invoice carry the fee on top; `'from'` fixes the invoice amount itself.
+   */
+  async createReceive(
+    amountSats: number,
+    opts: { maxFeeSats?: number; amountSide?: 'from' | 'to' } = {},
+  ): Promise<ArkadeLightningReceive> {
+    const amountSide = opts.amountSide ?? 'to'
     if (!Number.isSafeInteger(amountSats) || amountSats <= 0) {
       throw new ProtocolError('Amount is required for a Lightning invoice into Arkade', 'ARKADE', 'INVALID_AMOUNT')
     }
@@ -554,8 +562,8 @@ export class ArkadeIntentsLightning {
     try {
       prepared = await venue.prepareLightningReceive({
         amountSats,
-        amountSide: 'to',
-        maxPayAmountSats: amountSats + this.feeCeiling(amountSats, opts.maxFeeSats),
+        amountSide,
+        maxPayAmountSats: amountSide === 'from' ? amountSats : amountSats + this.feeCeiling(amountSats, opts.maxFeeSats),
         ...(covclaimd ? { covclaimdPubkey: hexToBytes(covclaimd) } : {}),
         ...(this.deps.config.emulatorPubkey ? { emulatorPubkey: this.deps.config.emulatorPubkey } : {}),
         decodeInvoice: (bolt11: string) => {
@@ -574,20 +582,36 @@ export class ArkadeIntentsLightning {
     }
     const invoice = String(prepared.invoice ?? solverInvoice)
     const facts = await this.checkInvoice(invoice)
+    if (amountSide === 'from' && facts.amountSats !== amountSats) {
+      throw new ProtocolError(
+        `Solver invoice is for ${facts.amountSats} sats, not the requested ${amountSats}`,
+        'ARKADE',
+        'INVALID_QUOTE',
+      )
+    }
+    const credited = num(prepared.summary?.toAmountSats)
+    const ceiling = this.feeCeiling(facts.amountSats, opts.maxFeeSats)
+    if (amountSide === 'from' && credited != null && facts.amountSats - credited > ceiling) {
+      throw new ProtocolError(
+        `Solver fee ${facts.amountSats - credited} sats exceeds the ceiling of ${ceiling} sats`,
+        'ARKADE',
+        'FEE_TOO_HIGH',
+      )
+    }
     const id = String(prepared.record?.id)
     await this.store().linkPaymentHash(facts.paymentHash, id)
     // Arm the watcher now: the payer is external, so there is no "dispatched"
     // moment to wait for, and an unpaid invoice simply ends `cancelled`.
     await venue.notifyFunded(id)
     const payAmountSats = Number(prepared.payAmountSats)
-    const expectedAmountSats = Number(prepared.summary?.toAmountSats ?? amountSats)
+    const expectedAmountSats = Number(prepared.summary?.toAmountSats ?? (amountSide === 'to' ? amountSats : NaN))
     return {
       id,
       invoice,
       paymentHash: facts.paymentHash,
       payAmountSats,
       expectedAmountSats,
-      feeSats: Math.max(0, payAmountSats - expectedAmountSats),
+      feeSats: Number.isFinite(expectedAmountSats) ? Math.max(0, payAmountSats - expectedAmountSats) : 0,
       invoiceExpiresAt: Number(prepared.invoiceExpiresAt ?? facts.expiresAt),
     }
   }

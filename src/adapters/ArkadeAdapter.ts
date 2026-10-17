@@ -373,7 +373,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
     }
     if (request.layer === "BTC_LN") {
-      const receive = await this.requireIntents().createReceive(request.amount ?? 0);
+      const receive = await this.requireIntents().createReceive(request.amount ?? 0, { amountSide: "from" });
       return {
         invoice: receive.invoice,
         paymentHash: receive.paymentHash,

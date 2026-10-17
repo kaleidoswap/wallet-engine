@@ -34,8 +34,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
     `pending` with the BOLT11 payment hash, the funding txid and the fee. The
     call itself is the approval; the manager's spending policy still applies
     to the invoice amount. `getPaymentStatus(paymentHash)` follows the swap.
-  - `createInvoice({ layer: 'BTC_LN' })` returns the solver's BOLT11 (never an
-    Ark address) and arms the claim watcher. Claims and refunds run while
+  - `createInvoice({ layer: 'BTC_LN' })` returns the solver's BOLT11 for exactly
+    the requested amount (never an Ark address); the solver fee comes off the
+    sats credited on Arkade and is bounded by the fee ceiling. It arms the
+    claim watcher. Claims and refunds run while
     connected and resume after a restart from the persisted records.
   - Invoices must match the Ark network (`lntbs` on mutinynet/signet, `lnbc`
     on mainnet), carry an amount and be unexpired.

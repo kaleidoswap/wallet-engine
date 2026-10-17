@@ -69,25 +69,26 @@ function fakeVenue(store: ArkadeIntentsStore, opts: { feeSats?: number; refuse?:
         fundAmountSats: invoice.amountSats + fee,
       }
     }),
-    prepareLightningReceive: vi.fn(async (args: { amountSats: number; maxPayAmountSats: number; decodeInvoice: (s: string) => { amountSats: number; expiresAt: number } }) => {
+    prepareLightningReceive: vi.fn(async (args: { amountSats: number; amountSide: 'from' | 'to'; maxPayAmountSats: number; decodeInvoice: (s: string) => { amountSats: number; expiresAt: number } }) => {
       if (opts.refuse) throw opts.refuse
       const facts = args.decodeInvoice(INV_1000)
       if (facts.amountSats > args.maxPayAmountSats) throw new Error('pay amount above cap')
       const id = `rfq-recv-${++n}`
+      const credited = args.amountSide === 'from' ? facts.amountSats - 10 : args.amountSats
       const record = {
         id,
         route: RECV_ROUTE,
         phase: 'prepared',
         createdAt: NOW,
-        quote: { valid_until: NOW + 60, from_amount: facts.amountSats, to_amount: args.amountSats },
+        quote: { valid_until: NOW + 60, from_amount: facts.amountSats, to_amount: credited },
         address: 'tark1qhtlc',
         invoice: INV_1000,
         payAmountSats: facts.amountSats,
-        expectedAmountSats: args.amountSats,
+        expectedAmountSats: credited,
         invoiceExpiresAt: facts.expiresAt,
       } as unknown as ArkadeIntentsRecord
       await store.put(record)
-      return { record, summary: { toAmountSats: args.amountSats }, invoice: INV_1000, payAmountSats: facts.amountSats, invoiceExpiresAt: facts.expiresAt }
+      return { record, summary: { toAmountSats: credited }, invoice: INV_1000, payAmountSats: facts.amountSats, invoiceExpiresAt: facts.expiresAt }
     }),
     notifyFunded: vi.fn(async (id: string, txid?: string) => {
       const r = (await store.get(id))!
@@ -300,6 +301,16 @@ describe('Lightning -> Ark (receive + claim)', () => {
     expect(ok.venue.prepareLightningReceive.mock.calls[0][0].covclaimdPubkey).toBeInstanceOf(Uint8Array)
   })
 
+  it("amountSide 'from' fixes the invoice amount and bounds the fee", async () => {
+    const { intents, venue } = setup()
+    const r = await intents.createReceive(1000, { amountSide: 'from' })
+    expect(venue.prepareLightningReceive.mock.calls[0][0]).toMatchObject({ amountSats: 1000, amountSide: 'from', maxPayAmountSats: 1000 })
+    expect(r).toMatchObject({ payAmountSats: 1000, expectedAmountSats: 990, feeSats: 10 })
+    await expect(setup().intents.createReceive(1000, { amountSide: 'from', maxFeeSats: 5 })).rejects.toMatchObject({ code: 'FEE_TOO_HIGH' })
+    // The solver must quote the exact amount asked for.
+    await expect(setup().intents.createReceive(990, { amountSide: 'from' })).rejects.toThrow()
+  })
+
   it('requires an amount', async () => {
     const { intents } = setup()
     await expect(intents.createReceive(0)).rejects.toMatchObject({ code: 'INVALID_AMOUNT' })
@@ -357,8 +368,10 @@ describe('adapters route Lightning through Intents', () => {
     it(`${name}: createInvoice(BTC_LN) returns the solver BOLT11, not an Ark address`, async () => {
       const { intents } = setup()
       const adapter = make(intents)
-      const inv = await adapter.createInvoice({ amount: 990, layer: 'BTC_LN' })
+      const inv = await adapter.createInvoice({ amount: 1000, layer: 'BTC_LN' })
+      // The invoice is for exactly the requested amount; the fee comes off the Ark side.
       expect(inv).toMatchObject({ invoice: INV_1000, paymentHash: HASH_1000, amount: 1000 })
+      expect((intents as any).deps.store).toBeDefined()
       expect(inv.invoice.startsWith('lntbs')).toBe(true)
     })
 
