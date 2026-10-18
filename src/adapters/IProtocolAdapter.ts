@@ -263,7 +263,8 @@ export interface IRgbHtlcOperations {
   rgbHtlcPayoutAddress(params?: { assetId?: string }): Promise<{ address: string; recipientId: string }>
   /**
    * Color `psbt` (base64): the transition moves every unit of `assetId` held on
-   * `inputOutpoints` to `outputIndex` (index before the OP_RETURN rgb-lib adds).
+   * `inputOutpoints` to `outputIndex`, an absolute output index. The PSBT must
+   * already carry its empty OP_RETURN, which receives the commitment.
    * The operation never expires on its own; abort it if it is not broadcast.
    */
   prepareRgbHtlcSpend(params: {
