@@ -215,6 +215,85 @@ export interface IRgbOperations {
   sendAsset(params: Record<string, unknown>): Promise<unknown>
 }
 
+/** One assignment an RGB HTLC operation's transition makes. */
+export interface RgbHtlcAllocation {
+  assetId: string
+  /** Output of the spend the assignment is sealed to; null when concealed. */
+  vout: number | null
+  /** Fungible amount in contract units; null for a non-fungible assignment. */
+  amount: number | null
+}
+
+export type RgbHtlcOperationStatus = 'prepared' | 'applied' | 'failed' | 'settled'
+
+/** A recorded spend of RGB held outside the wallet (e.g. a swap HTLC). */
+export interface RgbHtlcOperation {
+  operationId: string
+  /** Colored, unsigned PSBT (base64). */
+  coloredPsbt: string
+  txid: string
+  status: RgbHtlcOperationStatus
+  broadcast: 'not_attempted' | 'attempted' | 'observed' | 'ambiguous'
+  allocations: RgbHtlcAllocation[]
+}
+
+/**
+ * Taking RGB out of an HTLC the wallet does not own (RGB-L1 wasm). The host
+ * builds and signs the HTLC spend (swap-sdk); the adapter accepts the lock's
+ * consignment, colors the spend and records the operation so the asset lands
+ * in this wallet once the spend is broadcast. Nothing here broadcasts.
+ */
+export interface IRgbHtlcOperations {
+  /**
+   * Accept the counterparty's lock consignment for `recipientId` and register the
+   * asset. `awaitingConfirmations` while the lock has fewer than `minConfirmations`.
+   * Fails if the lock assigns anything other than `amount` of `assetId`.
+   */
+  acceptRgbHtlcLock(params: {
+    recipientId: string
+    consignmentEndpoint: string
+    /** Lock blinding as a decimal string (u64). */
+    blinding: string
+    minConfirmations: number
+    assetId: string
+    amount: number
+    lockTxid: string
+  }): Promise<{ status: 'accepted' | 'awaitingConfirmations' }>
+  /** A fresh witness receive of this wallet, as an address, for an HTLC payout. */
+  rgbHtlcPayoutAddress(params?: { assetId?: string }): Promise<{ address: string; recipientId: string }>
+  /**
+   * Color `psbt` (base64): the transition moves every unit of `assetId` held on
+   * `inputOutpoints` to `outputIndex` (index before the OP_RETURN rgb-lib adds).
+   * The operation never expires on its own; abort it if it is not broadcast.
+   */
+  prepareRgbHtlcSpend(params: {
+    psbt: string
+    assetId: string
+    outputIndex: number
+    amount: number
+    inputOutpoints: string[]
+  }): Promise<RgbHtlcOperation>
+  /** The operation whose spend has `txid`, or null. */
+  getRgbHtlcOperation(txid: string): Promise<RgbHtlcOperation | null>
+  /** Operations that spend `outpoint` (`txid:vout`). */
+  listRgbHtlcOperationsSpending(outpoint: string): Promise<RgbHtlcOperation[]>
+  /** Record that the spend is about to be broadcast. Await before broadcasting. */
+  markRgbHtlcBroadcast(operationId: string): Promise<void>
+  /** After the broadcast: move the spend into the wallet's RGB state. */
+  applyRgbHtlcOperation(operationId: string): Promise<void>
+  /**
+   * Hand the applied spend's consignment to the wallet's own receive so the payout
+   * settles. `alreadyProvided` when an earlier call already did it.
+   */
+  provideRgbHtlcReceive(params: { operationId: string; assetId: string; txid: string }): Promise<{
+    status: 'provided' | 'alreadyProvided'
+  }>
+  /** Drop an operation whose spend was never broadcast. */
+  abortRgbHtlcOperation(operationId: string): Promise<void>
+  /** Finalize the wallet's own signed inputs of a PSBT (base64). */
+  finalizeRgbPsbt(psbt: string): Promise<string>
+}
+
 /**
  * Wallet-state backup (RGB-L1 wasm). RGB allocations/consignments cannot be
  * rebuilt from the seed, so state is backed up after every settled transfer.
@@ -348,6 +427,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<IOnchainOperations> &
   Partial<ISimplicityOperations> &
   Partial<IRgbOperations> &
+  Partial<IRgbHtlcOperations> &
   Partial<IBackupOperations> &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &
@@ -399,6 +479,9 @@ export function asSimplicityOperations(a: IProtocolAdapter): ISimplicityOperatio
     isFn(a.deriveSimplicityPublicKey) && isFn(a.compileSimplicityProgram)
     ? (a as ISimplicityOperations)
     : null
+}
+export function asRgbHtlcOperations(a: IProtocolAdapter): IRgbHtlcOperations | null {
+  return isFn(a.acceptRgbHtlcLock) && isFn(a.prepareRgbHtlcSpend) ? (a as IRgbHtlcOperations) : null
 }
 export function asBackupOperations(a: IProtocolAdapter): IBackupOperations | null {
   return isFn(a.backup) && isFn(a.restoreBackup) ? (a as IBackupOperations) : null
