@@ -12,8 +12,8 @@
  * adapter never touches fetch/URLs. No rgb-lib types cross the contract.
  */
 
-import { Address as BtcAddress, OutScript, NETWORK, TEST_NETWORK, Transaction } from '@scure/btc-signer'
-import { base64, hex } from '@scure/base'
+import { Address as BtcAddress, OutScript, NETWORK, TEST_NETWORK } from '@scure/btc-signer'
+import { hex } from '@scure/base'
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
 import type { IRgbHtlcOperations, RgbHtlcOperation, RgbHtlcAllocation } from '../IProtocolAdapter'
 import {
@@ -88,7 +88,6 @@ function toRgbNetwork(network: string): string {
 }
 
 const REGTEST_NETWORK = { ...TEST_NETWORK, bech32: 'bcrt' }
-const PSBT_OPTS = { allowUnknownInputs: true, allowUnknownOutputs: true, allowUnknown: true }
 
 function btcNetworkFor(rgbNetwork: string) {
   if (rgbNetwork === 'Mainnet') return NETWORK
@@ -674,8 +673,18 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       'never',
     )
     const operation = toHtlcOperation({ status: 'prepared', ...raw })
-    // The txid excludes witnesses, so signing never changes it.
-    if (!operation.txid) operation.txid = Transaction.fromPSBT(base64.decode(operation.coloredPsbt), PSBT_OPTS).id
+    if (!operation.txid) {
+      // psbtOpPrepare does not return the txid; the stored operation does.
+      // (Parsing the colored PSBT locally fails: rgb-lib sets PSBTv2 global
+      // fields on a v0 PSBT, which strict parsers refuse.)
+      const recorded = (await this.listRgbHtlcOperationsSpending(params.inputOutpoints[0])).find(
+        (op) => op.operationId === operation.operationId,
+      )
+      if (!recorded?.txid) {
+        throw new ProtocolError('rgb-lib recorded no txid for the HTLC spend', 'RGB_L1', 'INTERNAL')
+      }
+      operation.txid = recorded.txid
+    }
     return operation
   }
 

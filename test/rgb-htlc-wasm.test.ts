@@ -123,6 +123,10 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
           allocations: [{ assetId: ASSET, vout: 1, assignment: { Fungible: 5_000_000 } }],
         }
       },
+      psbtOpsSpending: async (outpoint: any) =>
+        outpoint.txid === LOCK_TXID
+          ? [{ operationId: 'other', txid: 'ee'.repeat(32) }, { operationId: 'op1', txid }]
+          : [],
     })
     const op = await adapter.prepareRgbHtlcSpend({
       psbt: 'cHNidP8=',
