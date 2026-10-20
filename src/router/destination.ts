@@ -72,6 +72,7 @@ export function sparkAddressNetwork(address: string): SparkAddressNetwork | null
   } catch {
     return null
   }
+  if (!Object.prototype.hasOwnProperty.call(SPARK_HRP_NETWORK, decoded.prefix)) return null
   const network = SPARK_HRP_NETWORK[decoded.prefix]
   if (!network) return null
   try {

@@ -135,7 +135,7 @@ describe('Spark BOLT11 decode fails closed without a known network', () => {
     })
   })
 
-  it.each(['', 'bogus', 'mutinynet'])('rejects wallet network %j with UNKNOWN_NETWORK', (network) => {
+  it.each(['', 'bogus', 'mutinynet', 'constructor', '__proto__'])('rejects wallet network %j with UNKNOWN_NETWORK', (network) => {
     vi.useFakeTimers({ now: NOW_MS })
     expect(() => decodeSparkBolt11(bolt11Fixture({ hrp: 'lnbc10u' }), network)).toThrow(
       expect.objectContaining({ code: 'UNKNOWN_NETWORK' }),

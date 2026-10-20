@@ -95,6 +95,13 @@ describe('classifyDestination', () => {
     expect(classifyDestination(wrongTag).kind).toBe('UNKNOWN')
   })
 
+  it.each(['constructor', '__proto__'])('rejects a Spark payload under the Object.prototype name %j as HRP', (hrp) => {
+    const payload = bech32m.decode(sparkAddress('spark') as `${string}1${string}`, 1024).words
+    const address = bech32m.encode(hrp, payload, 1024)
+    expect(sparkAddressNetwork(address)).toBeNull()
+    expect(classifyDestination(address).kind).toBe('UNKNOWN')
+  })
+
   it('rejects a checksum-valid Spark payload under a non-Spark HRP', () => {
     const payload = bech32m.decode(sparkAddress('spark') as `${string}1${string}`, 1024).words
     expect(classifyDestination(bech32m.encode('sparkx', payload, 1024)).kind).toBe('UNKNOWN')

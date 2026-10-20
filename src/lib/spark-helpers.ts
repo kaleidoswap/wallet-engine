@@ -189,7 +189,8 @@ const SPARK_BOLT11_HRPS: Record<string, readonly Bolt11Hrp[]> = {
  * check against — never a summary built from the HRP alone.
  */
 export function decodeSparkBolt11(invoice: string, network: string): DecodedInvoice {
-  const allowedHrps = SPARK_BOLT11_HRPS[(network ?? '').toLowerCase()]
+  const key = (network ?? '').toLowerCase()
+  const allowedHrps = Object.prototype.hasOwnProperty.call(SPARK_BOLT11_HRPS, key) ? SPARK_BOLT11_HRPS[key] : undefined
   if (!allowedHrps) {
     throw new ProtocolError(
       `Cannot validate a Lightning invoice for Spark network "${network}"`,
