@@ -83,7 +83,7 @@ read it at runtime, don't hardcode it.
 | **RGB-LN** | `beta` | RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
 | **RGB-L1** | `beta` | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
 | **LIQUID** | `beta` | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
-| **ARKADE** | `beta` | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
+| **ARKADE** | `beta` | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/sdk` |
 | **BARK**   | `beta` | Ark, LN, on-chain | — | — | boarding; React Native adapter also pays BOLT12 offers (`lno1…`) | `@secondts/bark` / `@secondts/bark-react-native` |
 
 Each protocol is described once in [`src/capabilities/index.ts`](src/capabilities/index.ts).
@@ -113,7 +113,7 @@ actually load that adapter's subpath.
 | `…/adapters/wdk` (RGB/RLN) | `@kaleidorg/wdk-wallet-rln` |
 | `…/adapters/wdk/wasm-liquid` | `@kaleidorg/wdk-wallet-liquid` |
 | `…/adapters/wdk/wasm-rgb` | `@utexo/rgb-lib-wasm` |
-| `…/adapters/wdk` (Arkade) | `@arkade-os/wdk` |
+| `…/adapters/wdk` (Arkade) | `@arkade-os/sdk` (+`@arkade-os/boltz-swap` for Lightning) |
 | `…/swap` | `@kaleidorg/wdk-protocol-swap-kaleidoswap` |
 | `…/swap` (`BoltzChainSwap`, Arkade intents) | `@kaleidorg/swap-sdk` (`^0.1.1 \|\| ^0.3.0 \|\| ^0.7.0 \|\| ^0.10.0`) |
 | `…/format` | `kaleido-sdk` |
@@ -326,25 +326,6 @@ consumers of `wallet-engine` never import `kaleido-sdk` directly.
 
 ---
 
-## Status
-
-**Alpha — experimental.** Published under a `1.0.0-beta` version tag, but treat the
-project as alpha: interfaces are unstable and nothing has been audited. Per-protocol
-readiness is not prose — it's the `maturity` field in the capability manifest, shown in
-[Supported protocols](#supported-protocols) and readable at runtime:
-
-```ts
-import { PROTOCOL_CAPABILITIES } from '@kaleidorg/wallet-engine'
-PROTOCOL_CAPABILITIES.RGB_LN.maturity   // 'beta'
-```
-
-Native fallback adapters remain available alongside the WDK-backed ones.
-
-## License
-
-[MIT](LICENSE)
-
-
 ## Bark on React Native
 
 Import `BarkReactNativeAdapter` from
@@ -445,3 +426,23 @@ wallet lifecycle races, manager routing and import isolation. They mock native
 execution. Android/iOS native linking and funded signet flows have not been run
 in this repository session; this remains a beta release. Verify them in a native
 development build before using the new backend with funds.
+
+---
+
+## Status
+
+**Alpha — experimental.** Published under a `1.0.0-beta` version tag, but treat the
+project as alpha: interfaces are unstable and nothing has been audited. Per-protocol
+readiness is not prose — it's the `maturity` field in the capability manifest, shown in
+[Supported protocols](#supported-protocols) and readable at runtime:
+
+```ts
+import { PROTOCOL_CAPABILITIES } from '@kaleidorg/wallet-engine'
+PROTOCOL_CAPABILITIES.RGB_LN.maturity   // 'beta'
+```
+
+Native fallback adapters remain available alongside the WDK-backed ones.
+
+## License
+
+[MIT](LICENSE)
