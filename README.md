@@ -27,8 +27,6 @@ agent).
 └──────────────────────────────────────────────────────────────┘
 ```
 
----
-
 ## Why
 
 Every Bitcoin L2 (Spark, RGB-on-Lightning, Liquid, Arkade) ships its own SDK, its
@@ -43,8 +41,6 @@ with `if (protocol === …)` smeared across every screen.
 - Protocol *differences* live as **data** in a capability manifest, not as branches
   in app code — adding or changing a protocol never edits another protocol's path.
 - The **same engine runs on every host**; platform specifics are injected.
-
----
 
 ## What you get
 
@@ -76,16 +72,15 @@ read it at runtime, don't hardcode it.
 | Protocol | Maturity | Layers | Assets | Swaps | Notable quirks | Backing module |
 |---|:---:|---|---|:---:|---|---|
 | **BTC**    | `stable` | on-chain | — | — | base on-chain only | (native) |
-| **SPARK**  | `beta` | Spark, LN, on-chain | Spark tokens | — | zero-fee, static receive addr | `@tetherto/wdk-wallet-spark` |
+| **SPARK**  | `beta` | Spark, LN, on-chain | Spark tokens | — | zero-fee; on-chain BTC received on the reusable static deposit address (unconfirmed deposits stay awaiting); sends to Bitcoin addresses via cooperative exit | `@tetherto/wdk-wallet-spark` |
 | **RGB-LN** | `beta` | RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
 | **RGB-L1** | `beta` | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
 | **LIQUID** | `beta` | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
-| **ARKADE** | `beta` | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
+| **ARKADE** | `beta` | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/sdk` |
+| **BARK**   | `beta` | Ark, LN, on-chain | — | — | boarding; React Native adapter also pays BOLT12 offers (`lno1…`) | `@secondts/bark` / `@secondts/bark-react-native` |
 
 Each protocol is described once in [`src/capabilities/index.ts`](src/capabilities/index.ts).
 The router and UI read that manifest — they never special-case a protocol by name.
-
----
 
 ## Install
 
@@ -109,8 +104,9 @@ actually load that adapter's subpath.
 | `…/adapters/wdk` (RGB/RLN) | `@kaleidorg/wdk-wallet-rln` |
 | `…/adapters/wdk/wasm-liquid` | `@kaleidorg/wdk-wallet-liquid` |
 | `…/adapters/wdk/wasm-rgb` | `@utexo/rgb-lib-wasm` |
-| `…/adapters/wdk` (Arkade) | `@arkade-os/wdk` |
+| `…/adapters/wdk` (Arkade) | `@arkade-os/sdk` (+`@arkade-os/boltz-swap` for Lightning) |
 | `…/swap` | `@kaleidorg/wdk-protocol-swap-kaleidoswap` |
+| `…/swap` (`BoltzChainSwap`, Arkade intents) | `@kaleidorg/swap-sdk` (see [versions](#kaleidorgswap-sdk-versions)) |
 | `…/format` | `kaleido-sdk` |
 | legacy `…/adapters/spark` \| `/arkade` \| `/rgb` \| `/flashnet` | `@buildonspark/spark-sdk` \| `@arkade-os/sdk` (+`@arkade-os/boltz-swap`) \| `kaleido-sdk` \| `@flashnet/sdk` |
 
@@ -123,8 +119,6 @@ pnpm add @kaleidorg/wallet-engine @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-walle
 > `optionalDependencies` to optional `peerDependencies`. They are no longer installed
 > transitively — add the packages for the adapters you use (table above) to your own
 > `package.json`.
-
----
 
 ## Quickstart
 
@@ -165,8 +159,6 @@ const uri = buildUnifiedReceiveURI({
 })
 ```
 
----
-
 ## Run it first
 
 The quickstart above needs a wallet behind it. This doesn't — it's the same
@@ -182,8 +174,6 @@ npm run example:tour
 No node, no credentials, no network. See [`examples/tour`](examples/tour) for what
 each section demonstrates, and [`examples/minimal-adapter`](examples/minimal-adapter)
 for the whole contract in ~170 dependency-free lines.
-
----
 
 ## Core concepts
 
@@ -244,8 +234,6 @@ Each host injects `IStorageProvider` + `IRuntimeProvider` (storage, CSPRNG, cloc
 the same engine runs on React Native (SecureStore/MMKV), the extension (chrome.storage),
 and Node unchanged.
 
----
-
 ## Swaps
 
 [`KaleidoswapSwap`](src/swap/KaleidoswapSwap.ts) wraps the Kaleidoswap **RFQ** flow
@@ -274,7 +262,15 @@ const result = await swap.executeSwap({
 const status = await swap.getSwapStatus(result.swapId) // pending → confirmed/failed
 ```
 
----
+### `@kaleidorg/swap-sdk` versions
+
+BTC ↔ L-BTC chain swaps (`BoltzChainSwap`) run on `@kaleidorg/swap-sdk` 0.7.x and
+0.10 or later; the exact peer range is in [`package.json`](package.json). 0.9.0 renamed
+`BoltzClient` → `SwapClient` and `boltzBaseUrl` → `makerBaseUrl`; the engine detects
+which one the loaded SDK exports, so hosts on 0.7.x need no changes. For the Arkade
+venue (`@kaleidorg/swap-sdk/arkade`), use 0.11 or later: with `@arkade-os/swap` 0.0.21+
+the 0.10 venue fails refunds and claims silently. Install the `@arkade-os/sdk` and
+`@arkade-os/swap` versions that swap-sdk release declares as peers.
 
 ## Extending: add a protocol
 
@@ -286,8 +282,6 @@ The router, unified receive, lite aggregation, and every screen pick it up with 
 changes** to existing protocol code. New protocol-specific behaviour is a capability
 flag, never a new method on the contract.
 
----
-
 ## Public API
 
 The root barrel, [`src/index.ts`](src/index.ts), is deliberately **SDK-free**: types, the
@@ -296,8 +290,6 @@ The root barrel, [`src/index.ts`](src/index.ts), is deliberately **SDK-free**: t
 `ProtocolManager`, and the Arkade VTXO-lifecycle helpers. Adapters, `createWdkRegistry`,
 `KaleidoswapSwap`, and the client managers live behind their own subpath exports (see
 [`package.json`](package.json) `exports`) so importing the root pulls in no protocol SDK.
-
----
 
 ## Where it sits
 
@@ -309,27 +301,6 @@ kaleido-sdk      protocol client (RFQ/maker + RLN), Python + TypeScript
 
 `wallet-engine` consumes `kaleido-sdk` internally for the Kaleidoswap protocol;
 consumers of `wallet-engine` never import `kaleido-sdk` directly.
-
----
-
-## Status
-
-**Alpha — experimental.** Published under a `1.0.0-beta` version tag, but treat the
-project as alpha: interfaces are unstable and nothing has been audited. Per-protocol
-readiness is not prose — it's the `maturity` field in the capability manifest, shown in
-[Supported protocols](#supported-protocols) and readable at runtime:
-
-```ts
-import { PROTOCOL_CAPABILITIES } from '@kaleidorg/wallet-engine'
-PROTOCOL_CAPABILITIES.RGB_LN.maturity   // 'beta'
-```
-
-Native fallback adapters remain available alongside the WDK-backed ones.
-
-## License
-
-[MIT](LICENSE)
-
 
 ## Bark on React Native
 
@@ -375,6 +346,12 @@ Supported operations:
   network and server before payment. BOLT11 and Bitcoin destinations include
   BARK in router candidates. Ark and Arkade share address prefixes, so direct
   Ark sends must select the account explicitly; a prefix cannot select a server.
+- **BOLT12 offers:** `sendPayment` routes `lno1…` offers to the SDK's
+  `payLightningOffer` and waits for the outcome (the payment hash is only known
+  once the offer's invoice is paid). A fixed-amount offer is paid at its own
+  amount; the fee is recovered from history. The capability manifest still
+  reports `supportsBolt12: false` for `BARK`, since the browser adapter has no
+  offer flow.
 - **Boarding:** `bark.backend.getOnchainAddress()` supplies a BDK funding address.
   Fund it explicitly, call `syncOnchain()`, then `bark.boardAmount(sats)` or
   `boardAll()`. `boardingTerms()` and `pendingBoards()` expose server terms and
@@ -425,3 +402,27 @@ wallet lifecycle races, manager routing and import isolation. They mock native
 execution. Android/iOS native linking and funded signet flows have not been run
 in this repository session; this remains a beta release. Verify them in a native
 development build before using the new backend with funds.
+
+## Status
+
+**Alpha — experimental.** Published under a `1.0.0-beta` version tag, but treat the
+project as alpha: interfaces are unstable and nothing has been audited. Per-protocol
+readiness is not prose — it's the `maturity` field in the capability manifest, shown in
+[Supported protocols](#supported-protocols) and readable at runtime:
+
+```ts
+import { PROTOCOL_CAPABILITIES } from '@kaleidorg/wallet-engine'
+PROTOCOL_CAPABILITIES.RGB_LN.maturity   // 'beta'
+```
+
+Native fallback adapters remain available alongside the WDK-backed ones.
+
+## License
+
+[MIT](LICENSE)
+
+---
+
+To learn more, check:
+- **Product page:** [kaleidoswap.com/products/sdk](https://kaleidoswap.com/products/sdk)
+- **Docs:** [Wallet Engine on docs.kaleidoswap.com](https://docs.kaleidoswap.com/wallet-engine/introduction)
