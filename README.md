@@ -104,7 +104,7 @@ actually load that adapter's subpath.
 | `…/adapters/wdk` (RGB/RLN) | `@kaleidorg/wdk-wallet-rln` |
 | `…/adapters/wdk/wasm-liquid` | `@kaleidorg/wdk-wallet-liquid` |
 | `…/adapters/wdk/wasm-rgb` | `@utexo/rgb-lib-wasm` |
-| `…/adapters/wdk` (Arkade) | `@arkade-os/sdk` (+`@arkade-os/boltz-swap` for Lightning) |
+| `…/adapters/wdk` (Arkade) | `@arkade-os/sdk` (+`@kaleidorg/swap-sdk` and `@arkade-os/swap` for Lightning over Arkade Intents) |
 | `…/swap` | `@kaleidorg/wdk-protocol-swap-kaleidoswap` |
 | `…/swap` (`BoltzChainSwap`, Arkade intents) | `@kaleidorg/swap-sdk` (see [versions](#kaleidorgswap-sdk-versions)) |
 | `…/format` | `kaleido-sdk` |
@@ -264,13 +264,13 @@ const status = await swap.getSwapStatus(result.swapId) // pending → confirmed/
 
 ### `@kaleidorg/swap-sdk` versions
 
-BTC ↔ L-BTC chain swaps (`BoltzChainSwap`) run on `@kaleidorg/swap-sdk` 0.7.x and
-0.10 or later; the exact peer range is in [`package.json`](package.json). 0.9.0 renamed
-`BoltzClient` → `SwapClient` and `boltzBaseUrl` → `makerBaseUrl`; the engine detects
-which one the loaded SDK exports, so hosts on 0.7.x need no changes. For the Arkade
-venue (`@kaleidorg/swap-sdk/arkade`), use 0.11 or later: with `@arkade-os/swap` 0.0.21+
-the 0.10 venue fails refunds and claims silently. Install the `@arkade-os/sdk` and
-`@arkade-os/swap` versions that swap-sdk release declares as peers.
+The engine needs `@kaleidorg/swap-sdk` 0.12 (peer range `^0.12.0`), for both the
+BTC ↔ L-BTC chain swaps (`BoltzChainSwap`) and the Arkade Intents venue
+(`@kaleidorg/swap-sdk/arkade`) behind Lightning on Arkade. Earlier releases strand
+Arkade swaps: with `@arkade-os/swap` 0.0.21+ the 0.10 venue fails refunds and claims
+silently, and before 0.12 a `prepared` swap is cancelled on the first `unknown`
+lockup read past its deadline. Install the `@arkade-os/sdk` and `@arkade-os/swap`
+versions that swap-sdk release declares as peers.
 
 ## Extending: add a protocol
 
