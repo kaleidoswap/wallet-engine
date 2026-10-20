@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.77] - 2026-10-20
+
 ### Added
 - The RGB-L1 wasm account claims RGB held in a swap HTLC, which is how a
   Lightning → USDT-RGB reverse swap pays out. A new capability group,
