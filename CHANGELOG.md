@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+- The engine is tested against `@kaleidorg/swap-sdk` 0.12. Hosts using the
+  Arkade venue with `@arkade-os/swap` 0.0.21 or later should run swap-sdk 0.11
+  or later: on 0.10 that venue never claimed a receive and threw on every send
+  refund (`contracts.getContractsWithVtxos is not a function`), and the error
+  was swallowed. swap-sdk 0.12 also waits 15 minutes on an `unknown` lockup
+  read past the deadline before cancelling a `prepared` swap, so a late
+  funding or a lagging indexer no longer strands it as cancelled.
+
 ### Fixed
 - Liquid Testnet USDt (`LIQUID_TESTNET_USDT_ASSET_ID`) is now a known asset: `listAssets`
   and `getAssetBalance` report ticker `USDt`, name `Tether USD` and precision 8
