@@ -15,7 +15,7 @@
 import { arkadeIntentsClientManager, loadArkadeIntentsModule, type ArkadeIntentsVenueLike } from './arkade-intents-client-manager'
 import { decodeBolt11Invoice, type Bolt11Hrp } from './bolt11'
 import { log } from './log'
-import { ArkadeIntentsStore, type ArkadeIntentsRecord } from '../swap/arkade-intents-store'
+import { ArkadeIntentsStore, type ArkadeIntentsFundingMarker, type ArkadeIntentsRecord } from '../swap/arkade-intents-store'
 import { ErrorCode, ProtocolError } from '../types/base'
 
 /** Host settings for the Intents corridor. Pass `{}` to take every default. */
@@ -65,6 +65,15 @@ const DEFAULT_MAX_FEE_BPS = 300
 const DEFAULT_RECONCILE_MS = 30_000
 const CARD_TTL_SECONDS = 300
 const SEND_ROUTE = 'arkade:BTC->lightning:BTC'
+
+/**
+ * A quote must still have this long to run when its lockup is funded, so the
+ * funding lands (and the solver sees it) before `valid_until`.
+ */
+export const FUNDING_MARGIN_SECONDS = 30
+
+/** Sends being funded in this process, by rfq_id: a second call joins the first. */
+const sendsInFlight = new Map<string, Promise<ArkadeLightningSwap>>()
 
 /** Host-facing swap status. `pending` until the solver settles, never `confirmed` on funding. */
 export type ArkadeLightningSwapStatus =
@@ -204,7 +213,7 @@ interface CardLimits {
   feeBps?: number
 }
 
-/** BOLT11 prefixes valid for an Arkade server network. */
+/** BOLT11 prefixes valid for an Arkade server network; null for an empty or unknown one. */
 export function lightningHrpsForArkadeNetwork(network: string): readonly Bolt11Hrp[] | null {
   switch (network) {
     case 'bitcoin':
@@ -265,6 +274,7 @@ export class ArkadeIntentsLightning {
   private card: { limits: CardLimits; at: number } | null = null
   private initPromise: Promise<ArkadeIntentsVenueLike | null> | null = null
   private resumed = false
+  private ownStore: Promise<ArkadeIntentsStore> | null = null
 
   constructor(private readonly deps: ArkadeIntentsLightningDeps) {}
 
@@ -272,8 +282,21 @@ export class ArkadeIntentsLightning {
     return this.deps.now?.() ?? Math.floor(Date.now() / 1000)
   }
 
-  private store(): ArkadeIntentsStore {
-    return this.deps.store ?? ArkadeIntentsStore.fromPlatform()
+  /**
+   * The live venue's store when it is ours to read, else one scoped to this
+   * wallet and Ark network (the same keys a default venue store uses).
+   */
+  private async store(): Promise<ArkadeIntentsStore> {
+    if (this.deps.store) return this.deps.store
+    const live = arkadeIntentsClientManager.getStore()
+    if (live instanceof ArkadeIntentsStore) return live
+    this.ownStore ??= (async () => ArkadeIntentsStore.forWallet(this.deps.getWallet(), await this.deps.getNetwork()))()
+    try {
+      return await this.ownStore
+    } catch (error) {
+      this.ownStore = null
+      throw error
+    }
   }
 
   get enabled(): boolean {
@@ -326,7 +349,7 @@ export class ArkadeIntentsLightning {
     await arkadeIntentsClientManager.initialize(this.deps.getWallet(), {
       arkServerUrl: this.deps.arkServerUrl,
       transport,
-      ...(this.deps.store ? { store: this.deps.store } : {}),
+      store: await this.store(),
     })
     return arkadeIntentsClientManager.getVenue()
   }
@@ -345,6 +368,7 @@ export class ArkadeIntentsLightning {
     this.initPromise = null
     this.resumed = false
     this.card = null
+    this.ownStore = null
   }
 
   private async venue(): Promise<ArkadeIntentsVenueLike> {
@@ -373,7 +397,14 @@ export class ArkadeIntentsLightning {
     }
     const network = await this.deps.getNetwork()
     const hrps = lightningHrpsForArkadeNetwork(network)
-    if (hrps && !hrps.includes(decoded.network.hrp)) {
+    if (!hrps) {
+      throw new ProtocolError(
+        `Cannot check the invoice network: unknown Arkade network '${network}'`,
+        'ARKADE',
+        'INVOICE_NETWORK_MISMATCH',
+      )
+    }
+    if (!hrps.includes(decoded.network.hrp)) {
       throw new ProtocolError(
         `Invoice is for ln${decoded.network.hrp}, but this Arkade wallet is on ${network} (expects ${hrps.map((h) => 'ln' + h).join(' or ')})`,
         'ARKADE',
@@ -514,7 +545,8 @@ export class ArkadeIntentsLightning {
       throw new ProtocolError('Solver quote does not match the invoice amount', 'ARKADE', 'INVALID_QUOTE')
     }
     const id = String(prepared.record?.id ?? summary.rfqId)
-    await this.store().linkPaymentHash(facts.paymentHash, id)
+    const store = await this.store()
+    await store.linkPaymentHash(facts.paymentHash, id)
     const feeSats = fundAmountSats - toAmount
     const maxFeeSats = this.feeCeiling(facts.amountSats, opts.maxFeeSats)
     const quote: ArkadeLightningSendQuote = {
@@ -538,7 +570,14 @@ export class ArkadeIntentsLightning {
         quote,
       )
     }
+    await this.rememberCeiling(store, id, maxFeeSats)
     return quote
+  }
+
+  /** The fee ceiling the caller approved at quote time, for `executeSend` to re-check. */
+  private async rememberCeiling(store: ArkadeIntentsStore, id: string, maxFeeSats: number): Promise<void> {
+    const record = await store.get(id)
+    if (record && record.phase === 'prepared') await store.put({ ...record, engineMaxFeeSats: maxFeeSats })
   }
 
   /**
@@ -551,8 +590,9 @@ export class ArkadeIntentsLightning {
     facts: { raw: string; paymentHash: string; amountSats: number; expiresAt: number },
     opts: { maxFeeSats?: number },
   ): Promise<ArkadeLightningSendQuote | null> {
-    const id = await this.store().idForPaymentHash(facts.paymentHash)
-    const record = id ? await this.store().get(id) : undefined
+    const store = await this.store()
+    const id = await store.idForPaymentHash(facts.paymentHash)
+    const record = id ? await store.get(id) : undefined
     if (!record) return null
     if (record.route !== SEND_ROUTE) {
       throw new ProtocolError(
@@ -561,9 +601,21 @@ export class ArkadeIntentsLightning {
         'SELF_PAYMENT',
       )
     }
+    if (record.phase !== 'settled' && (await store.getFundingMarker(record.id))) {
+      throw new ProtocolError(
+        `A payment of this invoice is already in progress (swap ${record.id}); it was not paid twice`,
+        'ARKADE',
+        'INVOICE_IN_PROGRESS',
+      )
+    }
     const q = (record.quote ?? {}) as Record<string, unknown>
     const validUntil = num(q.valid_until)
-    if (record.phase === 'prepared' && validUntil != null && validUntil > this.now()) {
+    if (
+      record.phase === 'prepared' &&
+      !record.legacyAdopted &&
+      validUntil != null &&
+      validUntil > this.now() + FUNDING_MARGIN_SECONDS
+    ) {
       const fundAmountSats = num(record.fundAmountSats) ?? 0
       const toAmount = num(q.to_amount) ?? facts.amountSats
       const quote: ArkadeLightningSendQuote = {
@@ -586,6 +638,7 @@ export class ArkadeIntentsLightning {
           quote,
         )
       }
+      await this.rememberCeiling(store, record.id, quote.maxFeeSats)
       return quote
     }
     switch (record.phase) {
@@ -610,37 +663,119 @@ export class ArkadeIntentsLightning {
    * Step 2 of Ark -> LN: fund the quoted lockup. Call only after the user
    * approved the quote. Returns `pending`; the solver pays the invoice and
    * `reconcile` moves the swap to settled / refunded / failed.
+   *
+   * Funds at most once per quote: a concurrent call joins the one in flight,
+   * and a funding marker is persisted before any value moves, so a retry, a
+   * second tab or a restart never funds the same lockup twice. The fee is
+   * re-checked against `fundAmountSats` (`maxFeeSats`, else the ceiling
+   * approved at quote time, else `intents.maxFeeBps`).
    */
-  async executeSend(id: string): Promise<ArkadeLightningSwap> {
+  executeSend(id: string, opts: { maxFeeSats?: number } = {}): Promise<ArkadeLightningSwap> {
+    const running = sendsInFlight.get(id)
+    if (running) return running
+    const attempt = this.fundSend(id, opts).finally(() => sendsInFlight.delete(id))
+    sendsInFlight.set(id, attempt)
+    return attempt
+  }
+
+  private async fundSend(id: string, opts: { maxFeeSats?: number }): Promise<ArkadeLightningSwap> {
     const venue = await this.venue()
-    const record = await this.store().get(id)
+    const store = await this.store()
+    const record = await store.get(id)
     if (!record || record.route !== SEND_ROUTE) {
       throw new ProtocolError(`No Arkade Intents send quote ${id}`, 'ARKADE', 'QUOTE_NOT_FOUND')
     }
-    if (record.phase !== 'prepared') {
-      throw new ProtocolError(`Arkade Intents swap ${id} is already ${record.phase}`, 'ARKADE', 'QUOTE_USED')
+    const marker = await store.getFundingMarker(id)
+    if (marker?.fundingTxid && record.phase === 'prepared') {
+      // Funded earlier, but the hand-off to the venue was lost: finish it.
+      return this.handOff(venue, store, record, marker.fundingTxid)
     }
-    const validUntil = num((record.quote as Record<string, unknown> | undefined)?.valid_until)
-    if (validUntil != null && validUntil <= this.now()) {
-      throw new ProtocolError('The quote expired before it was funded; request a new one', 'ARKADE', 'QUOTE_EXPIRED')
+    if (marker || record.phase !== 'prepared') {
+      const state = marker && record.phase === 'prepared' ? 'already being funded, or its funding failed midway' : `already ${record.phase}`
+      throw new ProtocolError(`Arkade Intents swap ${id} is ${state}; it is not funded again`, 'ARKADE', 'QUOTE_USED')
+    }
+    if (record.legacyAdopted) {
+      throw new ProtocolError('This quote predates per-wallet swap records; request a new one', 'ARKADE', 'QUOTE_EXPIRED')
+    }
+    const quote = (record.quote ?? {}) as Record<string, unknown>
+    const validUntil = num(quote.valid_until)
+    if (validUntil == null || validUntil <= this.now() + FUNDING_MARGIN_SECONDS) {
+      throw new ProtocolError(
+        `The quote expires too soon to fund safely (needs ${FUNDING_MARGIN_SECONDS} s left); request a new one`,
+        'ARKADE',
+        'QUOTE_EXPIRED',
+      )
     }
     const address = record.address as string
     const amount = num(record.fundAmountSats)
-    if (!address || !amount) {
-      throw new ProtocolError(`Arkade Intents record ${id} has no funding instruction`, 'ARKADE', 'INVALID_QUOTE')
+    const toAmount = num(quote.to_amount)
+    if (!address || !amount || !toAmount || amount < toAmount) {
+      throw new ProtocolError(`Arkade Intents record ${id} has no valid funding instruction`, 'ARKADE', 'INVALID_QUOTE')
     }
-    const fundingTxid = await this.deps.fund(address, amount)
+    const feeSats = amount - toAmount
+    const maxFeeSats = this.feeCeiling(toAmount, opts.maxFeeSats ?? num(record.engineMaxFeeSats))
+    if (feeSats > maxFeeSats) {
+      throw new ProtocolError(
+        `Solver fee ${feeSats} sats (funding ${amount} for ${toAmount}) exceeds the ceiling of ${maxFeeSats} sats`,
+        'ARKADE',
+        'FEE_TOO_HIGH',
+      )
+    }
+    const startedAt = this.now()
+    // Persisted before anything moves: from here on this quote counts as funded.
+    await store.setFundingMarker(id, { startedAt })
+    let fundingTxid: string
+    try {
+      fundingTxid = await this.deps.fund(address, amount)
+    } catch (error) {
+      await this.markFundingError(store, id, { startedAt, error: error instanceof Error ? error.message : String(error) })
+      throw error
+    }
     if (!fundingTxid) {
+      await this.markFundingError(store, id, { startedAt, error: 'no txid returned' })
       throw new ProtocolError('Arkade send did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
     }
     try {
-      return this.toSwap(await venue.notifyFunded(id, fundingTxid))
+      await store.setFundingMarker(id, { startedAt, fundingTxid })
     } catch (error) {
-      // Funded but not handed to the manager: reconcile self-heals a prepared
-      // record with chain evidence after its window, so report it pending.
-      log.warn(`[ArkadeIntents] notifyFunded failed for ${id} after funding ${fundingTxid}:`, error)
-      return { ...this.toSwap(record), status: 'pending', fundingTxid }
+      log.error(`[ArkadeIntents] Could not persist funding txid ${fundingTxid} for ${id}:`, error)
     }
+    return this.handOff(venue, store, record, fundingTxid)
+  }
+
+  private async markFundingError(store: ArkadeIntentsStore, id: string, marker: ArkadeIntentsFundingMarker): Promise<void> {
+    try {
+      await store.setFundingMarker(id, marker)
+    } catch (error) {
+      log.error(`[ArkadeIntents] Could not persist the funding error for ${id}:`, error)
+    }
+  }
+
+  /**
+   * Hand a funded send to the venue. When `notifyFunded` fails, the record is
+   * still moved to `funded` with its txid, so the venue's reconcile tracks it
+   * (claims, refunds) and never cancels it as unfunded.
+   */
+  private async handOff(
+    venue: ArkadeIntentsVenueLike,
+    store: ArkadeIntentsStore,
+    record: ArkadeIntentsRecord,
+    fundingTxid: string,
+  ): Promise<ArkadeLightningSwap> {
+    try {
+      return this.toSwap(await venue.notifyFunded(record.id, fundingTxid))
+    } catch (error) {
+      log.warn(`[ArkadeIntents] notifyFunded failed for ${record.id} after funding ${fundingTxid}:`, error)
+    }
+    const current = (await store.get(record.id).catch(() => undefined)) ?? record
+    const healed = { ...current, fundingTxid }
+    if (current.phase === 'prepared' || current.phase === 'cancelled') healed.phase = 'funded'
+    try {
+      await store.put(healed)
+    } catch (error) {
+      log.error(`[ArkadeIntents] Could not mark ${record.id} funded (txid ${fundingTxid}):`, error)
+    }
+    return { ...this.toSwap(healed), status: 'pending', fundingTxid }
   }
 
   /**
@@ -694,9 +829,12 @@ export class ArkadeIntentsLightning {
         'INVALID_QUOTE',
       )
     }
-    const credited = num(prepared.summary?.toAmountSats)
-    const ceiling = this.feeCeiling(facts.amountSats, opts.maxFeeSats)
-    if (amountSide === 'from' && credited != null && facts.amountSats - credited > ceiling) {
+    const credited = num(prepared.summary?.toAmountSats) ?? (amountSide === 'to' ? amountSats : undefined)
+    if (credited == null || credited > facts.amountSats) {
+      throw new ProtocolError('Solver quote does not state what lands on Arkade', 'ARKADE', 'INVALID_QUOTE')
+    }
+    const ceiling = this.feeCeiling(amountSide === 'from' ? facts.amountSats : amountSats, opts.maxFeeSats)
+    if (facts.amountSats - credited > ceiling) {
       throw new ProtocolError(
         `Solver fee ${facts.amountSats - credited} sats exceeds the ceiling of ${ceiling} sats`,
         'ARKADE',
@@ -704,7 +842,7 @@ export class ArkadeIntentsLightning {
       )
     }
     const id = String(prepared.record?.id)
-    await this.store().linkPaymentHash(facts.paymentHash, id)
+    await (await this.store()).linkPaymentHash(facts.paymentHash, id)
     // Arm the watcher now: the payer is external, so there is no "dispatched"
     // moment to wait for, and an unpaid invoice simply ends `cancelled`.
     await venue.notifyFunded(id)
@@ -724,8 +862,25 @@ export class ArkadeIntentsLightning {
   /** One pass over pending swaps: claims receives, settles/refunds sends. */
   async reconcile(): Promise<ArkadeLightningReconcileReport | null> {
     if (!arkadeIntentsClientManager.isInitialized()) return null
+    await this.healFundedSends().catch((error: unknown) => log.warn('[ArkadeIntents] Funding marker pass failed:', error))
     const report = await arkadeIntentsClientManager.getVenue().reconcile()
     return { ...report, failed: report.failed ?? [] }
+  }
+
+  /**
+   * Sends this engine funded whose venue record still reads `prepared` or
+   * `cancelled` (the hand-off was lost, or the venue gave up on a lagging
+   * indexer): move them to `funded` with their txid so the venue tracks them.
+   */
+  private async healFundedSends(): Promise<void> {
+    const store = await this.store()
+    for (const [id, marker] of await store.listFundingMarkers()) {
+      if (!marker.fundingTxid) continue
+      const record = await store.get(id)
+      if (!record || (record.phase !== 'prepared' && record.phase !== 'cancelled')) continue
+      log.warn(`[ArkadeIntents] Swap ${id} was funded (${marker.fundingTxid}) but reads ${record.phase}; tracking it as funded`)
+      await store.put({ ...record, phase: 'funded', fundingTxid: marker.fundingTxid })
+    }
   }
 
   /**
@@ -738,7 +893,8 @@ export class ArkadeIntentsLightning {
    */
   async refundSend(id: string): Promise<ArkadeLightningSwap> {
     const venue = await this.venue()
-    const before = await this.store().get(id)
+    const store = await this.store()
+    let before = await store.get(id)
     if (!before) throw new ProtocolError(`No Arkade Intents swap ${id}`, 'ARKADE', 'SWAP_NOT_FOUND')
     if (before.route !== SEND_ROUTE) {
       throw new ProtocolError(
@@ -753,8 +909,19 @@ export class ArkadeIntentsLightning {
       case 'settled':
         throw new ProtocolError('The payment settled; there is nothing to refund', 'ARKADE', 'ALREADY_SETTLED')
       case 'prepared':
-      case 'cancelled':
-        throw new ProtocolError('This swap was never funded; there is nothing to refund', 'ARKADE', 'NOTHING_TO_REFUND')
+      case 'cancelled': {
+        const marker = await store.getFundingMarker(id)
+        if (!marker) {
+          throw new ProtocolError('This swap was never funded; there is nothing to refund', 'ARKADE', 'NOTHING_TO_REFUND')
+        }
+        if (marker.fundingTxid) {
+          // Funded, but the venue never learned it: track it before refunding.
+          before = { ...before, phase: 'funded', fundingTxid: marker.fundingTxid }
+          await store.put(before)
+        }
+        // Without a txid the funding call failed midway; the venue's refund
+        // pass reads the lockup itself and finds whatever is there.
+      }
     }
     const after = this.toSwap(await venue.refundSend(id))
     if (after.status !== 'pending') return after
@@ -776,15 +943,16 @@ export class ArkadeIntentsLightning {
   }
 
   async getSwap(id: string): Promise<ArkadeLightningSwap | null> {
-    const record = await this.store().get(id)
-    return record ? this.toSwap(record) : null
+    const store = await this.store()
+    const record = await store.get(id)
+    return record ? this.toSwap(record, await store.getFundingMarker(id)) : null
   }
 
   async findByPaymentHash(paymentHash: string): Promise<ArkadeLightningSwap | null> {
     if (!paymentHash) return null
     let id: string | undefined
     try {
-      id = await this.store().idForPaymentHash(paymentHash)
+      id = await (await this.store()).idForPaymentHash(paymentHash)
     } catch {
       return null
     }
@@ -792,19 +960,23 @@ export class ArkadeIntentsLightning {
   }
 
   async listSwaps(): Promise<ArkadeLightningSwap[]> {
-    const records = await this.store().list()
-    return records.map((r) => this.toSwap(r)).sort((a, b) => b.createdAt - a.createdAt)
+    const store = await this.store()
+    const [records, markers] = await Promise.all([store.list(), store.listFundingMarkers()])
+    return records.map((r) => this.toSwap(r, markers.get(r.id))).sort((a, b) => b.createdAt - a.createdAt)
   }
 
-  toSwap(record: ArkadeIntentsRecord): ArkadeLightningSwap {
+  /** `marker`: this engine's funding marker; a marked send is never reported `quoted` or `cancelled`. */
+  toSwap(record: ArkadeIntentsRecord, marker?: ArkadeIntentsFundingMarker): ArkadeLightningSwap {
     const quote = (record.quote ?? {}) as Record<string, unknown>
     const send = record.route === SEND_ROUTE
     const from = num(quote.from_amount) ?? 0
     const to = num(quote.to_amount) ?? 0
+    const unfundedPhase = record.phase === 'prepared' || record.phase === 'cancelled'
+    const fundingTxid = typeof record.fundingTxid === 'string' ? record.fundingTxid : marker?.fundingTxid
     return {
       id: record.id,
       direction: send ? 'send' : 'receive',
-      status: statusOf(record.phase),
+      status: send && marker && unfundedPhase ? 'pending' : statusOf(record.phase),
       phase: record.phase,
       invoice: typeof record.invoice === 'string' ? record.invoice : undefined,
       arkadeAmountSats: send ? num(record.fundAmountSats) ?? from : num(record.expectedAmountSats) ?? to,
@@ -813,7 +985,7 @@ export class ArkadeIntentsLightning {
       createdAt: num(record.createdAt) ?? 0,
       validUntil: num(quote.valid_until),
       refundLocktime: num(quote.refund_locktime),
-      fundingTxid: typeof record.fundingTxid === 'string' ? record.fundingTxid : undefined,
+      fundingTxid,
       resolvedTxid: typeof record.resolvedTxid === 'string' ? record.resolvedTxid : undefined,
       failureReason: typeof record.failureReason === 'string' ? record.failureReason : undefined,
       ...(send && num(quote.refund_locktime) != null ? { refundAvailableAt: num(quote.refund_locktime) } : {}),

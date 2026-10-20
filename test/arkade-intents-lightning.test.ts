@@ -11,6 +11,7 @@ import { arkadeIntentsClientManager } from '../src/lib/arkade-intents-client-man
 import {
   ArkadeIntentsLightning,
   ArkadeIntentsRefusalError,
+  FUNDING_MARGIN_SECONDS,
   lightningHrpsForArkadeNetwork,
   transactionStatusOf,
 } from '../src/lib/arkade-intents-lightning'
@@ -112,8 +113,8 @@ function fakeVenue(store: ArkadeIntentsStore, opts: { feeSats?: number; refuse?:
   return venue
 }
 
-function setup(o: { network?: string; feeSats?: number; refuse?: unknown; maxFeeBps?: number; card?: unknown; covclaimdPubkey?: string } = {}) {
-  const store = new ArkadeIntentsStore(memoryStorage())
+function setup(o: { network?: string; feeSats?: number; refuse?: unknown; maxFeeBps?: number; card?: unknown; covclaimdPubkey?: string; now?: () => number; store?: ArkadeIntentsStore } = {}) {
+  const store = o.store ?? new ArkadeIntentsStore(memoryStorage())
   const venue = fakeVenue(store, o)
   vi.spyOn(arkadeIntentsClientManager, 'isInitialized').mockReturnValue(true)
   vi.spyOn(arkadeIntentsClientManager, 'getVenue').mockReturnValue(venue as never)
@@ -127,7 +128,7 @@ function setup(o: { network?: string; feeSats?: number; refuse?: unknown; maxFee
     fund,
     getNetwork: async () => o.network ?? 'mutinynet',
     arkServerUrl: 'https://ark.test',
-    now: () => NOW,
+    now: o.now ?? (() => NOW),
     store,
   })
   return { store, venue, fund, fetch, intents }
@@ -201,13 +202,18 @@ describe('Ark -> Lightning (two-step send)', () => {
     expect(fund).not.toHaveBeenCalled()
   })
 
-  it('a funding failure leaves the quote unfunded and surfaces the error', async () => {
-    const { intents, fund, venue } = setup()
+  it('a funding failure surfaces the error and never funds the quote again', async () => {
+    const { intents, fund, venue, store } = setup()
     fund.mockRejectedValueOnce(new Error('insufficient funds'))
     const q = await intents.quoteSend(INV_5000)
     await expect(intents.executeSend(q.id)).rejects.toThrow('insufficient funds')
     expect(venue.notifyFunded).not.toHaveBeenCalled()
-    expect((await intents.getSwap(q.id))?.status).toBe('quoted')
+    // The call may have broadcast before it threw: the quote counts as funded.
+    expect(await store.getFundingMarker(q.id)).toMatchObject({ error: 'insufficient funds' })
+    expect((await intents.getSwap(q.id))?.status).toBe('pending')
+    await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_USED' })
+    await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ code: 'INVOICE_IN_PROGRESS' })
+    expect(fund).toHaveBeenCalledTimes(1)
   })
 
   it('stays pending when funded but the hand-off fails', async () => {
@@ -236,6 +242,119 @@ describe('Ark -> Lightning (two-step send)', () => {
     const { intents } = setup()
     ;(intents as any).deps.now = () => 1_792_341_753
     await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ code: 'INVOICE_EXPIRED' })
+  })
+})
+
+describe('funding safety', () => {
+  it('concurrent executeSend calls fund the lockup once', async () => {
+    const { intents, fund, store } = setup()
+    let release!: () => void
+    fund.mockImplementationOnce(() => new Promise<string>((done) => (release = () => done('fund-txid'))))
+    const q = await intents.quoteSend(INV_5000)
+    const first = intents.executeSend(q.id)
+    const second = intents.executeSend(q.id)
+    // Another engine instance on the same wallet (e.g. the other adapter).
+    const other = new ArkadeIntentsLightning({
+      config: { solverUrl: 'https://solver.test/v2' },
+      getWallet: () => ({}),
+      fund,
+      getNetwork: async () => 'mutinynet',
+      arkServerUrl: 'https://ark.test',
+      now: () => NOW,
+      store,
+    })
+    const third = other.executeSend(q.id)
+    await vi.waitFor(() => expect(fund).toHaveBeenCalledTimes(1))
+    // A re-quote while funding is in flight is not handed the same quote to fund.
+    await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ code: 'INVOICE_IN_PROGRESS' })
+    release()
+    const results = await Promise.all([first, second, third])
+    expect(results.map((r) => r.fundingTxid)).toEqual(['fund-txid', 'fund-txid', 'fund-txid'])
+    expect(fund).toHaveBeenCalledTimes(1)
+    await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_USED' })
+  })
+
+  it('a funding marker persisted by another process blocks funding', async () => {
+    const { intents, fund, store } = setup()
+    const q = await intents.quoteSend(INV_5000)
+    await store.setFundingMarker(q.id, { startedAt: NOW })
+    await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_USED' })
+    expect(fund).not.toHaveBeenCalled()
+  })
+
+  it('after a failed notifyFunded the txid is persisted and the swap stays refundable', async () => {
+    const { intents, venue, store, fund } = setup()
+    venue.notifyFunded.mockRejectedValueOnce(new Error('manager offline'))
+    const q = await intents.quoteSend(INV_5000)
+    expect(await intents.executeSend(q.id)).toMatchObject({ status: 'pending', fundingTxid: 'fund-txid' })
+    expect(await store.getFundingMarker(q.id)).toMatchObject({ fundingTxid: 'fund-txid' })
+    // The record itself is moved to funded, so the venue tracks it.
+    expect(await store.get(q.id)).toMatchObject({ phase: 'funded', fundingTxid: 'fund-txid' })
+    await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ code: 'INVOICE_IN_PROGRESS' })
+    await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_USED' })
+    expect(fund).toHaveBeenCalledTimes(1)
+
+    // Even if the venue later cancels the record (lagging indexer), refund still runs.
+    await venue.resolve(q.id, 'cancelled')
+    expect((await intents.getSwap(q.id))?.status).toBe('pending')
+    expect(await intents.refundSend(q.id)).toMatchObject({ status: 'refunded' })
+    expect(venue.refundSend).toHaveBeenCalledWith(q.id)
+  })
+
+  it('reconcile hands a funded send the venue never heard of back to it', async () => {
+    const { intents, venue, store } = setup()
+    venue.notifyFunded.mockRejectedValueOnce(new Error('store down'))
+    const q = await intents.quoteSend(INV_5000)
+    const put = vi.spyOn(store, 'put').mockRejectedValueOnce(new Error('store down'))
+    await intents.executeSend(q.id)
+    put.mockRestore()
+    expect(await store.get(q.id)).toMatchObject({ phase: 'prepared' })
+    await intents.reconcile()
+    expect(await store.get(q.id)).toMatchObject({ phase: 'funded', fundingTxid: 'fund-txid' })
+  })
+
+  it('refuses to fund a quote too close to its expiry', async () => {
+    let now = NOW
+    const { intents, fund } = setup({ now: () => now })
+    const q = await intents.quoteSend(INV_5000)
+    now = q.validUntil - FUNDING_MARGIN_SECONDS
+    await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_EXPIRED' })
+    // Nor is it handed back on a re-quote.
+    await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ kind: 'already_quoted' })
+    expect(fund).not.toHaveBeenCalled()
+    now = q.validUntil - FUNDING_MARGIN_SECONDS - 1
+    expect(await intents.executeSend(q.id)).toMatchObject({ status: 'pending' })
+  })
+
+  it('re-checks the fee against fundAmountSats before funding', async () => {
+    const { intents, fund, store } = setup()
+    const q = await intents.quoteSend(INV_5000)
+    const record = (await store.get(q.id))!
+    await store.put({ ...record, fundAmountSats: 6000 })
+    await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'FEE_TOO_HIGH' })
+    expect(fund).not.toHaveBeenCalled()
+  })
+
+  it('executeSend honours the ceiling approved at quote time', async () => {
+    const { intents, fund } = setup({ feeSats: 200 })
+    const q = await intents.quoteSend(INV_5000, { maxFeeSats: 200 })
+    expect(await intents.executeSend(q.id)).toMatchObject({ status: 'pending' })
+    expect(fund).toHaveBeenCalledWith(LOCKUP, 5200)
+  })
+
+  it('fails closed on an empty or unknown Ark network', async () => {
+    expect(lightningHrpsForArkadeNetwork('')).toBeNull()
+    for (const network of ['', 'liquid']) {
+      await expect(setup({ network }).intents.quoteSend(INV_5000)).rejects.toMatchObject({ code: 'INVOICE_NETWORK_MISMATCH' })
+    }
+  })
+
+  it("createReceive('from') refuses a quote that does not state the credited amount", async () => {
+    const { intents, venue } = setup()
+    const real = venue.prepareLightningReceive.getMockImplementation()!
+    venue.prepareLightningReceive.mockImplementationOnce(async (args) => ({ ...(await real(args)), summary: {} }))
+    await expect(intents.createReceive(1000, { amountSide: 'from' })).rejects.toMatchObject({ code: 'INVALID_QUOTE' })
+    expect(venue.notifyFunded).not.toHaveBeenCalled()
   })
 })
 

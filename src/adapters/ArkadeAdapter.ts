@@ -440,7 +440,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       // bounded by `maxFeeSats` (or the configured ceiling) before funding.
       const intents = this.requireIntents();
       const quote = await intents.quoteSend(request.invoice, { maxFeeSats: request.maxFeeSats });
-      const swap = await intents.executeSend(quote.id);
+      const swap = await intents.executeSend(quote.id, { maxFeeSats: request.maxFeeSats });
       return {
         paymentHash: quote.paymentHash,
         txid: swap.fundingTxid,

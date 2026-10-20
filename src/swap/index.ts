@@ -33,7 +33,9 @@ export {
 
 export {
   ArkadeIntentsStore,
+  type ArkadeIntentsFundingMarker,
   type ArkadeIntentsRecord,
+  type ArkadeIntentsStoreScope,
 } from './arkade-intents-store'
 
 export {

@@ -516,7 +516,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       // Calling sendPayment is the approval; the fee ceiling is checked before funding.
       const intents = this.requireIntents()
       const quote = await intents.quoteSend(dest, { maxFeeSats: request.maxFeeSats })
-      const swap = await intents.executeSend(quote.id)
+      const swap = await intents.executeSend(quote.id, { maxFeeSats: request.maxFeeSats })
       return {
         paymentHash: quote.paymentHash,
         txid: swap.fundingTxid,
