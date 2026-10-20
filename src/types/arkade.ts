@@ -4,6 +4,7 @@
  */
 
 import { BaseProtocolConfig } from '../adapters/IProtocolAdapter'
+import type { ArkadeIntentsConfig } from '../lib/arkade-intents-lightning'
 
 export interface ArkadeConfig extends Omit<BaseProtocolConfig, 'network'> {
   protocol: 'ARKADE'
@@ -21,12 +22,11 @@ export interface ArkadeConfig extends Omit<BaseProtocolConfig, 'network'> {
    */
   walletMode?: 'static' | 'hd'
   /**
-   * Start the Boltz swaps client on connect. Off by default: the client opens a
-   * WebSocket to the Boltz Ark endpoint and reconnects for the life of the
-   * session, which is pure background noise for a host that reaches Lightning
-   * some other way. Set it only when you call into `arkadeSwapsClientManager`.
+   * Lightning over Arkade Intents. Present = start the venue on connect (pass
+   * `{}` for the network defaults); absent = only a venue the host initializes
+   * through `arkadeIntentsClientManager` is used.
    */
-  boltzSwapsEnabled?: boolean
+  intents?: ArkadeIntentsConfig
   /**
    * `EventSource` implementation for runtimes that lack the global.
    *

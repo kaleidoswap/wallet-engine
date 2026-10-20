@@ -102,17 +102,20 @@ describe('ArkadeWdkAdapter.executeProtocolOperation allowlist', () => {
     const adapter = new ArkadeWdkAdapter()
     Object.assign(adapter as any, {
       connected: true,
-      // Arkade routes its own allowlist since the path moved off the WDK:
-      // Lightning ops are served by the swaps client, the rest by the wallet.
-      wallet: {},
-      swaps: { getLightningLimits: async () => ({ min: 1, max: 2 }) },
+      // Arkade routes its own allowlist since the path moved off the WDK.
+      wallet: { getBoardingAddress: async () => 'tark1boarding' },
     })
     return adapter
   }
 
   it('dispatches an allowlisted Arkade op', async () => {
     const adapter = connectedArkade()
-    await expect(adapter.executeProtocolOperation('getLightningLimits', {})).resolves.toMatchObject({ min: 1 })
+    await expect(adapter.executeProtocolOperation('getBoardingAddress', {})).resolves.toBe('tark1boarding')
+  })
+
+  it('no longer exposes the retired Boltz Lightning ops', async () => {
+    const adapter = connectedArkade()
+    await expect(adapter.executeProtocolOperation('getLightningLimits', {})).rejects.toThrow(/not allowed/i)
   })
 
   it('rejects meta members', async () => {

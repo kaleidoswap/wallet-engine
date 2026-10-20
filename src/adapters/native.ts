@@ -10,9 +10,24 @@ export { RgbAdapter } from './RgbAdapter'
 export { sparkClientManager } from '../lib/spark-client-manager'
 export { arkadeClientManager, type ArkadePlatformProviders } from '../lib/arkade-client-manager'
 export {
-  arkadeSwapsClientManager,
-  type ArkadeSwapsInitOptions,
-} from '../lib/arkade-swaps-client-manager'
+  cleanupLegacyArkadeSwapsDb,
+  isFinalLegacySwap,
+  LEGACY_ARKADE_SWAPS_DB,
+  type LegacyArkadeSwapsCleanup,
+} from '../lib/legacy-arkade-swaps-cleanup'
+export {
+  ArkadeIntentsLightning,
+  ArkadeIntentsRefusalError,
+  DEFAULT_INTENTS_SOLVER_URLS,
+  lightningHrpsForArkadeNetwork,
+  type ArkadeIntentsConfig,
+  type ArkadeIntentsRefusalKind,
+  type ArkadeLightningReceive,
+  type ArkadeLightningReconcileReport,
+  type ArkadeLightningSendQuote,
+  type ArkadeLightningSwap,
+  type ArkadeLightningSwapStatus,
+} from '../lib/arkade-intents-lightning'
 export {
   arkadeIntentsClientManager,
   type ArkadeIntentsInitOptions,

@@ -34,6 +34,11 @@ import {
   SwapResult,
 } from '../types/base'
 import type { ProtocolCapability } from '../capabilities/operations'
+import type {
+  ArkadeLightningReconcileReport,
+  ArkadeLightningSendQuote,
+  ArkadeLightningSwap,
+} from '../lib/arkade-intents-lightning'
 import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { RgbConfig } from '../types/rgb'
 import type { SparkConfig } from '../types/spark'
@@ -358,11 +363,6 @@ export interface ISparkOperations {
 
 /** Arkade-specific operations. */
 export interface IArkadeOperations {
-  /**
-   * Lightning invoice paying into Arkade via a Boltz reverse swap. Needs a
-   * positive `request.amount`.
-   */
-  createArkadeLightningInvoice(request: InvoiceRequest): Promise<Invoice>
   /** List virtual transaction outputs. */
   getVtxos(): Promise<Record<string, unknown>[]>
   /** List boarding UTXOs. */
@@ -371,6 +371,19 @@ export interface IArkadeOperations {
   onboard(): Promise<{ txid: string }>
   /** Offboard funds from Arkade to on-chain. */
   offboard(address: string, amount?: number): Promise<{ txid: string }>
+  /**
+   * Lightning over Arkade Intents, in two steps so the host can show the quote:
+   * `quoteLightningSend` persists a quote and moves nothing; the host calls
+   * `executeLightningSend` only after the user approved it.
+   */
+  quoteLightningSend?(invoice: string, opts?: { maxFeeSats?: number }): Promise<ArkadeLightningSendQuote>
+  executeLightningSend?(quoteId: string): Promise<ArkadeLightningSwap>
+  getLightningSwap?(id: string): Promise<ArkadeLightningSwap | null>
+  listLightningSwaps?(): Promise<ArkadeLightningSwap[]>
+  /** Push the refund of a stalled send once its refund locktime matured. */
+  refundLightningSend?(id: string): Promise<ArkadeLightningSwap>
+  /** One claim/refund pass over pending swaps, for the host's scheduler. */
+  reconcileLightningSwaps?(): Promise<ArkadeLightningReconcileReport | null>
 }
 
 /**

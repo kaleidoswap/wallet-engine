@@ -85,6 +85,56 @@ describe('ArkadeIntentsStore', () => {
   })
 })
 
+describe('ArkadeIntentsStore scoping', () => {
+  const walletOf = (byte: number) => ({ identity: { xOnlyPublicKey: async () => new Uint8Array(32).fill(byte) } })
+  const scopeA = { network: 'mutinynet', walletId: 'aa'.repeat(32) }
+
+  it('keeps wallets and networks apart', async () => {
+    const storage = new MemoryStorage()
+    const a = new ArkadeIntentsStore(storage, scopeA)
+    const b = new ArkadeIntentsStore(storage, { ...scopeA, walletId: 'bb'.repeat(32) })
+    const aMainnet = new ArkadeIntentsStore(storage, { ...scopeA, network: 'bitcoin' })
+    await a.put(record('rfq-1', 'prepared'))
+    await a.linkPaymentHash('AB12', 'rfq-1')
+    await a.setFundingMarker('rfq-1', { startedAt: 1, fundingTxid: 'tx' })
+    for (const other of [b, aMainnet, new ArkadeIntentsStore(storage)]) {
+      expect(await other.get('rfq-1')).toBeUndefined()
+      expect(await other.list()).toEqual([])
+      expect(await other.idForPaymentHash('ab12')).toBeUndefined()
+      expect(await other.getFundingMarker('rfq-1')).toBeUndefined()
+    }
+    expect(await a.idForPaymentHash('ab12')).toBe('rfq-1')
+    expect([...(await a.listFundingMarkers()).keys()]).toEqual(['rfq-1'])
+  })
+
+  it('refuses an empty scope', () => {
+    expect(() => new ArkadeIntentsStore(new MemoryStorage(), { network: '', walletId: 'aa' })).toThrow()
+    expect(() => new ArkadeIntentsStore(new MemoryStorage(), { network: 'mutinynet', walletId: '' })).toThrow()
+  })
+
+  it('scopes by the wallet identity and adopts unscoped records once', async () => {
+    const storage = new MemoryStorage()
+    const legacy = new ArkadeIntentsStore(storage)
+    await legacy.put(record('rfq-old', 'funded'))
+    await legacy.linkPaymentHash('cd34', 'rfq-old')
+    const previous = getPlatform()
+    setPlatform({ storage } as never)
+    try {
+      const a = await ArkadeIntentsStore.forWallet(walletOf(0xaa), 'mutinynet')
+      expect(await a.get('rfq-old')).toMatchObject({ phase: 'funded', legacyAdopted: true })
+      expect(await a.idForPaymentHash('cd34')).toBe('rfq-old')
+      expect(await new ArkadeIntentsStore(storage, scopeA).get('rfq-old')).toBeDefined()
+      // Adopted once per host; the unscoped keys stay where they were.
+      const b = await ArkadeIntentsStore.forWallet(walletOf(0xbb), 'mutinynet')
+      expect(await b.list()).toEqual([])
+      expect(await legacy.get('rfq-old')).toBeDefined()
+      await expect(ArkadeIntentsStore.forWallet({}, 'mutinynet')).rejects.toMatchObject({ code: 'CONFIG' })
+    } finally {
+      if (previous) setPlatform(previous)
+    }
+  })
+})
+
 describe('arkadeIntentsClientManager', () => {
   const wallet = {} as never
 

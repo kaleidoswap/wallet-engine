@@ -27,6 +27,7 @@ export interface ArkadeIntentsVenueLike {
     refunded: string[];
     cancelled: string[];
     needsRecovery: string[];
+    failed?: string[];
     pending: string[];
     errors: { id: string; error: unknown }[];
   }>;
@@ -40,8 +41,13 @@ export interface ArkadeIntentsInitOptions {
    * best-effort on dispose.
    */
   transport: unknown;
-  /** Override the platform-storage-backed record store. */
+  /**
+   * Override the platform-storage-backed record store. Without it the venue
+   * gets a store scoped to this wallet and `network`.
+   */
   store?: unknown;
+  /** The Ark server's network; read from `wallet.arkProvider.getInfo()` when absent. */
+  network?: string;
   /**
    * Ecosystem `AssetSwapRepository` enabling the intra-Arkade asset-swap route
    * (e.g. `IndexedDbAssetSwapRepository` from `@arkade-os/swap`).
@@ -49,11 +55,37 @@ export interface ArkadeIntentsInitOptions {
   assetSwapRepository?: unknown;
 }
 
+/** Load `@kaleidorg/swap-sdk/arkade` through the host-injectable module loader. */
+export function loadArkadeIntentsModule(): Promise<any> {
+  return loadWdkModule(VENUE_MODULE, () => {
+    // Non-literal on purpose — see the module doc. Hosts register a
+    // loader; this fallback covers node/Vite where the subpath resolves.
+    const specifier = VENUE_MODULE;
+    return import(/* @vite-ignore */ specifier);
+  });
+}
+
+/** The platform store scoped to this wallet and network. Throws when either is unknown. */
+async function defaultStore(wallet: IWallet, network?: string): Promise<ArkadeIntentsStore> {
+  const resolved =
+    network ||
+    String(
+      (await (wallet as { arkProvider?: { getInfo?: () => Promise<{ network?: string }> } }).arkProvider?.getInfo?.())
+        ?.network ?? "",
+    );
+  if (!resolved) {
+    throw new Error("Arkade Intents needs the Ark network to scope its swap records");
+  }
+  return ArkadeIntentsStore.forWallet(wallet, resolved);
+}
+
 /** The guard's single slot: the wallet-bound venue handshake. */
 const VENUE_SLOT = "venue";
 
 class ArkadeIntentsClientManager {
   private venue: ArkadeIntentsVenueLike | null = null;
+  /** The record store the live venue was built with. */
+  private venueStore: unknown = null;
   /** The wallet whose signing capability the live venue holds. */
   private venueWallet: IWallet | null = null;
   private transport: unknown = null;
@@ -78,27 +110,25 @@ class ArkadeIntentsClientManager {
   ): Promise<void> {
     attempt.mark();
     try {
-      const mod = await loadWdkModule(VENUE_MODULE, () => {
-        // Non-literal on purpose — see the module doc. Hosts register a
-        // loader; this fallback covers node/Vite where the subpath resolves.
-        const specifier = VENUE_MODULE;
-        return import(/* @vite-ignore */ specifier);
-      });
+      const mod = await loadArkadeIntentsModule();
+      const store = options.store ?? (await defaultStore(wallet, options.network));
       const venue = new mod.ArkadeIntentsVenue({
         wallet,
         arkServerUrl: options.arkServerUrl,
         transport: options.transport,
-        store: options.store ?? ArkadeIntentsStore.fromPlatform(),
+        store,
         assetSwapRepository: options.assetSwapRepository,
       }) as ArkadeIntentsVenueLike;
       if (!(await attempt.claim(() => this.closeTransport(options.transport)))) return;
       this.venue = venue;
+      this.venueStore = store;
       this.venueWallet = wallet;
       this.transport = options.transport;
       log.info("[ArkadeIntentsClientManager] Initialized");
     } catch (error) {
       if (attempt.isCurrent) {
         this.venue = null;
+        this.venueStore = null;
         this.venueWallet = null;
         this.transport = null;
       }
@@ -118,6 +148,11 @@ class ArkadeIntentsClientManager {
     return this.venue;
   }
 
+  /** The live venue's record store, or null when none is live. */
+  getStore(): unknown {
+    return this.venue ? this.venueStore : null;
+  }
+
   async dispose(): Promise<void> {
     this.session.invalidate();
     if (!this.venue && !this.transport) return;
@@ -126,6 +161,7 @@ class ArkadeIntentsClientManager {
     // interface doesn't require one.
     this.closeTransport(this.transport);
     this.venue = null;
+    this.venueStore = null;
     this.venueWallet = null;
     this.transport = null;
     log.info("[ArkadeIntentsClientManager] Disposed");
@@ -136,6 +172,7 @@ class ArkadeIntentsClientManager {
     if (!this.session.releaseIf(this.venue, expected)) return;
     this.closeTransport(this.transport);
     this.venue = null;
+    this.venueStore = null;
     this.venueWallet = null;
     this.transport = null;
   }

@@ -11,15 +11,125 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - `sparkAddressNetwork(address)` and `ClassifiedDestination.sparkNetwork`: the
   spark-sdk network (`MAINNET`/`TESTNET`/`REGTEST`/`SIGNET`/`LOCAL`) a Spark
   address belongs to, so a host can refuse a Spark send to another network.
+- `cleanupLegacyArkadeSwapsDb()`: deletes the old Boltz IndexedDB store
+  (`kaleidoswap-arkade-swaps`) when it is absent or holds only final swaps, and
+  keeps it with a warning when a swap may still hold funds in a VHTLC.
+  `ArkadeAdapter.connect()` runs it once per process; it no-ops without
+  `indexedDB`.
+- Two-step Arkade Lightning API on `IArkadeOperations`:
+  `quoteLightningSend(invoice, { maxFeeSats? })` persists a quote and moves
+  nothing (fund amount, solver fee, ceiling, `validUntil`, `refundLocktime`);
+  `executeLightningSend(quoteId)` funds an approved quote and returns
+  `pending`. Funding happens at most once per quote: concurrent calls join the
+  one in flight, and a funding marker (then the funding txid) is persisted
+  before any value moves, so a retry, a second tab or a restart never funds the
+  same lockup twice. A funding call that throws may have broadcast, so its
+  quote is never funded again either; ask the payee for a new invoice. The
+  quote must have `FUNDING_MARGIN_SECONDS` (30 s) left, and the fee is
+  re-checked against `fundAmountSats` (the caller's `maxFeeSats`, else the
+  ceiling approved at quote time, else `intents.maxFeeBps`). When the hand-off
+  to the venue (`notifyFunded`) fails after funding, the record still moves to
+  `funded` with its txid, and `reconcile` and `refundLightningSend` treat any
+  funded marker as funded, so a lost hand-off never leaves a lockup without a
+  refund path. Also `getLightningSwap`, `listLightningSwaps`,
+  `refundLightningSend` and `reconcileLightningSwaps` (for host schedulers such
+  as an MV3 alarm). Swap status is `quoted`, `pending`, `settled`, `refunded`,
+  `cancelled`, `failed` or `needs_recovery`; funding is never `confirmed`.
+- `ArkadeIntentsRefusalError` (`code: 'INTENTS_REFUSED'`): the solver's
+  `reason` plus `kind` (`below_minimum`, `above_maximum`, `no_capacity`,
+  `out_of_range`, `already_quoted`, `other`) and, when known, `limit` / `actual` / `unit`. Limits
+  come from the solver's signed card (`GET /v1/card`), since `@arkade-os/swap`
+  drops them for `amount_out_of_range` / `exposure_cap`. Other errors:
+  `INVOICE_NETWORK_MISMATCH`, `INVOICE_EXPIRED`, `INVALID_AMOUNT`,
+  `FEE_TOO_HIGH`, `QUOTE_EXPIRED`, `QUOTE_USED`, `NOT_CONFIGURED`, `CONFIG`.
+- `ArkadeIntentsConfig.covclaimdPubkey` (optional, 66 hex) lets the solver's
+  claim daemon claim receives while the wallet is offline.
+- Arkade Lightning refunds: `refundLightningSend` returns a swap the solver
+  already settled or refunded, and otherwise pushes the trader's own refund
+  (trader + Ark operator) once `refund_locktime` has passed. Before that it
+  fails `REFUND_NOT_YET` with `refundAvailableAt` (the KaleidoSwap maker quotes
+  about 25 h and does not refund an Arkade lockup itself when its Lightning
+  payment fails). A double refund pushes once; settled, unfunded and receive
+  swaps fail `ALREADY_SETTLED`, `NOTHING_TO_REFUND` and `NOT_REFUNDABLE`. Swaps
+  carry `refundAvailableAt`, and `recoveryHint` when `needs_recovery`.
+  `REFUND_MTP_LAG_SECONDS` is exported.
+- Re-quoting an invoice is idempotent: a still-valid quote is returned
+  instead of asking the solver again (which answers `quote_conflict`, since it
+  keeps one swap per payment hash). An expired quote fails as an
+  `already_quoted` refusal, an invoice in flight or paid fails
+  `INVOICE_IN_PROGRESS` / `INVOICE_ALREADY_PAID` (never paid twice), and one
+  of this wallet's own receive invoices fails `SELF_PAYMENT`. The solver's
+  `quote_conflict` maps to `kind: 'already_quoted'` with a clear message.
+- `ARKADE_LIGHTNING_OPERATIONS`, `CONDITIONAL_OPERATIONS` and
+  `liveOperationAvailable` in `capabilities/operations`.
 
 ### Changed
-- The engine is tested against `@kaleidorg/swap-sdk` 0.12. Hosts using the
-  Arkade venue with `@arkade-os/swap` 0.0.21 or later should run swap-sdk 0.11
-  or later: on 0.10 that venue never claimed a receive and threw on every send
-  refund (`contracts.getContractsWithVtxos is not a function`), and the error
-  was swallowed. swap-sdk 0.12 also waits 15 minutes on an `unknown` lockup
-  read past the deadline before cancelling a `prepared` swap, so a late
-  funding or a lagging indexer no longer strands it as cancelled.
+- **Breaking:** the optional `@kaleidorg/swap-sdk` peer range is `^0.12.0`
+  only (it was `^0.1.1 || ^0.3.0 || ^0.7.0 || ^0.10.0 || ^0.11.0 || ^0.12.0`),
+  and the engine is tested against 0.12. No earlier release is safe with the Arkade venue: on
+  `@arkade-os/swap` 0.0.21 and later the 0.10 venue never claims a receive and
+  throws on every send refund (`contracts.getContractsWithVtxos is not a
+  function`), which the manager swallows, and before 0.12 the venue cancels a
+  `prepared` swap as soon as its deadline passes with an `unknown` lockup read,
+  so a late funding or a lagging indexer strands it as cancelled. 0.12 waits
+  15 minutes on that read first. Hosts on any earlier swap-sdk, chain swaps
+  included, must move to 0.12.
+- **Breaking:** `ArkadeAdapter.capabilities` and `ArkadeWdkAdapter.capabilities`
+  are getters instead of readonly fields, since the Lightning operations come
+  and go with the venue. Code that assigns or spreads the property at
+  construction time sees the list of that moment.
+- **Breaking:** `sendPayment({ invoice: bolt11 })` on ARKADE returns `pending`
+  without a preimage. The payment settles later; follow it with
+  `getPaymentStatus(paymentHash)`.
+- **Breaking:** `createInvoice({ layer: 'BTC_LN' })` on ARKADE needs Arkade
+  Intents (`ArkadeConfig.intents`, or a venue the host initialized) and fails
+  `NOT_CONFIGURED` without one.
+- Lightning on Arkade runs over Arkade Intents in both directions, on both
+  Arkade adapters. Set `ArkadeConfig.intents` (`{}` takes the defaults: the
+  KaleidoSwap signet maker on mutinynet/signet, a 3% fee ceiling, a 30 s
+  reconcile loop) to start the venue on connect; without it, a venue the host
+  initialized through `arkadeIntentsClientManager` is used.
+  - `sendPayment({ invoice: bolt11 })` quotes, checks the solver fee against
+    `maxFeeSats` (or `intents.maxFeeBps`), funds the lockup and returns
+    `pending` with the BOLT11 payment hash, the funding txid and the fee. The
+    call itself is the approval; the manager's spending policy still applies
+    to the invoice amount. `getPaymentStatus(paymentHash)` follows the swap.
+  - `createInvoice({ layer: 'BTC_LN' })` returns the solver's BOLT11 for exactly
+    the requested amount (never an Ark address); the solver fee comes off the
+    sats credited on Arkade and is bounded by the fee ceiling (a quote that
+    does not state the credited amount is refused). It arms the
+    claim watcher. Claims and refunds run while
+    connected and resume after a restart from the persisted records.
+  - Invoices must match the Ark network (`lntbs` on mutinynet/signet, `lnbc`
+    on mainnet), carry an amount and be unexpired. An empty or unknown Ark
+    network refuses every invoice.
+  - ARKADE declares `supportsLightning` and the `BTC_LN` layer again. The
+    adapters list `lightning-send` / `lightning-receive` only while a venue is
+    live, and the router checks that live list before offering ARKADE as a
+    direct BOLT11 route or a `BTC_LN` receive.
+- Arkade Intents records are stored per wallet and Ark network
+  (`arkade:intents:<network>:<walletId>:…`, the wallet id being the identity's
+  x-only pubkey), so two wallets on one host never see or fund each other's
+  quotes. The first scoped store opened on a host copies the unscoped records
+  of earlier releases into its scope, keeps the unscoped keys, and never funds
+  a copied quote. `arkadeIntentsClientManager.initialize` takes an optional
+  `network` for its default store (else it reads `arkProvider.getInfo()`).
+
+### Removed
+- **Breaking:** the Arkade Boltz swap integration. Boltz has retired its Ark
+  service, and Lightning on Arkade now runs over Arkade Intents. Gone:
+  the `@arkade-os/boltz-swap` optional peer, `arkadeSwapsClientManager` and
+  `ArkadeSwapsInitOptions` (from `adapters/arkade` and `adapters/native`),
+  `ArkadeConfig.boltzSwapsEnabled`, the `swapProviderUrl` passthrough,
+  `createArkadeLightningInvoice` (also dropped from `IArkadeOperations`), and the
+  `ArkadeWdkAdapter` ops `waitForLightningPayment`, `getLightningLimits` and
+  `getLightningFees`. The BTC <-> L-BTC chain swaps (`BoltzChainSwap`,
+  `boltzSwapClientManager`) are unaffected.
+- **Breaking:** the engine has no refund path left for Arkade Boltz swaps.
+  `cleanupLegacyArkadeSwapsDb()` keeps a `kaleidoswap-arkade-swaps` store that
+  may still hold funds in a VHTLC, but nothing in the engine reads it any
+  more: a host with such swaps must refund them with a release before this
+  one (or the Boltz tooling) before upgrading.
 
 ### Fixed
 - Liquid Testnet USDt (`LIQUID_TESTNET_USDT_ASSET_ID`) is now a known asset: `listAssets`

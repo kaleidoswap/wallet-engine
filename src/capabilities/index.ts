@@ -77,7 +77,9 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
     protocol: 'ARKADE',
     layers: ['BTC_ARKADE', 'ARKADE_ARKADE', 'BTC_LN'],
     supportsOnchain: true, // boarding
-    supportsLightning: true, // via boltz-swap
+    // Via Arkade Intents; a connected adapter lists `lightning-send` /
+    // `lightning-receive` only while a solver venue is live.
+    supportsLightning: true,
     supportsBolt12: false, // no adapter has an offer flow — see the field JSDoc
     supportsAssets: true,
     supportsSwaps: false,
