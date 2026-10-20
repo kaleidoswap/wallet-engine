@@ -12,6 +12,7 @@ import {
   ArkadeIntentsLightning,
   ArkadeIntentsRefusalError,
   FUNDING_MARGIN_SECONDS,
+  UNKNOWN_LOCKUP_GRACE_SECONDS,
   lightningHrpsForArkadeNetwork,
   transactionStatusOf,
 } from '../src/lib/arkade-intents-lightning'
@@ -33,6 +34,7 @@ const NOW = 1_790_000_000 // before both invoices expire
 const SEND_ROUTE = 'arkade:BTC->lightning:BTC'
 const RECV_ROUTE = 'lightning:BTC->arkade:BTC'
 const LOCKUP = 'tark1qlockup'
+const LOCKUP_SCRIPT = '5120' + '11'.repeat(32)
 
 function memoryStorage(): IStorageProvider {
   const m = new Map<string, string>()
@@ -59,6 +61,7 @@ function fakeVenue(store: ArkadeIntentsStore, opts: { feeSats?: number; refuse?:
         createdAt: NOW,
         quote: { valid_until: NOW + 60, refund_locktime: NOW + 3600, from_amount: invoice.amountSats + fee, to_amount: invoice.amountSats },
         address: LOCKUP,
+        swapPkScriptHex: LOCKUP_SCRIPT,
         fundAmountSats: invoice.amountSats + fee,
         invoice: invoice.raw,
       } as unknown as ArkadeIntentsRecord
@@ -113,7 +116,7 @@ function fakeVenue(store: ArkadeIntentsStore, opts: { feeSats?: number; refuse?:
   return venue
 }
 
-function setup(o: { network?: string; feeSats?: number; refuse?: unknown; maxFeeBps?: number; card?: unknown; covclaimdPubkey?: string; now?: () => number; store?: ArkadeIntentsStore } = {}) {
+function setup(o: { network?: string; feeSats?: number; refuse?: unknown; maxFeeBps?: number; card?: unknown; covclaimdPubkey?: string; now?: () => number; store?: ArkadeIntentsStore; wallet?: unknown } = {}) {
   const store = o.store ?? new ArkadeIntentsStore(memoryStorage())
   const venue = fakeVenue(store, o)
   vi.spyOn(arkadeIntentsClientManager, 'isInitialized').mockReturnValue(true)
@@ -124,7 +127,7 @@ function setup(o: { network?: string; feeSats?: number; refuse?: unknown; maxFee
   )
   const intents = new ArkadeIntentsLightning({
     config: { solverUrl: 'https://solver.test/v2', fetch: fetch as never, maxFeeBps: o.maxFeeBps, covclaimdPubkey: o.covclaimdPubkey },
-    getWallet: () => ({}),
+    getWallet: () => o.wallet ?? {},
     fund,
     getNetwork: async () => o.network ?? 'mutinynet',
     arkServerUrl: 'https://ark.test',
@@ -202,8 +205,10 @@ describe('Ark -> Lightning (two-step send)', () => {
     expect(fund).not.toHaveBeenCalled()
   })
 
-  it('a funding failure surfaces the error and never funds the quote again', async () => {
-    const { intents, fund, venue, store } = setup()
+  it('a funding failure never funds the quote again, and ends cancelled once the lockup stays empty', async () => {
+    let now = NOW
+    const getVtxos = vi.fn(async () => ({ vtxos: [] as unknown[] }))
+    const { intents, fund, venue, store } = setup({ now: () => now, wallet: { indexerProvider: { getVtxos } } })
     fund.mockRejectedValueOnce(new Error('insufficient funds'))
     const q = await intents.quoteSend(INV_5000)
     await expect(intents.executeSend(q.id)).rejects.toThrow('insufficient funds')
@@ -214,6 +219,63 @@ describe('Ark -> Lightning (two-step send)', () => {
     await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_USED' })
     await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ code: 'INVOICE_IN_PROGRESS' })
     expect(fund).toHaveBeenCalledTimes(1)
+
+    // An empty lockup inside the grace window may still be the indexer lagging.
+    now = q.validUntil + UNKNOWN_LOCKUP_GRACE_SECONDS - 1
+    await intents.reconcile()
+    expect(getVtxos).toHaveBeenCalledWith({ scripts: [LOCKUP_SCRIPT] })
+    expect((await intents.getSwap(q.id))?.status).toBe('pending')
+
+    // Past it, the funding never landed: the swap ends and the invoice is free.
+    now = q.validUntil + UNKNOWN_LOCKUP_GRACE_SECONDS
+    await intents.reconcile()
+    expect(await store.getFundingMarker(q.id)).toBeUndefined()
+    expect(await intents.getSwap(q.id)).toMatchObject({ status: 'cancelled', phase: 'cancelled' })
+    await expect(intents.quoteSend(INV_5000)).rejects.toMatchObject({ kind: 'already_quoted' })
+    expect(fund).toHaveBeenCalledTimes(1)
+  })
+
+  it('a funding call that threw after the lockup landed becomes a refundable funded swap', async () => {
+    const getVtxos = vi.fn(async () => ({ vtxos: [{ txid: 'lockup-tx', vout: 0 }] }))
+    const { intents, fund, venue, store } = setup({ wallet: { indexerProvider: { getVtxos } } })
+    fund.mockRejectedValueOnce(new Error('timeout'))
+    const q = await intents.quoteSend(INV_5000)
+    await expect(intents.executeSend(q.id)).rejects.toThrow('timeout')
+    // The venue gave up on it (e.g. a lagging indexer) before the lockup showed.
+    await venue.resolve(q.id, 'cancelled')
+    await intents.reconcile()
+    expect(await store.get(q.id)).toMatchObject({ phase: 'funded' })
+    expect(await intents.refundSend(q.id)).toMatchObject({ status: 'refunded' })
+    expect(venue.refundSend).toHaveBeenCalledWith(q.id)
+  })
+
+  it('an unreadable lockup leaves the marker for the next pass', async () => {
+    let now = NOW
+    const { intents, fund, store } = setup({ now: () => now })
+    fund.mockRejectedValueOnce(new Error('insufficient funds'))
+    const q = await intents.quoteSend(INV_5000)
+    await expect(intents.executeSend(q.id)).rejects.toThrow()
+    now = NOW + 3600
+    // No indexer on the wallet.
+    await intents.reconcile()
+    expect(await store.getFundingMarker(q.id)).toBeDefined()
+    expect(await store.get(q.id)).toMatchObject({ phase: 'prepared' })
+  })
+
+  it('drops the funding markers of swaps that ended', async () => {
+    const { intents, venue, store } = setup()
+    const a = await intents.quoteSend(INV_5000)
+    await intents.executeSend(a.id)
+    const b = await intents.quoteSend(INV_1000, { maxFeeSats: 100 })
+    await intents.executeSend(b.id)
+    await intents.refundSend(b.id)
+    // A refunded invoice is no longer in progress, even before the marker is pruned.
+    await expect(intents.quoteSend(INV_1000)).rejects.toMatchObject({ kind: 'already_quoted' })
+    await venue.resolve(a.id, 'settled')
+    await intents.reconcile()
+    expect(await store.listFundingMarkers()).toEqual(new Map())
+    expect((await intents.getSwap(a.id))?.status).toBe('settled')
+    expect((await intents.getSwap(b.id))?.status).toBe('refunded')
   })
 
   it('stays pending when funded but the hand-off fails', async () => {
@@ -272,6 +334,63 @@ describe('funding safety', () => {
     expect(results.map((r) => r.fundingTxid)).toEqual(['fund-txid', 'fund-txid', 'fund-txid'])
     expect(fund).toHaveBeenCalledTimes(1)
     await expect(intents.executeSend(q.id)).rejects.toMatchObject({ code: 'QUOTE_USED' })
+  })
+
+  it('two contexts sharing storage fund once under the Web Locks API', async () => {
+    // Each context loads its own copy of the engine, so no module state is shared;
+    // only the storage and the origin-wide lock manager are.
+    const held = new Map<string, Promise<unknown>>()
+    const locks = {
+      request: async (name: string, fn: () => Promise<unknown>) => {
+        while (held.has(name)) await held.get(name)!.catch(() => {})
+        const run = fn()
+        held.set(name, run)
+        try {
+          return await run
+        } finally {
+          held.delete(name)
+        }
+      },
+    }
+    vi.stubGlobal('navigator', { locks })
+    const storage = memoryStorage()
+    let release!: () => void
+    const fund = vi.fn(() => new Promise<string>((done) => (release = () => done('fund-txid'))))
+    const context = async () => {
+      vi.resetModules()
+      const lightning = await import('../src/lib/arkade-intents-lightning')
+      const { ArkadeIntentsStore: Store } = await import('../src/swap/arkade-intents-store')
+      const { arkadeIntentsClientManager: manager } = await import('../src/lib/arkade-intents-client-manager')
+      const store = new Store(storage, { network: 'mutinynet', walletId: 'aa'.repeat(32) })
+      const venue = fakeVenue(store)
+      vi.spyOn(manager, 'isInitialized').mockReturnValue(true)
+      vi.spyOn(manager, 'getVenue').mockReturnValue(venue as never)
+      const intents = new lightning.ArkadeIntentsLightning({
+        config: { solverUrl: 'https://solver.test/v2', fetch: (async () => new Response('', { status: 404 })) as never },
+        getWallet: () => ({}),
+        fund,
+        getNetwork: async () => 'mutinynet',
+        arkServerUrl: '',
+        now: () => NOW,
+        store,
+      })
+      return { intents, lightning }
+    }
+    try {
+      const popup = await context()
+      const worker = await context()
+      expect(popup.lightning).not.toBe(worker.lightning)
+      const q = await popup.intents.quoteSend(INV_5000)
+      const attempts = Promise.allSettled([popup.intents.executeSend(q.id), worker.intents.executeSend(q.id)])
+      await vi.waitFor(() => expect(fund).toHaveBeenCalledTimes(1))
+      release()
+      const [first, second] = await attempts
+      expect(first).toMatchObject({ status: 'fulfilled', value: { status: 'pending', fundingTxid: 'fund-txid' } })
+      expect(second).toMatchObject({ status: 'rejected', reason: { code: 'QUOTE_USED' } })
+      expect(fund).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 
   it('a funding marker persisted by another process blocks funding', async () => {

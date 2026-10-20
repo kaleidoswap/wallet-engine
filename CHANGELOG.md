@@ -21,10 +21,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   nothing (fund amount, solver fee, ceiling, `validUntil`, `refundLocktime`);
   `executeLightningSend(quoteId)` funds an approved quote and returns
   `pending`. Funding happens at most once per quote: concurrent calls join the
-  one in flight, and a funding marker (then the funding txid) is persisted
+  one in flight, and a funding marker (then the funding txid) is claimed
   before any value moves, so a retry, a second tab or a restart never funds the
-  same lockup twice. A funding call that throws may have broadcast, so its
-  quote is never funded again either; ask the payee for a new invoice. The
+  same lockup twice. Contexts sharing one storage (an extension popup and its
+  service worker) claim the marker under the Web Locks API; a host without it
+  and with more than one funding context must fund from one of them. A funding
+  call that throws may have broadcast, so its quote is never funded again
+  either: `reconcile` reads the lockup, moves the swap to `funded` (and so
+  refundable) when anything landed there, and ends it `cancelled` once the
+  lockup is still empty 15 minutes past `validUntil`
+  (`UNKNOWN_LOCKUP_GRACE_SECONDS`, the venue's own grace); ask the payee for a
+  new invoice. `reconcile` drops the marker of a swap that settled, refunded
+  or failed, and such an invoice no longer reads as in progress. The
   quote must have `FUNDING_MARGIN_SECONDS` (30 s) left, and the fee is
   re-checked against `fundAmountSats` (the caller's `maxFeeSats`, else the
   ceiling approved at quote time, else `intents.maxFeeBps`). When the hand-off
@@ -110,9 +118,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - Arkade Intents records are stored per wallet and Ark network
   (`arkade:intents:<network>:<walletId>:…`, the wallet id being the identity's
   x-only pubkey), so two wallets on one host never see or fund each other's
-  quotes. The first scoped store opened on a host copies the unscoped records
-  of earlier releases into its scope, keeps the unscoped keys, and never funds
-  a copied quote. `arkadeIntentsClientManager.initialize` takes an optional
+  quotes. Each scoped store copies, once, the unscoped records of earlier
+  releases that belong to its wallet (the identity key on the trader's leg of
+  the record's VHTLC) into its scope, keeps the unscoped keys, and never funds
+  a copied quote. A record no wallet on the host owns stays unscoped. `arkadeIntentsClientManager.initialize` takes an optional
   `network` for its default store (else it reads `arkProvider.getInfo()`).
 
 ### Removed

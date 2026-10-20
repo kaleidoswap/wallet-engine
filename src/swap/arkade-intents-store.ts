@@ -34,8 +34,6 @@ export interface ArkadeIntentsRecord {
 }
 
 const ROOT = 'arkade:intents:'
-/** Set once unscoped records from before per-wallet keys were copied into a scope. */
-const LEGACY_ADOPTED_KEY = ROOT + 'legacy-adopted'
 
 /** Which wallet on which Ark network a store belongs to. */
 export interface ArkadeIntentsStoreScope {
@@ -58,6 +56,47 @@ export interface ArkadeIntentsFundingMarker {
   error?: string
 }
 
+/**
+ * Runs `fn` while holding the lock `name`. Must exclude every context that
+ * shares the store's storage, not just this process.
+ */
+export type ArkadeIntentsFundingLock = <T>(name: string, fn: () => Promise<T>) => Promise<T>
+
+/**
+ * The Web Locks API, when the runtime has one. Its locks are per origin, so an
+ * extension's popup and its service worker exclude each other. Null elsewhere
+ * (React Native, older Node).
+ */
+export function webFundingLock(): ArkadeIntentsFundingLock | null {
+  const locks = (globalThis as { navigator?: { locks?: { request?: unknown } } }).navigator?.locks
+  if (!locks || typeof locks.request !== 'function') return null
+  const request = locks.request.bind(locks) as (name: string, fn: () => Promise<unknown>) => Promise<unknown>
+  return <T>(name: string, fn: () => Promise<T>) => request(name, fn) as Promise<T>
+}
+
+/** x-only form of a 32- or 33-byte hex pubkey, lowercased. */
+function xOnlyHex(key: unknown): string | undefined {
+  if (typeof key !== 'string') return undefined
+  const k = key.toLowerCase()
+  if (/^[0-9a-f]{64}$/.test(k)) return k
+  if (/^0[23][0-9a-f]{64}$/.test(k)) return k.slice(2)
+  return undefined
+}
+
+/**
+ * Whether `record` was quoted for the wallet with x-only key `walletId`: the
+ * venue puts the wallet's identity key on the trader's own leg of the VHTLC
+ * (the sender on a send, the receiver on a receive).
+ */
+export function recordBelongsTo(record: ArkadeIntentsRecord, walletId: string): boolean {
+  const id = walletId.toLowerCase()
+  const options = (record.scriptOptions ?? {}) as Record<string, unknown>
+  const own = record.route === 'lightning:BTC->arkade:BTC' ? options.receiverHex : options.senderHex
+  if (xOnlyHex(own) === id) return true
+  const descriptor = (record.secrets as { signingDescriptor?: unknown } | undefined)?.signingDescriptor
+  return typeof descriptor === 'string' && descriptor.toLowerCase().includes(id)
+}
+
 function scopeKey(scope: ArkadeIntentsStoreScope): string {
   if (!scope.network || !scope.walletId || /:/.test(scope.network + scope.walletId)) {
     throw new ProtocolError('Arkade Intents store scope needs a network and a wallet id', 'ARKADE', 'CONFIG')
@@ -76,16 +115,19 @@ export class ArkadeIntentsStore {
   private readonly swapPrefix: string
   private readonly hashPrefix: string
   private readonly fundingPrefix: string
+  /** Set once this scope has adopted its unscoped records. */
+  private readonly adoptedKey: string
 
   constructor(
     private storage: IStorageProvider,
-    scope?: ArkadeIntentsStoreScope,
+    private readonly scope?: ArkadeIntentsStoreScope,
   ) {
     const base = scope ? scopeKey(scope) : ROOT
     this.swapPrefix = base + 'swap:'
     /** BOLT11 payment hash -> rfq_id, so `getPaymentStatus(paymentHash)` finds the swap. */
     this.hashPrefix = base + 'ln:'
     this.fundingPrefix = base + 'funding:'
+    this.adoptedKey = base + 'legacy-adopted'
   }
 
   /**
@@ -116,7 +158,7 @@ export class ArkadeIntentsStore {
     return { network, walletId: Array.from(key, (b) => b.toString(16).padStart(2, '0')).join('') }
   }
 
-  /** A scoped platform store with the unscoped records adopted (once per host). */
+  /** A scoped platform store with this wallet's unscoped records adopted. */
   static async forWallet(wallet: unknown, network: string): Promise<ArkadeIntentsStore> {
     const store = ArkadeIntentsStore.fromPlatform(await ArkadeIntentsStore.scopeOf(wallet, network))
     await store.adoptLegacy()
@@ -124,28 +166,49 @@ export class ArkadeIntentsStore {
   }
 
   /**
-   * Copy records written under the unscoped keys into this scope, once per host,
-   * so a swap funded before the upgrade keeps its claim/refund path. The unscoped
-   * keys are left in place. Adopted records carry `legacyAdopted`; the engine
-   * never funds one, since it cannot tell which wallet quoted it.
+   * Copy the records this wallet owns from the unscoped keys into this scope,
+   * once per scope, so a swap funded before the upgrade keeps its claim/refund
+   * path. Ownership is read from the record's own VHTLC key
+   * (`recordBelongsTo`); a record no wallet on the host can claim stays
+   * unscoped. The unscoped keys are left in place. Adopted records carry
+   * `legacyAdopted`, and the engine never funds one.
+   *
+   * Also drops copies an earlier release adopted into this scope for another
+   * wallet, while their unscoped original is still there to adopt.
    */
   async adoptLegacy(): Promise<void> {
+    const scope = this.scope
+    if (!scope) return
+    if ((await this.storage.get(this.adoptedKey)) != null) return
     const legacy = new ArkadeIntentsStore(this.storage)
-    if (this.swapPrefix === legacy.swapPrefix) return
-    if ((await this.storage.get(LEGACY_ADOPTED_KEY)) != null) return
-    const adopted = new Set<string>()
-    for (const record of await legacy.list()) {
+    const legacyRecords = await legacy.list()
+    const owned = new Set<string>()
+    for (const record of legacyRecords) {
+      if (!recordBelongsTo(record, scope.walletId)) continue
       if (!(await this.get(record.id))) await this.put({ ...record, legacyAdopted: true })
-      adopted.add(record.id)
+      owned.add(record.id)
     }
-    for (const key of await this.storage.keys()) {
-      if (!key.startsWith(legacy.hashPrefix)) continue
-      const id = await this.storage.get(key)
-      if (id != null && adopted.has(id)) {
-        await this.storage.set(this.hashPrefix + key.slice(legacy.hashPrefix.length), id)
+    const foreign = new Set<string>()
+    for (const record of legacyRecords) {
+      if (owned.has(record.id)) continue
+      const copy = await this.get(record.id)
+      if (copy?.legacyAdopted && !recordBelongsTo(copy, scope.walletId)) {
+        await this.storage.remove(this.swapPrefix + record.id)
+        foreign.add(record.id)
       }
     }
-    await this.storage.set(LEGACY_ADOPTED_KEY, this.swapPrefix)
+    for (const key of await this.storage.keys()) {
+      if (key.startsWith(legacy.hashPrefix)) {
+        const id = await this.storage.get(key)
+        if (id != null && owned.has(id)) {
+          await this.storage.set(this.hashPrefix + key.slice(legacy.hashPrefix.length), id)
+        }
+      } else if (key.startsWith(this.hashPrefix)) {
+        const id = await this.storage.get(key)
+        if (id != null && foreign.has(id)) await this.storage.remove(key)
+      }
+    }
+    await this.storage.set(this.adoptedKey, String(owned.size))
   }
 
   async put(record: ArkadeIntentsRecord): Promise<void> {
@@ -186,6 +249,31 @@ export class ArkadeIntentsStore {
 
   async setFundingMarker(id: string, marker: ArkadeIntentsFundingMarker): Promise<void> {
     await this.storage.set(this.fundingPrefix + id, JSON.stringify(marker))
+  }
+
+  /**
+   * Write `marker` unless a funding marker for `id` already exists, under
+   * `lock` when one is given (default: the Web Locks API). Returns the
+   * existing marker when there was one, else undefined: the caller owns the
+   * funding. Without a lock the check and the write are two steps, so a host
+   * that funds from several contexts on one storage must provide one.
+   */
+  async claimFundingMarker(
+    id: string,
+    marker: ArkadeIntentsFundingMarker,
+    lock: ArkadeIntentsFundingLock | null = webFundingLock(),
+  ): Promise<ArkadeIntentsFundingMarker | undefined> {
+    const claim = async () => {
+      const existing = await this.getFundingMarker(id)
+      if (existing) return existing
+      await this.setFundingMarker(id, marker)
+      return undefined
+    }
+    return lock ? lock(this.fundingPrefix + id, claim) : claim()
+  }
+
+  async removeFundingMarker(id: string): Promise<void> {
+    await this.storage.remove(this.fundingPrefix + id)
   }
 
   async getFundingMarker(id: string): Promise<ArkadeIntentsFundingMarker | undefined> {

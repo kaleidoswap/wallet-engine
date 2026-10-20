@@ -15,7 +15,12 @@
 import { arkadeIntentsClientManager, loadArkadeIntentsModule, type ArkadeIntentsVenueLike } from './arkade-intents-client-manager'
 import { decodeBolt11Invoice, type Bolt11Hrp } from './bolt11'
 import { log } from './log'
-import { ArkadeIntentsStore, type ArkadeIntentsFundingMarker, type ArkadeIntentsRecord } from '../swap/arkade-intents-store'
+import {
+  ArkadeIntentsStore,
+  type ArkadeIntentsFundingLock,
+  type ArkadeIntentsFundingMarker,
+  type ArkadeIntentsRecord,
+} from '../swap/arkade-intents-store'
 import { ErrorCode, ProtocolError } from '../types/base'
 
 /** Host settings for the Intents corridor. Pass `{}` to take every default. */
@@ -71,6 +76,16 @@ const SEND_ROUTE = 'arkade:BTC->lightning:BTC'
  * funding lands (and the solver sees it) before `valid_until`.
  */
 export const FUNDING_MARGIN_SECONDS = 30
+
+/**
+ * How long a lockup may stay invisible to the indexer past `valid_until`
+ * before it counts as never funded. Mirrors `DEFAULT_UNKNOWN_LOCKUP_GRACE_SECONDS`
+ * in `@kaleidorg/swap-sdk/arkade` (15 min).
+ */
+export const UNKNOWN_LOCKUP_GRACE_SECONDS = 15 * 60
+
+/** Venue phases a send never leaves: its funding marker has nothing left to guard. */
+const TERMINAL_PHASES = new Set(['settled', 'refunded', 'failed'])
 
 /** Sends being funded in this process, by rfq_id: a second call joins the first. */
 const sendsInFlight = new Map<string, Promise<ArkadeLightningSwap>>()
@@ -267,6 +282,16 @@ export interface ArkadeIntentsLightningDeps {
   now?: () => number
   /** Override the platform-backed store (tests). */
   store?: ArkadeIntentsStore
+  /**
+   * Cross-context lock for claiming a quote before funding it. Defaults to the
+   * Web Locks API; without either, only calls in this process are serialized.
+   */
+  fundingLock?: ArkadeIntentsFundingLock
+  /**
+   * Whether anything ever landed at a lockup script (hex). Defaults to the
+   * wallet's indexer, the same read the venue uses.
+   */
+  lockupFunded?: (swapPkScriptHex: string) => Promise<boolean>
 }
 
 export class ArkadeIntentsLightning {
@@ -601,7 +626,7 @@ export class ArkadeIntentsLightning {
         'SELF_PAYMENT',
       )
     }
-    if (record.phase !== 'settled' && (await store.getFundingMarker(record.id))) {
+    if (!TERMINAL_PHASES.has(record.phase) && (await store.getFundingMarker(record.id))) {
       throw new ProtocolError(
         `A payment of this invoice is already in progress (swap ${record.id}); it was not paid twice`,
         'ARKADE',
@@ -665,8 +690,11 @@ export class ArkadeIntentsLightning {
    * `reconcile` moves the swap to settled / refunded / failed.
    *
    * Funds at most once per quote: a concurrent call joins the one in flight,
-   * and a funding marker is persisted before any value moves, so a retry, a
-   * second tab or a restart never funds the same lockup twice. The fee is
+   * and a funding marker is claimed before any value moves, so a retry, a
+   * second tab or a restart never funds the same lockup twice. Across contexts
+   * sharing one storage (an extension popup and its service worker) the claim
+   * is atomic only under `fundingLock` or the Web Locks API; a host with
+   * neither must fund from a single context. The fee is
    * re-checked against `fundAmountSats` (`maxFeeSats`, else the ceiling
    * approved at quote time, else `intents.maxFeeBps`).
    */
@@ -686,13 +714,9 @@ export class ArkadeIntentsLightning {
       throw new ProtocolError(`No Arkade Intents send quote ${id}`, 'ARKADE', 'QUOTE_NOT_FOUND')
     }
     const marker = await store.getFundingMarker(id)
-    if (marker?.fundingTxid && record.phase === 'prepared') {
-      // Funded earlier, but the hand-off to the venue was lost: finish it.
-      return this.handOff(venue, store, record, marker.fundingTxid)
-    }
-    if (marker || record.phase !== 'prepared') {
-      const state = marker && record.phase === 'prepared' ? 'already being funded, or its funding failed midway' : `already ${record.phase}`
-      throw new ProtocolError(`Arkade Intents swap ${id} is ${state}; it is not funded again`, 'ARKADE', 'QUOTE_USED')
+    if (marker) return this.alreadyClaimed(venue, store, record, marker)
+    if (record.phase !== 'prepared') {
+      throw new ProtocolError(`Arkade Intents swap ${id} is already ${record.phase}; it is not funded again`, 'ARKADE', 'QUOTE_USED')
     }
     if (record.legacyAdopted) {
       throw new ProtocolError('This quote predates per-wallet swap records; request a new one', 'ARKADE', 'QUOTE_EXPIRED')
@@ -723,7 +747,8 @@ export class ArkadeIntentsLightning {
     }
     const startedAt = this.now()
     // Persisted before anything moves: from here on this quote counts as funded.
-    await store.setFundingMarker(id, { startedAt })
+    const claimed = await store.claimFundingMarker(id, { startedAt }, this.deps.fundingLock)
+    if (claimed) return this.alreadyClaimed(venue, store, record, claimed)
     let fundingTxid: string
     try {
       fundingTxid = await this.deps.fund(address, amount)
@@ -741,6 +766,21 @@ export class ArkadeIntentsLightning {
       log.error(`[ArkadeIntents] Could not persist funding txid ${fundingTxid} for ${id}:`, error)
     }
     return this.handOff(venue, store, record, fundingTxid)
+  }
+
+  /** `executeSend` on a quote that already has a funding marker. */
+  private async alreadyClaimed(
+    venue: ArkadeIntentsVenueLike,
+    store: ArkadeIntentsStore,
+    record: ArkadeIntentsRecord,
+    marker: ArkadeIntentsFundingMarker,
+  ): Promise<ArkadeLightningSwap> {
+    if (marker.fundingTxid && record.phase === 'prepared') {
+      // Funded earlier, but the hand-off to the venue was lost: finish it.
+      return this.handOff(venue, store, record, marker.fundingTxid)
+    }
+    const state = record.phase === 'prepared' ? 'already being funded, or its funding failed midway' : `already ${record.phase}`
+    throw new ProtocolError(`Arkade Intents swap ${record.id} is ${state}; it is not funded again`, 'ARKADE', 'QUOTE_USED')
   }
 
   private async markFundingError(store: ArkadeIntentsStore, id: string, marker: ArkadeIntentsFundingMarker): Promise<void> {
@@ -862,25 +902,72 @@ export class ArkadeIntentsLightning {
   /** One pass over pending swaps: claims receives, settles/refunds sends. */
   async reconcile(): Promise<ArkadeLightningReconcileReport | null> {
     if (!arkadeIntentsClientManager.isInitialized()) return null
-    await this.healFundedSends().catch((error: unknown) => log.warn('[ArkadeIntents] Funding marker pass failed:', error))
+    await this.healFundingMarkers().catch((error: unknown) => log.warn('[ArkadeIntents] Funding marker pass failed:', error))
     const report = await arkadeIntentsClientManager.getVenue().reconcile()
     return { ...report, failed: report.failed ?? [] }
   }
 
   /**
-   * Sends this engine funded whose venue record still reads `prepared` or
-   * `cancelled` (the hand-off was lost, or the venue gave up on a lagging
-   * indexer): move them to `funded` with their txid so the venue tracks them.
+   * One pass over this engine's funding markers:
+   * - a send whose venue record reached a terminal phase drops its marker;
+   * - a marked send whose record still reads `prepared` or `cancelled` (the
+   *   hand-off was lost, or the venue gave up on a lagging indexer) moves to
+   *   `funded` with its txid, so the venue tracks it;
+   * - a marker without a txid (the funding call threw) is settled against the
+   *   lockup itself: anything there moves the record to `funded`, so it can be
+   *   refunded; still empty `UNKNOWN_LOCKUP_GRACE_SECONDS` past `valid_until`,
+   *   the record ends `cancelled` and the marker is dropped, freeing the
+   *   invoice.
    */
-  private async healFundedSends(): Promise<void> {
+  private async healFundingMarkers(): Promise<void> {
     const store = await this.store()
     for (const [id, marker] of await store.listFundingMarkers()) {
-      if (!marker.fundingTxid) continue
-      const record = await store.get(id)
-      if (!record || (record.phase !== 'prepared' && record.phase !== 'cancelled')) continue
-      log.warn(`[ArkadeIntents] Swap ${id} was funded (${marker.fundingTxid}) but reads ${record.phase}; tracking it as funded`)
-      await store.put({ ...record, phase: 'funded', fundingTxid: marker.fundingTxid })
+      if (sendsInFlight.has(id)) continue
+      try {
+        const record = await store.get(id)
+        if (!record) continue
+        if (TERMINAL_PHASES.has(record.phase)) {
+          await store.removeFundingMarker(id)
+        } else if (record.phase === 'prepared' || record.phase === 'cancelled') {
+          if (marker.fundingTxid) {
+            log.warn(`[ArkadeIntents] Swap ${id} was funded (${marker.fundingTxid}) but reads ${record.phase}; tracking it as funded`)
+            await store.put({ ...record, phase: 'funded', fundingTxid: marker.fundingTxid })
+          } else {
+            await this.settleUnconfirmedFunding(store, record, marker)
+          }
+        }
+      } catch (error) {
+        log.warn(`[ArkadeIntents] Funding marker for ${id} not settled this pass:`, error)
+      }
     }
+  }
+
+  private async settleUnconfirmedFunding(
+    store: ArkadeIntentsStore,
+    record: ArkadeIntentsRecord,
+    marker: ArkadeIntentsFundingMarker,
+  ): Promise<void> {
+    if (await this.lockupFunded(record)) {
+      log.warn(`[ArkadeIntents] Swap ${record.id}: the funding call failed but its lockup is funded; tracking it as funded`)
+      await store.put({ ...record, phase: 'funded' })
+      return
+    }
+    const validUntil = num(((record.quote ?? {}) as Record<string, unknown>).valid_until) ?? marker.startedAt
+    if (this.now() < validUntil + UNKNOWN_LOCKUP_GRACE_SECONDS) return
+    log.info(`[ArkadeIntents] Swap ${record.id}: lockup still empty past its window; the funding never landed`)
+    if (record.phase !== 'cancelled') await store.put({ ...record, phase: 'cancelled' })
+    await store.removeFundingMarker(record.id)
+  }
+
+  private async lockupFunded(record: ArkadeIntentsRecord): Promise<boolean> {
+    const script = typeof record.swapPkScriptHex === 'string' ? record.swapPkScriptHex : ''
+    if (!script) throw new ProtocolError(`Arkade Intents record ${record.id} has no lockup script`, 'ARKADE', 'INVALID_QUOTE')
+    if (this.deps.lockupFunded) return this.deps.lockupFunded(script)
+    const indexer = (this.deps.getWallet() as { indexerProvider?: { getVtxos?: (opts: { scripts: string[] }) => Promise<{ vtxos?: unknown[] }> } } | null)
+      ?.indexerProvider
+    if (!indexer?.getVtxos) throw new ProtocolError('The Arkade wallet exposes no indexer to read the lockup', 'ARKADE', ErrorCode.NOT_CONFIGURED)
+    const { vtxos } = await indexer.getVtxos({ scripts: [script] })
+    return (vtxos ?? []).length > 0
   }
 
   /**
