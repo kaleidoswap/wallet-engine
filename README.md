@@ -11,6 +11,9 @@ parts — routing, unified receive, swaps, lite/advanced UX — as reusable prim
 It powers KaleidoSwap's apps (`rate` mobile wallet, the browser extension, the desktop
 agent).
 
+- **Product page:** [kaleidoswap.com/products/sdk](https://kaleidoswap.com/products/sdk)
+- **Docs:** [Wallet Engine on docs.kaleidoswap.com](https://docs.kaleidoswap.com/wallet-engine/introduction)
+
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  your app   (rate · extension · desktop)                      │
@@ -76,11 +79,12 @@ read it at runtime, don't hardcode it.
 | Protocol | Maturity | Layers | Assets | Swaps | Notable quirks | Backing module |
 |---|:---:|---|---|:---:|---|---|
 | **BTC**    | `stable` | on-chain | — | — | base on-chain only | (native) |
-| **SPARK**  | `beta` | Spark, LN, on-chain | Spark tokens | — | zero-fee, static receive addr | `@tetherto/wdk-wallet-spark` |
+| **SPARK**  | `beta` | Spark, LN, on-chain | Spark tokens | — | zero-fee; on-chain BTC received on the reusable static deposit address (unconfirmed deposits stay awaiting); sends to Bitcoin addresses via cooperative exit | `@tetherto/wdk-wallet-spark` |
 | **RGB-LN** | `beta` | RGB-L1, RGB-LN, BTC-L1, BTC-LN | RGB (USDT, XAUT) | ✅ | needs channel liquidity (LSPS1) | `@kaleidorg/wdk-wallet-rln` |
 | **RGB-L1** | `beta` | RGB-L1, BTC-L1 | RGB (USDT, XAUT) | — | on-chain only (no LN/channels), local rgb-lib | `@utexo/wdk-wallet-rgb` |
 | **LIQUID** | `beta` | Liquid, Liquid assets | USDt (lite "USD") | — | own L1, no LN | `@kaleidorg/wdk-wallet-liquid` |
 | **ARKADE** | `beta` | Arkade, LN | Arkade assets | — | boarding addr, static receive | `@arkade-os/wdk` |
+| **BARK**   | `beta` | Ark, LN, on-chain | — | — | boarding; React Native adapter also pays BOLT12 offers (`lno1…`) | `@secondts/bark` / `@secondts/bark-react-native` |
 
 Each protocol is described once in [`src/capabilities/index.ts`](src/capabilities/index.ts).
 The router and UI read that manifest — they never special-case a protocol by name.
@@ -111,6 +115,7 @@ actually load that adapter's subpath.
 | `…/adapters/wdk/wasm-rgb` | `@utexo/rgb-lib-wasm` |
 | `…/adapters/wdk` (Arkade) | `@arkade-os/wdk` |
 | `…/swap` | `@kaleidorg/wdk-protocol-swap-kaleidoswap` |
+| `…/swap` (`BoltzChainSwap`, Arkade intents) | `@kaleidorg/swap-sdk` (`^0.1.1 \|\| ^0.3.0 \|\| ^0.7.0 \|\| ^0.10.0`) |
 | `…/format` | `kaleido-sdk` |
 | legacy `…/adapters/spark` \| `/arkade` \| `/rgb` \| `/flashnet` | `@buildonspark/spark-sdk` \| `@arkade-os/sdk` (+`@arkade-os/boltz-swap`) \| `kaleido-sdk` \| `@flashnet/sdk` |
 
@@ -274,6 +279,15 @@ const result = await swap.executeSwap({
 const status = await swap.getSwapStatus(result.swapId) // pending → confirmed/failed
 ```
 
+### `@kaleidorg/swap-sdk` versions
+
+BTC ↔ L-BTC chain swaps (`BoltzChainSwap`) run on `@kaleidorg/swap-sdk` **0.7.x or
+0.10.x** (peer range `^0.1.1 || ^0.3.0 || ^0.7.0 || ^0.10.0`). 0.9.0 renamed
+`BoltzClient` → `SwapClient` and `boltzBaseUrl` → `makerBaseUrl`; the engine detects
+which one the loaded SDK exports, so hosts on 0.7.x need no changes. If you also use
+`@kaleidorg/swap-sdk/arkade` on 0.10, install `@arkade-os/sdk >=0.4.74` and
+`@arkade-os/swap ^0.0.20` (that SDK's own peer ranges).
+
 ---
 
 ## Extending: add a protocol
@@ -375,6 +389,12 @@ Supported operations:
   network and server before payment. BOLT11 and Bitcoin destinations include
   BARK in router candidates. Ark and Arkade share address prefixes, so direct
   Ark sends must select the account explicitly; a prefix cannot select a server.
+- **BOLT12 offers:** `sendPayment` routes `lno1…` offers to the SDK's
+  `payLightningOffer` and waits for the outcome (the payment hash is only known
+  once the offer's invoice is paid). A fixed-amount offer is paid at its own
+  amount; the fee is recovered from history. The capability manifest still
+  reports `supportsBolt12: false` for `BARK`, since the browser adapter has no
+  offer flow.
 - **Boarding:** `bark.backend.getOnchainAddress()` supplies a BDK funding address.
   Fund it explicitly, call `syncOnchain()`, then `bark.boardAmount(sats)` or
   `boardAll()`. `boardingTerms()` and `pendingBoards()` expose server terms and
