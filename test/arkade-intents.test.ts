@@ -112,26 +112,77 @@ describe('ArkadeIntentsStore scoping', () => {
     expect(() => new ArkadeIntentsStore(new MemoryStorage(), { network: 'mutinynet', walletId: '' })).toThrow()
   })
 
-  it('scopes by the wallet identity and adopts unscoped records once', async () => {
+  const owned = (id: string, owner: 'sender' | 'receiver', key: string) => ({
+    ...record(id, 'funded'),
+    ...(owner === 'receiver' ? { route: 'lightning:BTC->arkade:BTC' } : {}),
+    scriptOptions: { refundLocktime: '1800003600', [`${owner}Hex`]: key, [`${owner === 'sender' ? 'receiver' : 'sender'}Hex`]: 'cc'.repeat(32) },
+  })
+
+  it('two wallets on one host each adopt only their own unscoped records', async () => {
     const storage = new MemoryStorage()
     const legacy = new ArkadeIntentsStore(storage)
-    await legacy.put(record('rfq-old', 'funded'))
-    await legacy.linkPaymentHash('cd34', 'rfq-old')
+    await legacy.put(owned('rfq-a', 'sender', 'aa'.repeat(32)))
+    await legacy.linkPaymentHash('aa11', 'rfq-a')
+    // A receive, its key in compressed form.
+    await legacy.put(owned('rfq-b', 'receiver', '02' + 'bb'.repeat(32)))
+    await legacy.linkPaymentHash('bb22', 'rfq-b')
+    // No key either wallet holds.
+    await legacy.put(record('rfq-x', 'funded'))
     const previous = getPlatform()
     setPlatform({ storage } as never)
     try {
       const a = await ArkadeIntentsStore.forWallet(walletOf(0xaa), 'mutinynet')
-      expect(await a.get('rfq-old')).toMatchObject({ phase: 'funded', legacyAdopted: true })
-      expect(await a.idForPaymentHash('cd34')).toBe('rfq-old')
-      expect(await new ArkadeIntentsStore(storage, scopeA).get('rfq-old')).toBeDefined()
-      // Adopted once per host; the unscoped keys stay where they were.
+      expect((await a.list()).map((r) => r.id)).toEqual(['rfq-a'])
+      expect(await a.get('rfq-a')).toMatchObject({ phase: 'funded', legacyAdopted: true })
+      expect(await a.idForPaymentHash('aa11')).toBe('rfq-a')
+      expect(await a.idForPaymentHash('bb22')).toBeUndefined()
+      // The second wallet to open still gets its own records.
       const b = await ArkadeIntentsStore.forWallet(walletOf(0xbb), 'mutinynet')
-      expect(await b.list()).toEqual([])
-      expect(await legacy.get('rfq-old')).toBeDefined()
+      expect((await b.list()).map((r) => r.id)).toEqual(['rfq-b'])
+      expect(await b.idForPaymentHash('bb22')).toBe('rfq-b')
+      // Once per scope: a record written to the unscoped keys later is not picked up.
+      await legacy.put(owned('rfq-a2', 'sender', 'aa'.repeat(32)))
+      expect(await (await ArkadeIntentsStore.forWallet(walletOf(0xaa), 'mutinynet')).get('rfq-a2')).toBeUndefined()
+      // The unscoped keys stay where they were.
+      expect((await legacy.list()).map((r) => r.id).sort()).toEqual(['rfq-a', 'rfq-a2', 'rfq-b', 'rfq-x'])
       await expect(ArkadeIntentsStore.forWallet({}, 'mutinynet')).rejects.toMatchObject({ code: 'CONFIG' })
     } finally {
       if (previous) setPlatform(previous)
     }
+  })
+
+  it("drops another wallet's record adopted by an earlier release, so its owner can adopt it", async () => {
+    const storage = new MemoryStorage()
+    const legacy = new ArkadeIntentsStore(storage)
+    const theirs = owned('rfq-b', 'sender', 'bb'.repeat(32))
+    await legacy.put(theirs)
+    await legacy.linkPaymentHash('bb22', 'rfq-b')
+    // What the host-wide adoption left behind: B's record copied into A's scope.
+    const a = new ArkadeIntentsStore(storage, scopeA)
+    await a.put({ ...theirs, legacyAdopted: true })
+    await a.linkPaymentHash('bb22', 'rfq-b')
+    await storage.set('arkade:intents:legacy-adopted', 'arkade:intents:mutinynet:' + 'aa'.repeat(32) + ':swap:')
+    await a.adoptLegacy()
+    expect(await a.get('rfq-b')).toBeUndefined()
+    expect(await a.idForPaymentHash('bb22')).toBeUndefined()
+    const b = new ArkadeIntentsStore(storage, { ...scopeA, walletId: 'bb'.repeat(32) })
+    await b.adoptLegacy()
+    expect(await b.get('rfq-b')).toMatchObject({ legacyAdopted: true })
+  })
+
+  it('claims a funding marker only when none exists, under the given lock', async () => {
+    const store = new ArkadeIntentsStore(new MemoryStorage(), scopeA)
+    const names: string[] = []
+    const lock = async <T,>(name: string, fn: () => Promise<T>) => {
+      names.push(name)
+      return fn()
+    }
+    expect(await store.claimFundingMarker('rfq-1', { startedAt: 1 }, lock)).toBeUndefined()
+    expect(await store.claimFundingMarker('rfq-1', { startedAt: 2 }, lock)).toEqual({ startedAt: 1 })
+    expect(await store.getFundingMarker('rfq-1')).toEqual({ startedAt: 1 })
+    expect(names).toEqual([`arkade:intents:mutinynet:${'aa'.repeat(32)}:funding:rfq-1`, `arkade:intents:mutinynet:${'aa'.repeat(32)}:funding:rfq-1`])
+    await store.removeFundingMarker('rfq-1')
+    expect(await store.listFundingMarkers()).toEqual(new Map())
   })
 })
 
