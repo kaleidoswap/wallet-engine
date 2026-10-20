@@ -79,7 +79,7 @@ export type { IStorageProvider, IRuntimeProvider, PlatformContext, Logger } from
 export { setPlatform, getPlatform, getLogger, consoleLogger } from './ports'
 
 // Shared constants
-export { LIQUID_USDT_ASSET_ID } from './constants'
+export { LIQUID_USDT_ASSET_ID, LIQUID_TESTNET_USDT_ASSET_ID } from './constants'
 
 // Adapters are deliberately NOT exported here — they pull heavy SDK/WDK weight an
 // extension host does not want. Import them from the opt-in sub-paths:

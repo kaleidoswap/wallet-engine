@@ -7,6 +7,11 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+- Liquid Testnet USDt (`LIQUID_TESTNET_USDT_ASSET_ID`) is now a known asset: `listAssets`
+  and `getAssetBalance` report ticker `USDt`, name `Tether USD` and precision 8
+  instead of a truncated-id ticker and default metadata.
+
 ## [1.0.0-beta.77] - 2026-10-20
 
 ### Added

@@ -38,8 +38,8 @@ import { BaseWdkAdapter } from './BaseWdkAdapter'
 
 // Re-exported from the neutral constants module so core (disclosure) never has
 // to import this adapter to reach the asset id.
-export { LIQUID_USDT_ASSET_ID } from '../../constants'
-import { LIQUID_USDT_ASSET_ID } from '../../constants'
+export { LIQUID_USDT_ASSET_ID, LIQUID_TESTNET_USDT_ASSET_ID } from '../../constants'
+import { LIQUID_USDT_ASSET_ID, LIQUID_TESTNET_USDT_ASSET_ID } from '../../constants'
 import { formatAmount } from '../../lib/amount'
 import type {
   LiquidPsetReview,
@@ -135,6 +135,7 @@ const LIQUID_NETWORK_MAP: Record<string, LiquidNetwork> = {
 /** Known asset metadata for nicer display; unknown assets fall back to their id. */
 const KNOWN_ASSETS: Record<string, { ticker: string; name: string; precision: number }> = {
   [LIQUID_USDT_ASSET_ID]: { ticker: 'USDt', name: 'Tether USD', precision: 8 },
+  [LIQUID_TESTNET_USDT_ASSET_ID]: { ticker: 'USDt', name: 'Tether USD', precision: 8 },
 }
 
 export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {

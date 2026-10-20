@@ -12,6 +12,7 @@ export {
   type LiquidSecretsStore,
   type LiquidOutputSecretsRecord,
   LIQUID_USDT_ASSET_ID,
+  LIQUID_TESTNET_USDT_ASSET_ID,
 } from './LiquidWdkAdapter'
 export { RlnWdkAdapter, type RlnAdapterConfig } from './RlnWdkAdapter'
 export { RgbLibWdkAdapter, type RgbLibAdapterConfig } from './RgbLibWdkAdapter'

@@ -9,7 +9,7 @@ import type {
   LiquidOutputSecretsRecord as PublicLiquidOutputSecretsRecord,
 } from '../src/adapters/wdk'
 import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
-import { LIQUID_USDT_ASSET_ID } from '../src/constants'
+import { LIQUID_USDT_ASSET_ID, LIQUID_TESTNET_USDT_ASSET_ID } from '../src/constants'
 
 /**
  * Fast unit tests for the Liquid (lwk) backing. They inject a fake `account` +
@@ -158,6 +158,21 @@ describe('LiquidWdkAdapter', () => {
     const unknown = assets.find((a) => a.id.startsWith('deadbeef'))!
     expect(unknown.ticker).toBe('deadbe') // first 6 chars of the id
     expect(unknown.balance.total).toBe(9)
+  })
+
+  it('labels the Liquid Testnet USDt asset with known metadata', async () => {
+    const adapter = connected({
+      getNetworkInfo: async () => ({ ...netInfo, network: 'liquidtestnet' }),
+      getBalance: async () => 0n,
+      listAssets: async () => [{ asset_id: LIQUID_TESTNET_USDT_ASSET_ID, balance: '123456789' }],
+      getTokenBalance: async () => 123456789n,
+    })
+    const usdt = (await adapter.listAssets()).find((a) => a.id === LIQUID_TESTNET_USDT_ASSET_ID)!
+    expect(usdt).toMatchObject({ ticker: 'USDt', name: 'Tether USD', precision: 8, layer: 'LIQUID_ASSET' })
+    expect(usdt.balance.totalDisplay).toBe('1.23456789')
+
+    const balance = await adapter.getAssetBalance(LIQUID_TESTNET_USDT_ASSET_ID)
+    expect(balance).toMatchObject({ total: 123456789, totalDisplay: '1.23456789' })
   })
 
   it('reads the L-BTC balance as confirmed sats', async () => {
