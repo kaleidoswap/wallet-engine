@@ -11,9 +11,6 @@ parts — routing, unified receive, swaps, lite/advanced UX — as reusable prim
 It powers KaleidoSwap's apps (`rate` mobile wallet, the browser extension, the desktop
 agent).
 
-- **Product page:** [kaleidoswap.com/products/sdk](https://kaleidoswap.com/products/sdk)
-- **Docs:** [Wallet Engine on docs.kaleidoswap.com](https://docs.kaleidoswap.com/wallet-engine/introduction)
-
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  your app   (rate · extension · desktop)                      │
@@ -446,3 +443,9 @@ Native fallback adapters remain available alongside the WDK-backed ones.
 ## License
 
 [MIT](LICENSE)
+
+---
+
+To learn more, check:
+- **Product page:** [kaleidoswap.com/products/sdk](https://kaleidoswap.com/products/sdk)
+- **Docs:** [Wallet Engine on docs.kaleidoswap.com](https://docs.kaleidoswap.com/wallet-engine/introduction)
