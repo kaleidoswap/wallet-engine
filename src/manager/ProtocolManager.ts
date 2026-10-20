@@ -452,7 +452,8 @@ export class ProtocolManager {
    * amount (so any cap denies it) rather than an amount read off its prefix.
    */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
-    const invoice = (request.invoice ?? '').trim()
+    // Adapters strip a `lightning:` URI scheme before paying, so the cap must too.
+    const invoice = (request.invoice ?? '').trim().replace(/^lightning:/i, '')
     if (isBolt11(invoice)) {
       let amountMsat: string | undefined
       try {

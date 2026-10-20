@@ -43,6 +43,15 @@ describe('F-F1: the spend cap must see the amount that will actually be paid', (
     expect(paid, 'the payment must never reach the adapter').toHaveLength(0)
   })
 
+  it('a lightning: URI prefix does not hide the invoice amount from the cap', async () => {
+    const { m, paid } = managerWith({ maxAmountSat: 1000 })
+    await expect(m.sendPayment({ invoice: `lightning:${BIG_INVOICE}`, amount: 1 } as any))
+      .rejects.toBeInstanceOf(PolicyError)
+    await expect(m.sendPayment({ invoice: `LIGHTNING:${BIG_INVOICE}`, amount: 1 } as any))
+      .rejects.toBeInstanceOf(PolicyError)
+    expect(paid).toHaveLength(0)
+  })
+
   it('the same invoice with no declared amount is still denied', async () => {
     const { m } = managerWith({ maxAmountSat: 1000 })
     await expect(m.sendPayment({ invoice: BIG_INVOICE } as any)).rejects.toBeInstanceOf(PolicyError)

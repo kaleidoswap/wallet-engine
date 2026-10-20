@@ -41,9 +41,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   (`NOT_CONNECTED`), since the network check uses the wallet's network rather
   than assuming mainnet. Uppercase spark-sdk network names are accepted, `local`
   is checked as regtest, and any other network fails with `UNKNOWN_NETWORK`.
+  Invoice networks follow spark-sdk: a signet wallet takes `lnsb` invoices and a
+  testnet wallet takes `lntb` and `lntbs`.
 - `ProtocolManager` reads the spend-cap amount from a checksum-verified BOLT11.
   An invoice that fails to decode has no known amount, so any cap denies it
-  (`AMOUNT_UNKNOWN`), and a sub-satoshi amount rounds up rather than down.
+  (`AMOUNT_UNKNOWN`), and a sub-satoshi amount rounds up rather than down. A
+  `lightning:` URI prefix no longer hides the invoice amount from the cap.
 
 ## [1.0.0-beta.77] - 2026-10-20
 

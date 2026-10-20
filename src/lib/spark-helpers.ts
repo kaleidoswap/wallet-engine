@@ -6,7 +6,7 @@
 import { bech32m } from '@scure/base'
 import type { DecodedInvoice, TransactionStatus } from '../types/base'
 import { ProtocolError } from '../types/base'
-import { validateBolt11Invoice, type Bolt11ValidationPolicy } from './bolt11'
+import { validateBolt11Invoice, type Bolt11Hrp } from './bolt11'
 import { roundedMsatToSat, toSafeAmountNumber } from '../lightning/amounts'
 import { LightningPaymentError } from '../lightning/errors'
 import { normalizeTxHash } from './spark-sent-token-records'
@@ -168,16 +168,17 @@ export function isSparkAddressSafe(
 }
 
 /**
- * BOLT11 network a Spark wallet on `network` can pay. Spark regtest and local
- * wallets settle over `lnbcrt`. Keys are lowercase; callers may pass the
- * spark-sdk's uppercase names.
+ * BOLT11 HRPs a Spark wallet on `network` can pay, as spark-sdk reads them:
+ * `lnsb` is Spark signet (simnet in BOLT11), every `lntb…` is testnet, and
+ * regtest and local wallets settle over `lnbcrt`. Keys are lowercase; callers
+ * may pass the spark-sdk's uppercase names.
  */
-const SPARK_BOLT11_NETWORK: Record<string, NonNullable<Bolt11ValidationPolicy['expectedNetworkId']>> = {
-  mainnet: 'bitcoin',
-  testnet: 'testnet',
-  signet: 'signet',
-  regtest: 'regtest',
-  local: 'regtest',
+const SPARK_BOLT11_HRPS: Record<string, readonly Bolt11Hrp[]> = {
+  mainnet: ['bc'],
+  testnet: ['tb', 'tbs'],
+  signet: ['sb'],
+  regtest: ['bcrt'],
+  local: ['bcrt'],
 }
 
 /**
@@ -188,8 +189,8 @@ const SPARK_BOLT11_NETWORK: Record<string, NonNullable<Bolt11ValidationPolicy['e
  * check against — never a summary built from the HRP alone.
  */
 export function decodeSparkBolt11(invoice: string, network: string): DecodedInvoice {
-  const expectedNetworkId = SPARK_BOLT11_NETWORK[(network ?? '').toLowerCase()]
-  if (!expectedNetworkId) {
+  const allowedHrps = SPARK_BOLT11_HRPS[(network ?? '').toLowerCase()]
+  if (!allowedHrps) {
     throw new ProtocolError(
       `Cannot validate a Lightning invoice for Spark network "${network}"`,
       'SPARK',
@@ -198,7 +199,7 @@ export function decodeSparkBolt11(invoice: string, network: string): DecodedInvo
   }
   let decoded
   try {
-    decoded = validateBolt11Invoice(invoice, { expectedNetworkId })
+    decoded = validateBolt11Invoice(invoice, { allowedHrps })
   } catch (error) {
     const code = error instanceof LightningPaymentError ? error.code : 'INVALID_INVOICE'
     const message = error instanceof Error ? error.message : 'BOLT11 invoice is invalid'

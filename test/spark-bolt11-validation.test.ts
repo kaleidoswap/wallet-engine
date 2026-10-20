@@ -10,7 +10,7 @@ import { bolt11Fixture, TEST_PAYMENT_HASH } from './fixtures/bolt11'
  */
 const NOW_MS = 1_700_000_100_000
 
-type Network = 'mainnet' | 'regtest' | 'signet' | 'local' | 'MAINNET' | 'REGTEST'
+type Network = 'mainnet' | 'testnet' | 'regtest' | 'signet' | 'local' | 'MAINNET' | 'REGTEST' | 'SIGNET'
 
 function nativeAdapter(network: Network) {
   const adapter = new SparkAdapter()
@@ -50,9 +50,24 @@ describe.each(ADAPTERS)('%s.decodeInvoice BOLT11 validation', (_name, make) => {
     expect(d.paymentHash).toBe(TEST_PAYMENT_HASH)
   })
 
-  it('accepts signet invoices on a signet wallet', async () => {
+  it('accepts lnsb invoices on a signet wallet, as spark-sdk reads them', async () => {
     vi.useFakeTimers({ now: NOW_MS })
-    await expect(make('signet').decodeInvoice(bolt11Fixture({ hrp: 'lntbs10u' }))).resolves.toMatchObject({ amount: 1000 })
+    await expect(make('signet').decodeInvoice(bolt11Fixture({ hrp: 'lnsb10u' }))).resolves.toMatchObject({ amount: 1000 })
+    await expect(make('SIGNET').decodeInvoice(bolt11Fixture({ hrp: 'lnsb10u' }))).resolves.toMatchObject({ amount: 1000 })
+  })
+
+  it('rejects lntb and lntbs invoices on a signet wallet: spark-sdk treats them as testnet', async () => {
+    vi.useFakeTimers({ now: NOW_MS })
+    for (const hrp of ['lntb10u', 'lntbs10u']) {
+      await expect(make('signet').decodeInvoice(bolt11Fixture({ hrp }))).rejects.toMatchObject({ code: 'NETWORK_MISMATCH' })
+    }
+  })
+
+  it('accepts lntb and lntbs invoices on a testnet wallet', async () => {
+    vi.useFakeTimers({ now: NOW_MS })
+    for (const hrp of ['lntb10u', 'lntbs10u']) {
+      await expect(make('testnet').decodeInvoice(bolt11Fixture({ hrp }))).resolves.toMatchObject({ amount: 1000 })
+    }
   })
 
   it('rejects a garbage invoice whose prefix encodes 100 sats', async () => {
