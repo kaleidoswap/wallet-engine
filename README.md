@@ -27,8 +27,6 @@ agent).
 └──────────────────────────────────────────────────────────────┘
 ```
 
----
-
 ## Why
 
 Every Bitcoin L2 (Spark, RGB-on-Lightning, Liquid, Arkade) ships its own SDK, its
@@ -43,8 +41,6 @@ with `if (protocol === …)` smeared across every screen.
 - Protocol *differences* live as **data** in a capability manifest, not as branches
   in app code — adding or changing a protocol never edits another protocol's path.
 - The **same engine runs on every host**; platform specifics are injected.
-
----
 
 ## What you get
 
@@ -86,8 +82,6 @@ read it at runtime, don't hardcode it.
 Each protocol is described once in [`src/capabilities/index.ts`](src/capabilities/index.ts).
 The router and UI read that manifest — they never special-case a protocol by name.
 
----
-
 ## Install
 
 ```bash
@@ -125,8 +119,6 @@ pnpm add @kaleidorg/wallet-engine @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-walle
 > `optionalDependencies` to optional `peerDependencies`. They are no longer installed
 > transitively — add the packages for the adapters you use (table above) to your own
 > `package.json`.
-
----
 
 ## Quickstart
 
@@ -167,8 +159,6 @@ const uri = buildUnifiedReceiveURI({
 })
 ```
 
----
-
 ## Run it first
 
 The quickstart above needs a wallet behind it. This doesn't — it's the same
@@ -184,8 +174,6 @@ npm run example:tour
 No node, no credentials, no network. See [`examples/tour`](examples/tour) for what
 each section demonstrates, and [`examples/minimal-adapter`](examples/minimal-adapter)
 for the whole contract in ~170 dependency-free lines.
-
----
 
 ## Core concepts
 
@@ -246,8 +234,6 @@ Each host injects `IStorageProvider` + `IRuntimeProvider` (storage, CSPRNG, cloc
 the same engine runs on React Native (SecureStore/MMKV), the extension (chrome.storage),
 and Node unchanged.
 
----
-
 ## Swaps
 
 [`KaleidoswapSwap`](src/swap/KaleidoswapSwap.ts) wraps the Kaleidoswap **RFQ** flow
@@ -285,8 +271,6 @@ which one the loaded SDK exports, so hosts on 0.7.x need no changes. If you also
 `@kaleidorg/swap-sdk/arkade` on 0.10, install `@arkade-os/sdk >=0.4.74` and
 `@arkade-os/swap ^0.0.20` (that SDK's own peer ranges).
 
----
-
 ## Extending: add a protocol
 
 1. Implement `IProtocolAdapter` (native or WDK-backed).
@@ -297,8 +281,6 @@ The router, unified receive, lite aggregation, and every screen pick it up with 
 changes** to existing protocol code. New protocol-specific behaviour is a capability
 flag, never a new method on the contract.
 
----
-
 ## Public API
 
 The root barrel, [`src/index.ts`](src/index.ts), is deliberately **SDK-free**: types, the
@@ -307,8 +289,6 @@ The root barrel, [`src/index.ts`](src/index.ts), is deliberately **SDK-free**: t
 `ProtocolManager`, and the Arkade VTXO-lifecycle helpers. Adapters, `createWdkRegistry`,
 `KaleidoswapSwap`, and the client managers live behind their own subpath exports (see
 [`package.json`](package.json) `exports`) so importing the root pulls in no protocol SDK.
-
----
 
 ## Where it sits
 
@@ -320,8 +300,6 @@ kaleido-sdk      protocol client (RFQ/maker + RLN), Python + TypeScript
 
 `wallet-engine` consumes `kaleido-sdk` internally for the Kaleidoswap protocol;
 consumers of `wallet-engine` never import `kaleido-sdk` directly.
-
----
 
 ## Bark on React Native
 
@@ -423,8 +401,6 @@ wallet lifecycle races, manager routing and import isolation. They mock native
 execution. Android/iOS native linking and funded signet flows have not been run
 in this repository session; this remains a beta release. Verify them in a native
 development build before using the new backend with funds.
-
----
 
 ## Status
 
