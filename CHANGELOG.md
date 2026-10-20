@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.78] - 2026-10-20
+
 ### Added
 - `sparkAddressNetwork(address)` and `ClassifiedDestination.sparkNetwork`: the
   spark-sdk network (`MAINNET`/`TESTNET`/`REGTEST`/`SIGNET`/`LOCAL`) a Spark
