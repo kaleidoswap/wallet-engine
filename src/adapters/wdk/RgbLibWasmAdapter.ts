@@ -12,7 +12,10 @@
  * adapter never touches fetch/URLs. No rgb-lib types cross the contract.
  */
 
+import { Address as BtcAddress, OutScript, NETWORK, TEST_NETWORK } from '@scure/btc-signer'
+import { hex } from '@scure/base'
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
+import type { IRgbHtlcOperations, RgbHtlcOperation, RgbHtlcAllocation } from '../IProtocolAdapter'
 import {
   ProtocolType,
   Layer,
@@ -84,6 +87,48 @@ function toRgbNetwork(network: string): string {
   }
 }
 
+const REGTEST_NETWORK = { ...TEST_NETWORK, bech32: 'bcrt' }
+
+function btcNetworkFor(rgbNetwork: string) {
+  if (rgbNetwork === 'Mainnet') return NETWORK
+  if (rgbNetwork === 'Regtest') return REGTEST_NETWORK
+  return TEST_NETWORK
+}
+
+function parseOutpoint(outpoint: string): { txid: string; vout: number } {
+  const [txid, vout] = outpoint.split(':')
+  const index = Number(vout)
+  if (!/^[0-9a-f]{64}$/i.test(txid ?? '') || !Number.isInteger(index) || index < 0) {
+    throw new ProtocolError(`Invalid outpoint '${outpoint}'`, 'RGB_L1', 'INVALID_PARAMS')
+  }
+  return { txid, vout: index }
+}
+
+/** rgb-lib-wasm reports errors as strings: `"<Display prefix>: details"`. */
+function wasmErrorStartsWith(err: unknown, prefix: string): boolean {
+  const message = typeof err === 'string' ? err : (err as { message?: unknown })?.message
+  return typeof message === 'string' && message.startsWith(prefix)
+}
+
+function toHtlcOperation(raw: any): RgbHtlcOperation {
+  const allocations: RgbHtlcAllocation[] = (raw?.allocations ?? []).map((a: any) => {
+    const fungible = a?.assignment?.Fungible
+    return {
+      assetId: String(a?.assetId ?? a?.asset_id ?? ''),
+      vout: a?.vout == null ? null : Number(a.vout),
+      amount: fungible == null ? null : Number(fungible),
+    }
+  })
+  return {
+    operationId: String(raw?.operationId ?? raw?.operation_id ?? ''),
+    coloredPsbt: String(raw?.coloredPsbt ?? raw?.colored_psbt ?? ''),
+    txid: String(raw?.txid ?? ''),
+    status: String(raw?.status ?? 'prepared').toLowerCase() as RgbHtlcOperation['status'],
+    broadcast: String(raw?.broadcast ?? 'not_attempted').toLowerCase() as RgbHtlcOperation['broadcast'],
+    allocations,
+  }
+}
+
 /**
  * Serialize every WasmWallet call: rgb-lib-wasm is single-threaded and corrupts
  * or panics on interleaved-async access. All methods become async.
@@ -106,7 +151,7 @@ function serializeWasmAccount<T extends object>(account: T): T {
   }) as T
 }
 
-export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapter {
+export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapter, IRgbHtlcOperations {
   readonly protocolName: ProtocolType = 'RGB_L1'
   readonly capabilities = PROTOCOL_OPERATIONS.RGB_L1
   readonly supportedLayers: Layer[] = getCapabilities('RGB_L1').layers
@@ -115,6 +160,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   /** The rgb-lib `online` handle returned by goOnline(); required by network ops. */
   private online: any = null
   private transportEndpoints: string[] = []
+  private wasmModule: any = null
+  private rgbNetwork = 'Mainnet'
 
   // --- Connection ---------------------------------------------------------
   async connect(config: BaseProtocolConfig): Promise<void> {
@@ -125,6 +172,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.network = cfg.network ?? 'mainnet'
     this.transportEndpoints = cfg.transportEndpoints ?? []
     const rgbNetwork = toRgbNetwork(this.network)
+    this.rgbNetwork = rgbNetwork
 
     // The host injects an already-wasm-initialized module; the inline import is
     // the Node/Vite fallback. `init()` is rgb-lib's panic/log hook (idempotent).
@@ -136,6 +184,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       /* already initialized */
     }
 
+    this.wasmModule = mod
     const keys = mod.restoreKeys(rgbNetwork, cfg.mnemonic)
     const walletData = {
       // Scope the store by rgb-lib network, not the host label: rgb-lib panics
@@ -541,6 +590,172 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.assertConnected()
     const signed: string = await this.account.signPsbt(psbtHex)
     return { psbt: signed ?? psbtHex, unchanged: !signed || signed === psbtHex }
+  }
+
+  // --- HTLC spends ----------------------------------------------------------
+  // RGB locked in a swap HTLC belongs to no wallet key, so the swap client
+  // builds the spend and this wallet colors it. Each step is recorded by
+  // rgb-lib before it resolves, so a restart resumes from the operation.
+
+  async acceptRgbHtlcLock(params: {
+    recipientId: string
+    consignmentEndpoint: string
+    blinding: string
+    minConfirmations: number
+    assetId: string
+    amount: number
+    lockTxid: string
+  }): Promise<{ status: 'accepted' | 'awaitingConfirmations' }> {
+    this.assertConnected()
+    if (!Number.isSafeInteger(params.amount) || params.amount <= 0) {
+      throw new ProtocolError('HTLC lock amount must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    let accepted: any
+    try {
+      accepted = await this.account.fetchAndAcceptTransferByRecipientId(
+        this.online,
+        params.recipientId,
+        params.recipientId,
+        params.consignmentEndpoint,
+        params.blinding,
+        params.minConfirmations,
+        { assetId: params.assetId, assetSchema: 'Nia', assignment: { Fungible: params.amount } },
+      )
+    } catch (e) {
+      if (wasmErrorStartsWith(e, 'Insufficient confirmations')) return { status: 'awaitingConfirmations' }
+      throw e
+    }
+    const assignments: any[] = accepted?.assignments ?? []
+    if (assignments.length !== 1 || Number(assignments[0]?.Fungible) !== params.amount) {
+      throw new ProtocolError(
+        `HTLC lock assigns ${JSON.stringify(assignments)}, expected ${params.amount}`,
+        'RGB_L1',
+        'INVALID_PARAMS',
+      )
+    }
+    await this.account.saveNewAsset(this.online, accepted.consignment, params.lockTxid)
+    await this.flushState()
+    return { status: 'accepted' }
+  }
+
+  async rgbHtlcPayoutAddress(params?: { assetId?: string }): Promise<{ address: string; recipientId: string }> {
+    this.assertConnected()
+    if (this.transportEndpoints.length === 0) {
+      // rgb-lib-wasm settles the payout receive through its transport endpoint.
+      throw new ProtocolError('An HTLC payout needs a transport endpoint', 'RGB_L1', 'CONFIG')
+    }
+    const receive = await this.receiveRgb({ assetId: params?.assetId ?? null, witness: true, minConfirmations: 1 })
+    const scriptHex: string | null = this.wasmModule.scriptBufFromRecipientId(receive.recipientId)
+    if (!scriptHex) throw new ProtocolError('Witness receive returned no script', 'RGB_L1', 'INTERNAL')
+    const address = BtcAddress(btcNetworkFor(this.rgbNetwork)).encode(OutScript.decode(hex.decode(scriptHex)))
+    return { address, recipientId: receive.recipientId }
+  }
+
+  async prepareRgbHtlcSpend(params: {
+    psbt: string
+    assetId: string
+    outputIndex: number
+    amount: number
+    inputOutpoints: string[]
+  }): Promise<RgbHtlcOperation> {
+    this.assertConnected()
+    if (!Number.isSafeInteger(params.amount) || params.amount <= 0) {
+      throw new ProtocolError('HTLC spend amount must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    if (params.inputOutpoints.length === 0) {
+      throw new ProtocolError('An HTLC spend needs at least one input', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    const raw = await this.account.psbtOpPrepare(
+      params.psbt,
+      { assetInfoMap: { [params.assetId]: { outputMap: { [params.outputIndex]: params.amount } } } },
+      params.inputOutpoints.map(parseOutpoint),
+      1,
+      'never',
+    )
+    const operation = toHtlcOperation({ status: 'prepared', ...raw })
+    if (!operation.txid) {
+      // psbtOpPrepare does not return the txid; the stored operation does.
+      // (Parsing the colored PSBT locally fails: rgb-lib sets PSBTv2 global
+      // fields on a v0 PSBT, which strict parsers refuse.)
+      const recorded = (await this.listRgbHtlcOperationsSpending(params.inputOutpoints[0])).find(
+        (op) => op.operationId === operation.operationId,
+      )
+      if (!recorded?.txid) {
+        throw new ProtocolError('rgb-lib recorded no txid for the HTLC spend', 'RGB_L1', 'INTERNAL')
+      }
+      operation.txid = recorded.txid
+    }
+    return operation
+  }
+
+  async getRgbHtlcOperation(txid: string): Promise<RgbHtlcOperation | null> {
+    this.assertConnected()
+    try {
+      return toHtlcOperation(await this.account.psbtOpByTxid(txid))
+    } catch (e) {
+      if (wasmErrorStartsWith(e, 'HTLC operation not found')) return null
+      throw e
+    }
+  }
+
+  async listRgbHtlcOperationsSpending(outpoint: string): Promise<RgbHtlcOperation[]> {
+    this.assertConnected()
+    const raw: any[] = (await this.account.psbtOpsSpending(parseOutpoint(outpoint))) ?? []
+    return raw.map(toHtlcOperation)
+  }
+
+  async markRgbHtlcBroadcast(operationId: string): Promise<void> {
+    this.assertConnected()
+    await this.account.psbtOpMarkBroadcast(operationId)
+  }
+
+  async applyRgbHtlcOperation(operationId: string): Promise<void> {
+    this.assertConnected()
+    await this.account.psbtOpApply(this.online, operationId)
+    await this.flushState()
+  }
+
+  async provideRgbHtlcReceive(params: { operationId: string; assetId: string; txid: string }): Promise<{
+    status: 'provided' | 'alreadyProvided'
+  }> {
+    this.assertConnected()
+    try {
+      await this.account.psbtOpProvideReceiveConsignment(this.online, params.operationId, params.assetId)
+    } catch (e) {
+      // Repeating a handover that already happened is refused; the receive of
+      // that txid having moved past waiting-for-consignment is the proof.
+      if (wasmErrorStartsWith(e, 'Cannot provide out-of-band consignment') && (await this.receivedHtlcPayout(params))) {
+        return { status: 'alreadyProvided' }
+      }
+      throw e
+    }
+    await this.flushState()
+    return { status: 'provided' }
+  }
+
+  private async receivedHtlcPayout(params: { assetId: string; txid: string }): Promise<boolean> {
+    const raw: any = await this.account.listTransfers(params.assetId)
+    const rows: any[] = Array.isArray(raw) ? raw : (raw?.transfers ?? [])
+    return rows.some((t) => {
+      const kind = String(t?.kind ?? '')
+      const status = String(t?.status ?? '')
+      return (
+        t?.txid === params.txid &&
+        kind.startsWith('Receive') &&
+        (status === 'WaitingConfirmations' || status === 'Settled')
+      )
+    })
+  }
+
+  async abortRgbHtlcOperation(operationId: string): Promise<void> {
+    this.assertConnected()
+    await this.account.psbtOpAbort(this.online, operationId)
+    await this.flushState()
+  }
+
+  async finalizeRgbPsbt(psbt: string): Promise<string> {
+    this.assertConnected()
+    return this.account.finalizePsbt(psbt)
   }
 
   async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }): Promise<{ success: boolean }> {

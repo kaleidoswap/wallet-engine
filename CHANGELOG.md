@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+- The RGB-L1 wasm account claims RGB held in a swap HTLC, which is how a
+  Lightning → USDT-RGB reverse swap pays out. A new capability group,
+  `IRgbHtlcOperations` (`asRgbHtlcOperations()`), is implemented on
+  `RgbLibWasmAdapter`: accept the counterparty's lock consignment, give a
+  witness payout address, color the HTLC spend, and mark, apply, provide or
+  abort the operation rgb-lib records. Nothing here broadcasts; the host
+  builds and signs the spend. Needs an rgb-lib-wasm build with the PSBT
+  operation API (`@kaleidorg/rgb-lib-wasm` 1.0.0-ks.1 or later); on
+  `@utexo/rgb-lib-wasm` 1.0.0-beta.3 the methods are absent.
+
+### Changed
+- The optional `@kaleidorg/swap-sdk` peer range also accepts `^0.11.0` and
+  `^0.12.0`.
+
 ## [1.0.0-beta.76] - 2026-10-06
 
 ### Added
