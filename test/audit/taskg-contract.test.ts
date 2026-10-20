@@ -22,6 +22,7 @@ import { kaleidoClientManager } from '../../src/lib/kaleido-client-manager'
 import { sparkClientManager } from '../../src/lib/spark-client-manager'
 import { registerWdkModule } from '../../src/adapters/wdk/moduleLoader'
 import { asRgbOperations } from '../../src/adapters/IProtocolAdapter'
+import { bolt11Fixture } from '../fixtures/bolt11'
 
 /**
  * TASK G — adapter contract conformance gap tests.
@@ -396,9 +397,9 @@ describe('G-F14: LiquidWdkAdapter must not double-list L-BTC when getNetworkInfo
 // ---------------------------------------------------------------------------
 describe('G-F15: SparkAdapter.decodeInvoice must decode a bolt11 amount (decoder already in scope)', () => {
   it('lnbc2500u… decodes to 250_000 sats', async () => {
-    const adapter = new SparkAdapter() // decodeInvoice has no connection requirement
-    const d = await adapter.decodeInvoice('lnbc2500u1pexample')
-    // decodeBolt11 (used at SparkAdapter.ts:691) parses this as 250_000 sats.
+    const adapter = new SparkAdapter()
+    ;(adapter as any).config = { protocol: 'SPARK', network: 'mainnet' }
+    const d = await adapter.decodeInvoice(bolt11Fixture({ hrp: 'lnbc2500u', timestamp: Math.floor(Date.now() / 1000) }))
     // ACTUAL (bug): amount undefined, paymentHash '', expiresAt 0 (:648-667).
     expect(d.amount).toBe(250_000)
   })

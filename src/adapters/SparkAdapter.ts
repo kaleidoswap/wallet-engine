@@ -75,6 +75,7 @@ import {
   txHashFromBytes,
   withTimeout,
   isSparkAddressSafe,
+  decodeSparkBolt11,
 } from "../lib/spark-helpers";
 import {
   getSparkBalanceCached,
@@ -639,15 +640,11 @@ export class SparkAdapter implements IProtocolAdapter {
     const lower = input.trim().toLowerCase();
 
     if (lower.startsWith("ln")) {
-      // The lightweight parser proves the amount but not the payment hash.
-      const { amountSat, amountMsat } = decodeBolt11(input.trim());
-      return {
-        paymentHash: "",
-        amount: amountSat,
-        amountMsat,
-        expiresAt: 0,
-        destination: input,
-      };
+      // The network check needs the wallet's network; never assume mainnet.
+      if (!this.config) {
+        throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
+      }
+      return decodeSparkBolt11(input.trim(), this.config.network ?? "mainnet");
     }
 
     // Spark address or BTC address

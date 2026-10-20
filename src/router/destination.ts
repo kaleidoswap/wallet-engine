@@ -7,7 +7,8 @@
  * BETWEEN protocols.
  */
 
-import { base58check } from '@scure/base'
+import { base58check, bech32m } from '@scure/base'
+import { secp256k1 } from '@noble/curves/secp256k1.js'
 import { sha256 } from '@noble/hashes/sha2.js'
 
 import { ProtocolType, Layer, AddressFormat } from '../types/base'
@@ -37,6 +38,53 @@ function isLiquidConfidentialBase58(dest: string): boolean {
   }
 }
 
+/** Spark network union, as named by `@buildonspark/spark-sdk`. */
+export type SparkAddressNetwork = 'MAINNET' | 'TESTNET' | 'REGTEST' | 'SIGNET' | 'LOCAL'
+
+// Spark bech32m HRPs from the SDK's `AddressNetwork` + `LegacyAddressNetwork`.
+const SPARK_HRP_NETWORK: Record<string, SparkAddressNetwork> = {
+  spark: 'MAINNET',
+  sp: 'MAINNET',
+  sparkt: 'TESTNET',
+  spt: 'TESTNET',
+  sparkrt: 'REGTEST',
+  sprt: 'REGTEST',
+  sparks: 'SIGNET',
+  sps: 'SIGNET',
+  sparkl: 'LOCAL',
+  spl: 'LOCAL',
+}
+
+// The SDK decodes Spark addresses with a 1024-char bech32m limit.
+const SPARK_BECH32M_LIMIT = 1024
+
+/**
+ * Network of a Spark address, or null when it is not one. Requires a valid
+ * bech32m checksum, a Spark HRP, and a payload that opens with the protobuf
+ * identity-key field (tag 1, 33 bytes) holding a valid secp256k1 point. The
+ * payload check is what keeps BIP352 Silent Payment addresses (also `sp1…`,
+ * also bech32m) out: their first byte is a version ≤ 7, never the 0x0a tag.
+ */
+export function sparkAddressNetwork(address: string): SparkAddressNetwork | null {
+  let decoded: { prefix: string; words: number[] }
+  try {
+    decoded = bech32m.decode(address as `${string}1${string}`, SPARK_BECH32M_LIMIT)
+  } catch {
+    return null
+  }
+  if (!Object.prototype.hasOwnProperty.call(SPARK_HRP_NETWORK, decoded.prefix)) return null
+  const network = SPARK_HRP_NETWORK[decoded.prefix]
+  if (!network) return null
+  try {
+    const payload = bech32m.fromWords(decoded.words)
+    if (payload.length < 35 || payload[0] !== 0x0a || payload[1] !== 0x21) return null
+    if (!secp256k1.utils.isValidPublicKey(payload.subarray(2, 35), true)) return null
+  } catch {
+    return null
+  }
+  return network
+}
+
 export type DestinationKind =
   | 'BOLT11' // Lightning invoice
   | 'BOLT12' // Lightning offer (BIP321 `lno=`)
@@ -57,6 +105,8 @@ export interface ClassifiedDestination {
   format: AddressFormat | null
   /** Protocols capable of paying this destination, best-first. */
   candidates: ProtocolType[]
+  /** For SPARK: the network named by the address HRP. */
+  sparkNetwork?: SparkAddressNetwork
   /** For BIP21: an embedded BOLT11 fallback, if present. */
   lightningFallback?: string
   /** The normalized payable string (URI-stripped where relevant). */
@@ -76,11 +126,6 @@ const RE = {
   lnurl: /^lnurl[0-9a-z]+$/i,
   lnAddress: /^[^@\s]+@[^@\s]+\.[^@\s]+$/i,
   rgb: /^(rgb:|utxob:)/i,
-  // Spark bech32m HRPs per the SDK's address encoder: `spark1`, `sparkt1`,
-  // `sparkrt1`, `sparkl1`, plus legacy `spl1`/`sprt1`. `sp1` is deliberately NOT
-  // here — it belongs to BIP352 Silent Payments, so matching it as Spark would
-  // misroute funds. Longest prefixes first.
-  spark: /^(sparkrt|sparkt|sparkl|spark|sprt|spl)1[0-9a-z]{6,}$/i,
   // Both Arks share this HRP — Arkade (@arkade-os/sdk) and bark (Second).
   // The payloads differ (65 vs 75 bytes) and each SDK rejects the other's, so
   // a destination classified `arkade` still has to be validated by whichever
@@ -155,8 +200,9 @@ export function classifyDestination(raw: string): ClassifiedDestination {
     return { kind: 'RGB_INVOICE', layer: 'RGB_LN', format: 'RGB_INVOICE', candidates: ['RGB_LN', 'RGB_L1'], value: dest }
   }
 
-  if (RE.spark.test(dest)) {
-    return { kind: 'SPARK', layer: 'SPARK_SPARK', format: 'SPARK_ADDRESS', candidates: ['SPARK'], value: dest }
+  const sparkNetwork = sparkAddressNetwork(dest)
+  if (sparkNetwork) {
+    return { kind: 'SPARK', layer: 'SPARK_SPARK', format: 'SPARK_ADDRESS', candidates: ['SPARK'], sparkNetwork, value: dest }
   }
 
   if (RE.arkade.test(dest)) {

@@ -4,7 +4,11 @@
  */
 
 import { bech32m } from '@scure/base'
-import type { TransactionStatus } from '../types/base'
+import type { DecodedInvoice, TransactionStatus } from '../types/base'
+import { ProtocolError } from '../types/base'
+import { validateBolt11Invoice, type Bolt11Hrp } from './bolt11'
+import { roundedMsatToSat, toSafeAmountNumber } from '../lightning/amounts'
+import { LightningPaymentError } from '../lightning/errors'
 import { normalizeTxHash } from './spark-sent-token-records'
 
 // Amount display formatting is centralized in ./amount (was duplicated here).
@@ -160,5 +164,61 @@ export function isSparkAddressSafe(
     return validate(destination)
   } catch {
     return false
+  }
+}
+
+/**
+ * BOLT11 HRPs a Spark wallet on `network` can pay, as spark-sdk reads them:
+ * `lnsb` is Spark signet (simnet in BOLT11), every `lntb…` is testnet, and
+ * regtest and local wallets settle over `lnbcrt`. Keys are lowercase; callers
+ * may pass the spark-sdk's uppercase names.
+ */
+const SPARK_BOLT11_HRPS: Record<string, readonly Bolt11Hrp[]> = {
+  mainnet: ['bc'],
+  testnet: ['tb', 'tbs'],
+  signet: ['sb'],
+  regtest: ['bcrt'],
+  local: ['bcrt'],
+}
+
+/**
+ * Decode a BOLT11 for a Spark wallet: checksum, signature, required fields,
+ * network and expiry are all enforced. Throws a SPARK ProtocolError whose code is
+ * the LightningPaymentError code (INVALID_INVOICE / NETWORK_MISMATCH /
+ * INVOICE_EXPIRED), or UNKNOWN_NETWORK when the wallet network is not one we can
+ * check against — never a summary built from the HRP alone.
+ */
+export function decodeSparkBolt11(invoice: string, network: string): DecodedInvoice {
+  const key = (network ?? '').toLowerCase()
+  const allowedHrps = Object.prototype.hasOwnProperty.call(SPARK_BOLT11_HRPS, key) ? SPARK_BOLT11_HRPS[key] : undefined
+  if (!allowedHrps) {
+    throw new ProtocolError(
+      `Cannot validate a Lightning invoice for Spark network "${network}"`,
+      'SPARK',
+      'UNKNOWN_NETWORK',
+    )
+  }
+  let decoded
+  try {
+    decoded = validateBolt11Invoice(invoice, { allowedHrps })
+  } catch (error) {
+    const code = error instanceof LightningPaymentError ? error.code : 'INVALID_INVOICE'
+    const message = error instanceof Error ? error.message : 'BOLT11 invoice is invalid'
+    throw new ProtocolError(`Invalid Lightning invoice: ${message}`, 'SPARK', code, error)
+  }
+  const amountMsat = decoded.amountMsat
+  const expiresAt = decoded.expiresAtUnixSeconds * 1000
+  return {
+    paymentHash: decoded.paymentHash,
+    ...(amountMsat != null
+      ? {
+          amount: toSafeAmountNumber(roundedMsatToSat(amountMsat), 'sat'),
+          ...(BigInt(amountMsat) <= BigInt(Number.MAX_SAFE_INTEGER) ? { amountMsat: Number(amountMsat) } : {}),
+        }
+      : {}),
+    expiresAt,
+    destination: invoice,
+    payment_hash: decoded.paymentHash,
+    expires_at: expiresAt,
   }
 }

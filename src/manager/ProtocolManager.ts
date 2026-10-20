@@ -35,7 +35,7 @@ import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
 import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
-import { decodeBolt11 } from '../lib/bolt11'
+import { decodeBolt11Invoice, isBolt11 } from '../lib/bolt11'
 import { isBtcAssetId } from '../lib/asset-id'
 import type {
   LiquidPsetReview,
@@ -446,10 +446,23 @@ export class ProtocolManager {
     return this.getActiveAdapterUnchecked().sendPayment(request)
   }
 
-  /** Invoice amount wins because amount-bearing invoices ignore caller overrides. */
+  /**
+   * Invoice amount wins because amount-bearing invoices ignore caller overrides.
+   * A BOLT11-shaped destination that fails checksum/signature decoding yields no
+   * amount (so any cap denies it) rather than an amount read off its prefix.
+   */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
-    const invoiceAmountSat = decodeBolt11(request.invoice).amountSat
-    if (invoiceAmountSat != null) return invoiceAmountSat
+    // Adapters strip a `lightning:` URI scheme before paying, so the cap must too.
+    const invoice = (request.invoice ?? '').trim().replace(/^lightning:/i, '')
+    if (isBolt11(invoice)) {
+      let amountMsat: string | undefined
+      try {
+        amountMsat = decodeBolt11Invoice(invoice).amountMsat
+      } catch {
+        return undefined
+      }
+      if (amountMsat != null) return Number((BigInt(amountMsat) + 999n) / 1000n)
+    }
     return request.amount ?? undefined
   }
 

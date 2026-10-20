@@ -3,6 +3,7 @@ import { ProtocolManager } from '../../src/manager/ProtocolManager'
 import { PolicyError } from '../../src/policy'
 import type { IProtocolAdapter } from '../../src/adapters/IProtocolAdapter'
 import { PROTOCOL_OPERATIONS } from '../../src/capabilities/operations'
+import { bolt11Fixture } from '../fixtures/bolt11'
 
 /**
  * Audit finding F-F1 — the policy checked an amount the adapters discard.
@@ -16,8 +17,8 @@ import { PROTOCOL_OPERATIONS } from '../../src/capabilities/operations'
  * the large one.
  */
 // lnbc10m… encodes 10 mBTC = 1,000,000 sats.
-const BIG_INVOICE = 'lnbc10m1pexampleinvoice'
-const AMOUNTLESS = 'lnbc1pexampleinvoice'
+const BIG_INVOICE = bolt11Fixture({ hrp: 'lnbc10m' })
+const AMOUNTLESS = bolt11Fixture({ hrp: 'lnbc' })
 
 function managerWith(policy: any) {
   const paid: any[] = []
@@ -40,6 +41,15 @@ describe('F-F1: the spend cap must see the amount that will actually be paid', (
     await expect(m.sendPayment({ invoice: BIG_INVOICE, amount: 500 } as any))
       .rejects.toBeInstanceOf(PolicyError)
     expect(paid, 'the payment must never reach the adapter').toHaveLength(0)
+  })
+
+  it('a lightning: URI prefix does not hide the invoice amount from the cap', async () => {
+    const { m, paid } = managerWith({ maxAmountSat: 1000 })
+    await expect(m.sendPayment({ invoice: `lightning:${BIG_INVOICE}`, amount: 1 } as any))
+      .rejects.toBeInstanceOf(PolicyError)
+    await expect(m.sendPayment({ invoice: `LIGHTNING:${BIG_INVOICE}`, amount: 1 } as any))
+      .rejects.toBeInstanceOf(PolicyError)
+    expect(paid).toHaveLength(0)
   })
 
   it('the same invoice with no declared amount is still denied', async () => {

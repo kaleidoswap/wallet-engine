@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { classifyDestination } from '../src/router/destination'
+import { bech32m } from '@scure/base'
+import { classifyDestination, sparkAddressNetwork } from '../src/router/destination'
+import { sparkAddress, testPubkey } from './fixtures/spark-address'
 
 /**
  * The destination classifier decides which adapter(s) can pay an arbitrary string.
@@ -35,20 +37,74 @@ describe('classifyDestination', () => {
   })
 
   it('classifies a Spark address', () => {
-    expect(classifyDestination('spark1qxyzexampleaddr').kind).toBe('SPARK')
+    const r = classifyDestination(sparkAddress('spark'))
+    expect(r.kind).toBe('SPARK')
+    expect(r.sparkNetwork).toBe('MAINNET')
   })
 
-  it('classifies every real Spark HRP (mainnet/testnet/regtest/local + legacy)', () => {
-    for (const addr of [
-      'spark1qxyzexampleaddr', // mainnet
-      'sparkt1qxyzexampleaddr', // testnet
-      'sparkrt1qxyzexampleaddr', // regtest
-      'sparkl1qxyzexampleaddr', // local/signet
-      'spl1qxyzexampleaddr', // legacy
-      'sprt1qxyzexampleaddr', // legacy
-    ]) {
-      expect(classifyDestination(addr).kind, `${addr} should be SPARK`).toBe('SPARK')
+  it('maps every spark-sdk HRP (current + legacy) to its network', () => {
+    const expected: Array<[string, string]> = [
+      ['spark', 'MAINNET'], ['sp', 'MAINNET'],
+      ['sparkt', 'TESTNET'], ['spt', 'TESTNET'],
+      ['sparkrt', 'REGTEST'], ['sprt', 'REGTEST'],
+      ['sparks', 'SIGNET'], ['sps', 'SIGNET'],
+      ['sparkl', 'LOCAL'], ['spl', 'LOCAL'],
+    ]
+    for (const [hrp, network] of expected) {
+      const r = classifyDestination(sparkAddress(hrp))
+      expect(r.kind, `${hrp}1… should be SPARK`).toBe('SPARK')
+      expect(r.sparkNetwork, `${hrp}1… network`).toBe(network)
     }
+  })
+
+  it('accepts an all-uppercase Spark address (bech32m allows it, e.g. QR alphanumeric)', () => {
+    expect(classifyDestination(sparkAddress('sparkrt').toUpperCase()).kind).toBe('SPARK')
+  })
+
+  it('rejects a Spark address with one extra character (checksum)', () => {
+    const valid = sparkAddress('sparkrt')
+    for (const tampered of [`${valid}q`, `${valid.slice(0, 20)}q${valid.slice(20)}`]) {
+      expect(classifyDestination(tampered).kind).toBe('UNKNOWN')
+      expect(sparkAddressNetwork(tampered)).toBeNull()
+    }
+  })
+
+  it('rejects a Spark address with one character changed or dropped', () => {
+    const valid = sparkAddress('spark')
+    const flipped = valid.slice(0, -1) + (valid.endsWith('q') ? 'p' : 'q')
+    expect(classifyDestination(flipped).kind).toBe('UNKNOWN')
+    expect(classifyDestination(valid.slice(0, -1)).kind).toBe('UNKNOWN')
+  })
+
+  it('rejects mixed case and non-bech32 characters', () => {
+    const valid = sparkAddress('spark')
+    expect(classifyDestination(valid.slice(0, 10) + valid.slice(10).toUpperCase()).kind).toBe('UNKNOWN')
+    expect(classifyDestination(`${valid.slice(0, 12)}b${valid.slice(13)}`).kind).toBe('UNKNOWN')
+  })
+
+  it('rejects regex-shaped Spark strings with no valid checksum', () => {
+    for (const addr of ['spark1qxyzexampleaddr', 'sparkrt1qqqqqqqqqq', 'sparks1qqqqqqqqqqqq', 'spt1qqqqqqqqqqqq']) {
+      expect(classifyDestination(addr).kind, addr).toBe('UNKNOWN')
+    }
+  })
+
+  it('rejects a checksum-valid bech32m string with a Spark HRP but a non-Spark payload', () => {
+    const notAPubkey = bech32m.encode('spark', bech32m.toWords(Uint8Array.from([0x0a, 0x21, ...new Uint8Array(33)])))
+    expect(classifyDestination(notAPubkey).kind).toBe('UNKNOWN')
+    const wrongTag = bech32m.encode('spark', bech32m.toWords(new Uint8Array(40).fill(7)))
+    expect(classifyDestination(wrongTag).kind).toBe('UNKNOWN')
+  })
+
+  it.each(['constructor', '__proto__'])('rejects a Spark payload under the Object.prototype name %j as HRP', (hrp) => {
+    const payload = bech32m.decode(sparkAddress('spark') as `${string}1${string}`, 1024).words
+    const address = bech32m.encode(hrp, payload, 1024)
+    expect(sparkAddressNetwork(address)).toBeNull()
+    expect(classifyDestination(address).kind).toBe('UNKNOWN')
+  })
+
+  it('rejects a checksum-valid Spark payload under a non-Spark HRP', () => {
+    const payload = bech32m.decode(sparkAddress('spark') as `${string}1${string}`, 1024).words
+    expect(classifyDestination(bech32m.encode('sparkx', payload, 1024)).kind).toBe('UNKNOWN')
   })
 
   it('does NOT classify a Silent Payments (sp1…) address as Spark', () => {
@@ -56,6 +112,14 @@ describe('classifyDestination', () => {
     // Spark transfer would lose funds. It must fail closed.
     const r = classifyDestination('sp1qqw508d6qejxtdg4y5r3zarvary0c5xw7kexample')
     expect(r.kind).not.toBe('SPARK')
+  })
+
+  it('does NOT classify a checksum-valid Silent Payments address as legacy Spark `sp1`', () => {
+    // BIP352: version word 0, then scan + spend pubkeys (66 bytes).
+    const words = [0, ...bech32m.toWords(Uint8Array.from([...testPubkey(2), ...testPubkey(3)]))]
+    const silentPayment = bech32m.encode('sp', words, 1023)
+    expect(silentPayment.startsWith('sp1q')).toBe(true)
+    expect(classifyDestination(silentPayment).kind).toBe('UNKNOWN')
   })
 
   it('classifies an Arkade address', () => {
