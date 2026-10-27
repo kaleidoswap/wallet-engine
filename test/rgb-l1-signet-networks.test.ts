@@ -3,7 +3,6 @@ import { RgbLibWasmAdapter } from '../src/adapters/wdk/RgbLibWasmAdapter'
 import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { BIP39_TEST_VECTOR_MNEMONIC } from './fixtures/mnemonics'
 
-/** The rgb-lib network and data directory a host network string reaches. */
 async function connectAs(network: string) {
   const seen: { keys?: string; dataDir?: unknown } = {}
   registerWdkModule('@utexo/rgb-lib-wasm', () => ({

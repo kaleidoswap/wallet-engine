@@ -139,7 +139,7 @@ export const ARKADE = {
 }
 
 export const RGB_L1 = {
-  /** rgb-lib on mutinynet, a custom signet (rgb-lib `SignetCustom`). */
+  /** rgb-lib on mutinynet — surfaced to rgb-lib as its custom signet. */
   network: 'mutinynet' as const,
   /** Electrum/Esplora indexer rgb-lib syncs against — ours, see MUTINYNET_ESPLORA. */
   indexerUrl: env('RGB_INDEXER_URL', MUTINYNET_ESPLORA)!,

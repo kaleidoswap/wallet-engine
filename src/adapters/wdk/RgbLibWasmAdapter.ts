@@ -68,11 +68,9 @@ function toRgbNetwork(network: string): string {
       return 'Mainnet'
     case 'testnet':
       return 'Testnet'
-    // The default public signet.
     case 'signet':
       return 'Signet'
-    // Mutinynet is a custom signet: its recipient IDs are tagged
-    // `SignetCustom` and won't validate against a standard `Signet` wallet.
+    // Mutinynet is a custom signet.
     case 'signetcustom':
     case 'customsignet':
     case 'mutinynet':

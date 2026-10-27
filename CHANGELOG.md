@@ -9,7 +9,7 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ### Changed
 
-- **Breaking (RGB on-chain):** `RgbLibWasmAdapter` now tells signet and custom signet apart. `network: 'signet'` is the default public signet (rgb-lib `Signet`); Mutinynet is a custom signet, reached with `'signetcustom'`, `'customsignet'` or `'mutinynet'` (rgb-lib `SignetCustom`). Hosts that passed `'signet'` for Mutinynet must pass `'mutinynet'`. The rgb-lib data directory follows the network (`rgb-l1-signet` vs `rgb-l1-signetcustom`), so existing Mutinynet wallets keep their data.
+- **Breaking (RGB on-chain):** `network: 'signet'` is now the public signet (rgb-lib `Signet`). Mutinynet is `'mutinynet'` (or `'signetcustom'`, rgb-lib `SignetCustom`); existing Mutinynet wallets keep their data.
 
 ## [1.0.0-beta.78] - 2026-10-20
 
