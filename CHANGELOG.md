@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.79] - 2026-10-27
+
 ### Changed
 
 - **Breaking (RGB on-chain):** `network: 'signet'` is now the public signet (rgb-lib `Signet`). Mutinynet is `'mutinynet'` (or `'signetcustom'`, rgb-lib `SignetCustom`); existing Mutinynet wallets keep their data.
