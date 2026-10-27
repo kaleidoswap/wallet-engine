@@ -58,7 +58,11 @@ import type {
  */
 export interface BaseProtocolConfig {
   protocol: ProtocolType
-  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet'
+  /**
+   * `signet` is the default public signet. `mutinynet` (alias `signetcustom`)
+   * is a custom signet; RGB on-chain is the only adapter that runs there by name.
+   */
+  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet' | 'mutinynet' | 'signetcustom'
 }
 
 /**
