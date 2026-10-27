@@ -58,7 +58,7 @@ import type {
  */
 export interface BaseProtocolConfig {
   protocol: ProtocolType
-  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet'
+  network?: 'mainnet' | 'testnet' | 'regtest' | 'signet' | 'mutinynet' | 'signetcustom'
 }
 
 /**
