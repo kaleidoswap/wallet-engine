@@ -1,5 +1,5 @@
 /**
- * RGB-L1 (rgb-lib) · mutinynet (signet) — live integration
+ * RGB-L1 (rgb-lib) · mutinynet (custom signet) — live integration
  * --------------------------------------------------------
  * Connects Alice and Bob to a LOCAL rgb-lib wallet on Mutinynet. rgb-lib holds keys
  * in-process and persists SQLite state under a per-wallet dataDir, so the two never
@@ -71,12 +71,12 @@ describe.skipIf(!RGB_L1.enabled)('RGB-L1 rgb-lib mutinynet (Alice & Bob)', () =>
     await Promise.all([safeDisconnect(alice), safeDisconnect(bob)])
   })
 
-  it('connects both wallets on mutinynet (signet)', async () => {
+  it('connects both wallets on mutinynet (custom signet)', async () => {
     expect(alice.isConnected()).toBe(true)
     expect(bob.isConnected()).toBe(true)
     const info = await alice.getConnectionInfo()
     expect(info.protocol).toBe('RGB_L1')
-    expect(info.network).toBe('signet')
+    expect(info.network).toBe('mutinynet')
   }, 120_000)
 
   it('Alice has a funded vanilla (on-chain) BTC balance', async () => {
