@@ -19,8 +19,10 @@ import {
   findLightningSendForInvoice,
   isDuplicatePreimageSwapError,
 } from '../src/lib/spark-lightning-settlement'
+import { bolt11Fixture, TEST_PREIMAGE } from './fixtures/bolt11'
 
-const INVOICE = 'lnbc1m1pexample'
+// Settlement of INVOICE is proven only by TEST_PREIMAGE (its payment hash preimage).
+const INVOICE = bolt11Fixture({ hrp: 'lnbc1m' })
 const REQ_ID = 'SparkLightningSendRequest:01a0f985-c175-e342-0000-c36adb788a8a'
 // Verbatim shape of the operator's rejection (SDK SparkRequestError message).
 const DUPLICATE = new Error(
@@ -110,10 +112,9 @@ describe.each([
   ['SparkWdkAdapter', wdkAdapter],
 ] as const)('%s duplicate submit', (_name, make) => {
   it('reports the earlier settled attempt instead of failing', async () => {
-    const preimage = 'ab'.repeat(32)
-    const wallet = duplicateWallet([sendRequest('TRANSFER_COMPLETED', { paymentPreimage: preimage })])
+    const wallet = duplicateWallet([sendRequest('TRANSFER_COMPLETED', { paymentPreimage: TEST_PREIMAGE })])
     const result = await make(wallet).sendPayment({ invoice: INVOICE } as any)
-    expect(result).toMatchObject({ paymentHash: REQ_ID, status: 'confirmed', preimage })
+    expect(result).toMatchObject({ paymentHash: REQ_ID, status: 'confirmed', preimage: TEST_PREIMAGE })
   })
 
   it('tells the user to get a new invoice when the earlier attempt failed', async () => {
@@ -131,7 +132,7 @@ describe.each([
   })
 
   it('reads lightning send status from the SSP, not the transfer list', async () => {
-    const wallet = duplicateWallet([sendRequest('TRANSFER_COMPLETED')])
+    const wallet = duplicateWallet([sendRequest('TRANSFER_COMPLETED', { paymentPreimage: TEST_PREIMAGE })])
     const status = await make(wallet).getPaymentStatus(REQ_ID)
     expect(status).toMatchObject({ paymentHash: REQ_ID, status: 'confirmed', fee: 1 })
     expect(wallet.getLightningSendRequest).toHaveBeenCalledWith('01a0f985-c175-e342-0000-c36adb788a8a')

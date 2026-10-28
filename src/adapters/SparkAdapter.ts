@@ -60,6 +60,7 @@ import {
   getLightningSendStatus,
   isDuplicatePreimageSwapError,
   isLightningSendRequestId,
+  lightningInvoicePaymentHash,
   waitForLightningSendSettlement,
 } from "../lib/spark-lightning-settlement";
 
@@ -676,6 +677,16 @@ export class SparkAdapter implements IProtocolAdapter {
         // invoice, not on whether the caller supplied an amount.
         const decodedInvoice = decodeBolt11(destination);
         const invoiceIsAmountless = decodedInvoice.amountMsat == null;
+        // Settlement is proven by a preimage for this hash; an invoice whose
+        // hash cannot be read could never be confirmed, so refuse it up front.
+        const paymentHash = lightningInvoicePaymentHash(destination);
+        if (!paymentHash) {
+          throw new ProtocolError(
+            "Invalid Lightning invoice: payment hash cannot be decoded",
+            "SPARK",
+            "INVALID_INVOICE",
+          );
+        }
         let lnResult: Record<string, unknown>;
         let resubmitted = false;
         try {
@@ -710,7 +721,10 @@ export class SparkAdapter implements IProtocolAdapter {
         const amountSats = Number(decodedInvoice.amountSat ?? request.amount ?? 0);
         const timestamp = parseSdkExpiryMs(lnResult.createdAt) ?? Date.now();
 
-        const settlement = await waitForLightningSendSettlement(wallet, id, lnResult);
+        const settlement = await waitForLightningSendSettlement(wallet, id, lnResult, {
+          invoice: destination,
+          paymentHash,
+        });
         if (settlement.status === "failed") {
           throw resubmitted
             ? new ProtocolError(

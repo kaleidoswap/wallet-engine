@@ -42,6 +42,7 @@ import {
   getLightningSendStatus,
   isDuplicatePreimageSwapError,
   isLightningSendRequestId,
+  lightningInvoicePaymentHash,
   waitForLightningSendSettlement,
 } from '../../lib/spark-lightning-settlement'
 import { sweepWindow } from '../../lib/spark-deposit-sweep-window'
@@ -410,6 +411,16 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         // invoice itself, not on whether the caller supplied an amount.
         const decodedInvoice = decodeBolt11(destination)
         const invoiceIsAmountless = decodedInvoice.amountMsat == null
+        // Settlement is proven by a preimage for this hash; an invoice whose
+        // hash cannot be read could never be confirmed, so refuse it up front.
+        const paymentHash = lightningInvoicePaymentHash(destination)
+        if (!paymentHash) {
+          throw new ProtocolError(
+            'Invalid Lightning invoice: payment hash cannot be decoded',
+            'SPARK',
+            'INVALID_INVOICE',
+          )
+        }
         // Raw wallet access is best-effort: without it the poller degrades to
         // 'pending' rather than failing a payment that was already dispatched.
         const rawWallet = (this.account as any)?._wallet ?? {}
@@ -439,7 +450,10 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
           resubmitted = true
         }
         const id = String(result?.id ?? '')
-        const settlement = await waitForLightningSendSettlement(rawWallet, id, result ?? {})
+        const settlement = await waitForLightningSendSettlement(rawWallet, id, result ?? {}, {
+          invoice: destination,
+          paymentHash,
+        })
         if (settlement.status === 'failed') {
           throw resubmitted
             ? new ProtocolError(
