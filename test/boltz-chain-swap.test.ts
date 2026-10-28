@@ -357,7 +357,8 @@ describe('broadcast result integrity', () => {
   it('does not report a claim when broadcast returns no transaction id', async () => {
     const store = new BoltzChainSwapStore(new MemoryStorage())
     await store.put({ ...BASE, phase: 'server_locked' })
-    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    // Under test is the broadcast result, not the chain guards: take the maker's word.
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', allowUnverifiedClaims: true }, store)
     installContentlessBroadcast()
 
     await expect(swap.claim('swap-1')).rejects.toThrow(/claim transaction id/)
@@ -380,6 +381,16 @@ describe('broadcast result integrity', () => {
 })
 
 describe('claim guards', () => {
+  // Security review 2026-10-28, finding 12: the maker's status and `height()` are
+  // hints; the guards read the trusted chain-data provider. The finding-specific
+  // regressions live in boltz-chain-swap-confirmation.test.ts.
+  const LIQUID_LOCKUP =
+    'el1pqgft7r4ytdenml0gaj67393sd3qkt3nxex0ut5dt3plhzwf6jaww5wpq7p3x4f75f5gch3gktgxxwu2rxm394tsw8dchxedsc6r53w75cj24fq2u2ls5'
+  const LIQUID_SCRIPT = '51203820f0626aa7d44d118bc5165a0c67714336e25aae0e3b717365b0c68748bbd4'
+  const BTC_LOCKUP = 'bc1p0xlxvlhemja6c4dqv22uapctqupfhlxm9h8z3k2e72q4k9hcz7vqzk5jj0'
+  const BTC_SCRIPT = '512079be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798'
+  const SERVER_TXID = '11'.repeat(32)
+
   const BASE = {
     index: 0,
     from: 'BTC' as const,
@@ -387,22 +398,53 @@ describe('claim guards', () => {
     userLockAmount: 100_000,
     serverLockAmount: 99_000,
     claimTimeoutBlockHeight: 5000,
-    lockupAddress: 'bcrt1qlockup',
+    lockupAddress: BTC_LOCKUP,
     destinationAddress: 'el1qdestination',
     createdAt: 1,
     updatedAt: 1,
-    response: '{}',
+    response: encode({
+      lockupDetails: { lockupAddress: BTC_LOCKUP, amount: 100_000n },
+      claimDetails: { lockupAddress: LIQUID_LOCKUP, amount: 99_000n, timeoutBlockHeight: 5000n },
+    }),
   }
 
-  async function swapWith(record: Partial<typeof BASE> & { phase: any; userLockupSpent?: boolean }) {
+  /** Trusted chain: the maker lockup sits at `blockHeight` on `chain`, tips as given. */
+  function chainWith(opts: { chain: 'bitcoin' | 'liquid'; blockHeight?: number; tips: Record<string, number> }) {
+    const script = opts.chain === 'liquid' ? LIQUID_SCRIPT : BTC_SCRIPT
+    const tx = {
+      txid: SERVER_TXID,
+      hex: '00',
+      vin: [],
+      vout: [{ scriptPubKey: script, valueSat: 99_000 }],
+      ...(opts.blockHeight === undefined ? {} : { blockHeight: opts.blockHeight }),
+    }
+    return {
+      tipHeight: async (chain: string) => opts.tips[chain],
+      getTransaction: async (chain: string, txid: string) =>
+        chain === opts.chain && txid === SERVER_TXID ? tx : null,
+      getOutspend: async () => ({ spent: false }),
+    }
+  }
+
+  async function swapWith(
+    record: Partial<typeof BASE> & { phase: any; userLockupSpent?: boolean },
+    chainData?: ReturnType<typeof chainWith>
+  ) {
     const store = new BoltzChainSwapStore(new MemoryStorage())
     await store.put({ ...BASE, swapId: 'swap-1', ...record } as any)
-    return new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    return new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData }, store)
   }
 
+  beforeEach(() => {
+    installFakeSdk({ chainTxs: async () => ({ serverLock: { transaction: { id: SERVER_TXID } } }) })
+  })
+
   it('refuses to claim against an unconfirmed maker lockup', async () => {
-    const swap = await swapWith({ phase: 'server_locking' })
-    await expect(swap.claim('swap-1')).rejects.toThrow(/unconfirmed/)
+    const swap = await swapWith(
+      { phase: 'server_locked' },
+      chainWith({ chain: 'liquid', tips: { bitcoin: 800, liquid: 900 } })
+    )
+    await expect(swap.claim('swap-1')).rejects.toThrow(/0 confirmation\(s\) on liquid, needs 1/)
   })
 
   it('refuses to claim before the maker has locked at all', async () => {
@@ -411,35 +453,59 @@ describe('claim guards', () => {
   })
 
   it('refuses to claim inside the timeout margin', async () => {
-    installFakeSdk({ height: async () => ({ BTC: 800n, 'L-BTC': 4995n }) })
-    const swap = await swapWith({ phase: 'server_locked' })
+    const swap = await swapWith(
+      { phase: 'server_locked' },
+      chainWith({ chain: 'liquid', blockHeight: 4000, tips: { bitcoin: 800, liquid: 4995 } })
+    )
     await expect(swap.claim('swap-1')).rejects.toThrow(/Claim window .* has closed/)
   })
 
   it('uses the destination chain tip, not the source chain tip', async () => {
     // Liquid tip is inside the margin; a Bitcoin-tip comparison would pass.
-    installFakeSdk({ height: async () => ({ BTC: 100n, 'L-BTC': 4999n }) })
-    const swap = await swapWith({ phase: 'server_locked' })
+    const swap = await swapWith(
+      { phase: 'server_locked' },
+      chainWith({ chain: 'liquid', blockHeight: 4000, tips: { bitcoin: 100, liquid: 4999 } })
+    )
     await expect(swap.claim('swap-1')).rejects.toThrow(/Claim window/)
   })
 
   it('applies the Bitcoin margin when claiming on Bitcoin', async () => {
-    installFakeSdk({ height: async () => ({ BTC: 4997n, 'L-BTC': 100n }) })
     // tip 4997 vs timeout 5000: inside Liquid's 10-block margin, outside Bitcoin's 2.
-    const swap = await swapWith({ phase: 'server_locked', from: 'L-BTC', to: 'BTC' } as any)
-    await expect(swap.claim('swap-1')).rejects.toThrow(/Stored response .* no claimDetails/)
+    const swap = await swapWith(
+      {
+        phase: 'server_locked',
+        from: 'L-BTC',
+        to: 'BTC',
+        lockupAddress: LIQUID_LOCKUP,
+        response: encode({
+          lockupDetails: { lockupAddress: LIQUID_LOCKUP, amount: 100_000n },
+          claimDetails: { lockupAddress: BTC_LOCKUP, amount: 99_000n, timeoutBlockHeight: 5000n },
+        }),
+      } as any,
+      chainWith({ chain: 'bitcoin', blockHeight: 4000, tips: { bitcoin: 4997, liquid: 100 } })
+    )
+    const manager = boltzSwapClientManager as any
+    manager.sdk.SwapScript.fromChain = () => ({
+      constructClaim: async () => ({ broadcast: async () => 'claim-txid', hex: () => '', txid: () => '' }),
+    })
+    await expect(swap.claim('swap-1')).resolves.toMatchObject({ phase: 'claimed' })
   })
 
   it('bypasses both guards once the maker has spent our lockup', async () => {
-    installFakeSdk({ height: async () => ({ BTC: 800n, 'L-BTC': 4999n }) })
-    const swap = await swapWith({ phase: 'server_locking', userLockupSpent: true })
-    // Guards passed — it now fails further along, on the empty stored response.
-    await expect(swap.claim('swap-1')).rejects.toThrow(/Stored response .* no claimDetails/)
+    const swap = await swapWith(
+      { phase: 'server_locking', userLockupSpent: true },
+      chainWith({ chain: 'liquid', tips: { bitcoin: 800, liquid: 4999 } })
+    )
+    const manager = boltzSwapClientManager as any
+    manager.sdk.SwapScript.fromChain = () => ({
+      constructClaim: async () => ({ broadcast: async () => 'claim-txid', hex: () => '', txid: () => '' }),
+    })
+    await expect(swap.claim('swap-1')).resolves.toMatchObject({ phase: 'claimed' })
   })
 })
 
 describe('sync', () => {
-  it('records that the maker spent our lockup', async () => {
+  it('does not take transaction.claimed as proof that the maker spent our lockup', async () => {
     installFakeSdk({ swap: async () => ({ status: 'transaction.claimed' }) })
     const store = new BoltzChainSwapStore(new MemoryStorage())
     const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
@@ -450,7 +516,8 @@ describe('sync', () => {
       destinationAddress: 'el1qdestination',
     })
     const updated = await swap.sync('swap-1')
-    expect(updated.userLockupSpent).toBe(true)
+    expect(updated.status).toBe('transaction.claimed')
+    expect(updated.userLockupSpent).toBeFalsy()
   })
 
   it('keeps the flag set once the preimage is out', async () => {

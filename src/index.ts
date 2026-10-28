@@ -80,7 +80,18 @@ export {
 } from './capabilities/operations'
 
 // Platform ports (injected per host)
-export type { IStorageProvider, IRuntimeProvider, PlatformContext, Logger } from './ports'
+export type {
+  IStorageProvider,
+  IRuntimeProvider,
+  PlatformContext,
+  Logger,
+  IChainDataProvider,
+  ChainKind,
+  ChainTransaction,
+  ChainTxInput,
+  ChainTxOutput,
+  ChainOutspend,
+} from './ports'
 // Platform injection — consumers call setPlatform() once at startup to supply
 // storage/runtime/logger (extension: chrome.storage-backed; RN: AsyncStorage-backed).
 // Engine modules that persist state (e.g. Spark sent-token records) read getPlatform().storage.

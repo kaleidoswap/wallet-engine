@@ -18,6 +18,33 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   cannot be decoded (`INVALID_INVOICE`), since its settlement could never be
   proven. Security review 2026-10-28, finding 16.
 
+- **Security (chain swaps): a claim no longer trusts the maker.** `BoltzChainSwap`
+  used the maker's status strings and `height()` as proof of chain events:
+  `transaction.server.confirmed` opened the claim, `transaction.claimed` set
+  `userLockupSpent` and waived every guard, and the timeout was checked against
+  the maker's tip. A lying maker could have the wallet reveal the preimage against
+  an unconfirmed, replaceable lockup. Before any claim the engine now reads the
+  maker lockup from a trusted chain-data provider and checks that it pays the
+  swap script for the agreed amount at `minLockupConfirmations` depth (default
+  1), evaluates the timeout against the provider's tip, and pins the claim to the
+  verified transaction (`claimLockup`). `userLockupSpent` is set only once the
+  provider shows a spend of our lockup whose witness carries the preimage.
+  `sync()` keeps the maker's statuses as hints: `server_locked` is reached only
+  with chain backing. (Security review 2026-10-28, finding 12.)
+- **Breaking (chain swaps):** without a trusted provider for the destination
+  chain, `claim()` fails closed with `NO_CHAIN_DATA`. Set `chainData` (an
+  `IChainDataProvider`) or `bitcoinEsploraUrl` / `liquidEsploraUrl` on
+  `BoltzChainSwapConfig`; the URLs build an `EsploraChainDataProvider`. The named
+  opt-out `allowUnverifiedClaims: true` restores the previous maker-trusting
+  behaviour and must not be used in production. `allowZeroConf: true` waives only
+  the depth check.
+
+### Added
+
+- `IChainDataProvider` port (`tipHeight`, `getTransaction`, `getOutspend`) and
+  `EsploraChainDataProvider` (`@kaleidorg/wallet-engine/swap`) over the Esplora
+  HTTP API.
+
 ## [1.0.0-beta.79] - 2026-10-27
 
 ### Changed

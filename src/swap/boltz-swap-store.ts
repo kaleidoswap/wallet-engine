@@ -63,10 +63,16 @@ export interface BoltzChainSwapRecord {
    */
   claimTimeoutBlockHeight: number
   /**
-   * The maker has spent our lockup, only possible with the preimage our claim
-   * revealed. Once set, claims bypass the timeout guard — the secret is already out.
+   * A spend of our lockup carrying the preimage was OBSERVED on the source chain
+   * through the trusted chain-data provider. Only possible once the secret is
+   * public, so claims bypass the confirmation and timeout guards. Never set from a
+   * maker status alone.
    */
   userLockupSpent?: boolean
+  /** Maker lockup txid, once verified on the destination chain. */
+  serverLockupTxid?: string
+  /** Confirmations of the maker lockup at the last trusted read. */
+  serverLockupConfirmations?: number
   /** Address we must fund with `userLockAmount`. */
   lockupAddress: string
   lockupBip21?: string
