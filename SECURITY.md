@@ -50,6 +50,26 @@ When auditing this package, the highest-impact surfaces are:
   cryptographically bound; consumers must surface methods (`receiveMethodsOf`)
   rather than silently auto-pay one.
 
+## Fixing a Vulnerability (maintainers and agents)
+
+This repository is public, and the published packages lag the default branch,
+so a merged fix is not a shipped fix. Until a release containing the fix is
+published, nothing public may describe the bug in a way that helps exploit the
+versions people are running.
+
+- Pull-request titles and bodies, commit messages, issues, comments, code
+  comments, test names and the `[Unreleased]` changelog describe the change
+  neutrally: what is now validated or refused, not what an attacker could do.
+  No references to an unpublished review or audit, no finding numbers, no
+  severity ratings, no attack scenarios.
+- Exploitable bugs go through a GitHub security advisory with a temporary
+  private fork, or a branch the maintainers agree to merge and release
+  promptly. The release ships first; the advisory with the full write-up and
+  credit is published afterwards.
+- When in doubt, ask a maintainer before publishing anything. Edit history on
+  GitHub is permanent, so a disclosure cannot be undone.
+- Agents: see [AGENTS.md](AGENTS.md) for the same rules in operational form.
+
 ## Supported Versions
 
 This project is pre-1.0 (`1.0.0-beta.x`). Only the latest published beta receives
