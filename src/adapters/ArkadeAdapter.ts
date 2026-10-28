@@ -55,6 +55,7 @@ import {
 import { convertArkTxToUnifiedAll } from "../lib/arkade-converters";
 import { applyTransactionFilter } from "../lib/transaction-filter";
 import { decodeBolt11Invoice } from "../lib/bolt11";
+import { stripLightningScheme } from "../lib/lightning-uri";
 import {
   ProtocolType,
   Layer,
@@ -82,17 +83,9 @@ import {
 /** Bare bolt11 prefixes (lnbc / lntb / lnbcrt / lnsb) — case-insensitive. */
 function isLightningInvoice(value: string): boolean {
   if (!value) return false;
-  const lower = value.trim().toLowerCase();
-  // Strip a `lightning:` URI prefix if present.
-  const body = lower.startsWith("lightning:") ? lower.slice("lightning:".length) : lower;
+  // Same `lightning:` normalisation as the spend policy (finding 13).
+  const body = stripLightningScheme(value).toLowerCase();
   return /^ln(bc|tb|bcrt|sb)/.test(body);
-}
-
-function stripLightningPrefix(value: string): string {
-  const trimmed = value.trim();
-  return trimmed.toLowerCase().startsWith("lightning:")
-    ? trimmed.slice("lightning:".length)
-    : trimmed;
 }
 
 /**
@@ -405,7 +398,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
     if (isLightningInvoice(destination)) {
       try {
-        const decoded = decodeBolt11Invoice(stripLightningPrefix(destination));
+        const decoded = decodeBolt11Invoice(stripLightningScheme(destination));
         return {
           paymentHash: decoded.paymentHash,
           amount: decoded.amountSat == null ? undefined : Number(decoded.amountSat),

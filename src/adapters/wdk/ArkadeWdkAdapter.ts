@@ -56,6 +56,7 @@ import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
 import { arkadeIntentsClientManager } from '../../lib/arkade-intents-client-manager'
+import { stripLightningScheme } from '../../lib/lightning-uri'
 import {
   ArkadeIntentsLightning,
   transactionStatusOf,
@@ -67,7 +68,8 @@ import {
 
 const isBitcoinAddress = (value: string): boolean => /^(bc1|tb1|bcrt1)/i.test(value.trim())
 const isLightningInvoice = (value: string): boolean => {
-  const body = value.trim().toLowerCase().replace(/^lightning:/, '')
+  // Same `lightning:` normalisation as the spend policy (finding 13).
+  const body = stripLightningScheme(value).toLowerCase()
   return /^ln(bc|tb|bcrt|sb)/.test(body)
 }
 
@@ -464,7 +466,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   }
 
   async decodeInvoice(invoice: string): Promise<DecodedInvoice> {
-    const dest = invoice.trim()
+    const dest = stripLightningScheme(invoice)
     if (isBolt11(dest)) {
       const { amountSat } = decodeBolt11(dest)
       return { paymentHash: '', amount: amountSat, expiresAt: 0, destination: dest }
@@ -509,7 +511,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   // --- Send ---------------------------------------------------------------
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
     this.assertConnected()
-    const dest = request.invoice.trim()
+    const dest = stripLightningScheme(request.invoice)
 
     // Checked before the amount so a bolt11 never falls through to sendBitcoin.
     if (isLightningInvoice(dest)) {

@@ -65,10 +65,12 @@ describe('F-F1: the spend cap must see the amount that will actually be paid', (
 
   it('for an AMOUNTLESS invoice the caller amount is still what counts', async () => {
     // Here the adapters DO forward request.amount, so the policy must use it.
+    // The adapter is Spark, whose fee budget counts against the cap too (finding
+    // 17), so the caller bounds it explicitly to stay under the cap.
     const { m, paid } = managerWith({ maxAmountSat: 1000 })
-    await expect(m.sendPayment({ invoice: AMOUNTLESS, amount: 5000 } as any))
+    await expect(m.sendPayment({ invoice: AMOUNTLESS, amount: 5000, maxFeeSats: 0 } as any))
       .rejects.toBeInstanceOf(PolicyError)
-    await m.sendPayment({ invoice: AMOUNTLESS, amount: 900 } as any)
+    await m.sendPayment({ invoice: AMOUNTLESS, amount: 900, maxFeeSats: 100 } as any)
     expect(paid).toHaveLength(1)
   })
 

@@ -24,11 +24,18 @@ export interface PolicyRequest {
   operation: PolicyOperation
   /** Protocol the operation runs on (the active adapter). */
   protocol?: ProtocolType
-  /** Amount in satoshis for send/keysend/swap. Omitted when not known/applicable. */
+  /**
+   * Amount in satoshis for send/keysend/swap. Omitted when not known/applicable.
+   * For an asset-bearing send/keysend this is the satoshi carrier amount; the
+   * asset itself is authorised separately through `assetId`/`assetAmount`.
+   */
   amountSat?: number
-  /** Non-BTC swap input asset. Omitted for satoshi-denominated operations. */
+  /**
+   * Non-BTC asset moved by the operation: a swap's input asset, or the RGB
+   * asset attached to a send/keysend. Omitted for satoshi-only operations.
+   */
   assetId?: string
-  /** Non-BTC swap input amount in base units, as a decimal string. */
+  /** Amount of `assetId` in raw base units, as a decimal string. */
   assetAmount?: string
   /** Raw destination string (invoice/address); classified internally for kind checks. */
   destination?: string
@@ -45,6 +52,11 @@ export interface CapabilityGrant {
   protocols?: ProtocolType[]
   /** Per-transaction spend cap (sats) for send/keysend/swap. Omit = no grant cap. */
   maxAmountSat?: number
+  /**
+   * Per-asset raw-unit caps for asset-bearing send/keysend/swap. A grant that
+   * sets any cap denies non-BTC assets it does not list.
+   */
+  maxAmountByAsset?: Record<string, string>
   /** Allowed destination kinds. Omit = any. */
   allowedDestinationKinds?: DestinationKind[]
   /** Exact-match destination allowlist. Omit = any destination. */
@@ -59,7 +71,10 @@ export interface SigningPolicy {
   mode?: 'allow' | 'deny'
   /** Global per-transaction spend cap (sats), applied on top of any grant cap. */
   maxAmountSat?: number
-  /** Per-asset raw-unit swap caps; active policies deny unlisted non-BTC assets. */
+  /**
+   * Per-asset raw-unit caps for asset-bearing send/keysend/swap. A policy that
+   * sets any cap denies non-BTC assets it does not list.
+   */
   maxAmountByAsset?: Record<string, string>
   /** Per-app capability grants, resolved by `PolicyRequest.grantId`. */
   grants?: CapabilityGrant[]
@@ -105,6 +120,59 @@ function isDecimalBaseUnits(value: unknown): value is string {
   return typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value)
 }
 
+/** Caps a policy level (global or grant) can set. */
+interface AmountCaps {
+  maxAmountSat?: number
+  maxAmountByAsset?: Record<string, string>
+}
+
+/**
+ * Authorise the non-BTC asset an amount-op carries against one level's caps.
+ * A satoshi cap cannot bound another asset without a price oracle, so a level
+ * that caps anything must list the asset explicitly; unlisted assets fail
+ * closed. Returns null when allowed.
+ */
+function checkAssetCap(
+  req: PolicyRequest,
+  caps: AmountCaps,
+  level: { overCode: string; label: string },
+): PolicyDecision | null {
+  if (caps.maxAmountSat == null && caps.maxAmountByAsset == null) return null
+  const assetId = req.assetId!
+  const hasAssetCap =
+    caps.maxAmountByAsset != null && Object.prototype.hasOwnProperty.call(caps.maxAmountByAsset, assetId)
+  const cap = hasAssetCap ? caps.maxAmountByAsset![assetId] : undefined
+  if (cap == null) {
+    return deny(
+      'AMOUNT_UNKNOWN',
+      `'${req.operation}' amount for asset '${assetId}' has no configured base-unit cap in ${level.label}`,
+      { asset: assetId, cap: null },
+    )
+  }
+  if (!isDecimalBaseUnits(cap)) {
+    return deny(
+      'AMOUNT_INVALID',
+      `configured cap for asset '${assetId}' in ${level.label} is not a base-unit decimal string`,
+      { asset: assetId, cap },
+    )
+  }
+  if (req.assetAmount == null) {
+    return deny(
+      'AMOUNT_UNKNOWN',
+      `'${req.operation}' amount for asset '${assetId}' is unknown but ${level.label} sets a cap`,
+      { asset: assetId, cap },
+    )
+  }
+  if (BigInt(req.assetAmount) > BigInt(cap)) {
+    return deny(
+      level.overCode,
+      `amount ${req.assetAmount} of asset '${assetId}' exceeds ${level.label} limit ${cap}`,
+      { asset: assetId, amount: req.assetAmount, cap },
+    )
+  }
+  return null
+}
+
 /**
  * Evaluate a request against a policy. Pure — same input, same output, no I/O.
  */
@@ -128,46 +196,27 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
     )
   }
 
-  // 1. Global per-transaction cap, regardless of grants/mode. When a cap is set for
-  // an amount-op but the amount is unknown, fail CLOSED: an unknown amount must
-  // never slip past a spend limit (e.g. an unresolved amountless BOLT11).
-  const isNonBtcSwap = req.operation === 'swap' && req.assetId != null && !isBtcAssetId(req.assetId)
-  const hasGlobalCap = policy.maxAmountSat != null || policy.maxAmountByAsset != null
+  // An asset amount with no asset identity cannot be authorised by anything.
+  if (req.assetAmount != null && (req.assetId == null || req.assetId.trim() === '')) {
+    return deny('ASSET_UNKNOWN', `'${req.operation}' carries an asset amount without an asset id`, {
+      amount: req.assetAmount,
+    })
+  }
 
-  if (isNonBtcSwap && hasGlobalCap) {
-    const hasAssetCap =
-      policy.maxAmountByAsset != null &&
-      Object.prototype.hasOwnProperty.call(policy.maxAmountByAsset, req.assetId!)
-    const cap = hasAssetCap ? policy.maxAmountByAsset![req.assetId!] : undefined
-    if (cap == null) {
-      return deny(
-        'AMOUNT_UNKNOWN',
-        `'swap' amount for asset '${req.assetId}' has no configured base-unit cap`,
-        { asset: req.assetId, cap: null },
-      )
-    }
-    if (!isDecimalBaseUnits(cap)) {
-      return deny(
-        'AMOUNT_INVALID',
-        `configured cap for asset '${req.assetId}' is not a base-unit decimal string`,
-        { asset: req.assetId, cap },
-      )
-    }
-    if (req.assetAmount == null) {
-      return deny(
-        'AMOUNT_UNKNOWN',
-        `'swap' amount for asset '${req.assetId}' is unknown but a cap is set`,
-        { asset: req.assetId, cap },
-      )
-    }
-    if (BigInt(req.assetAmount) > BigInt(cap)) {
-      return deny(
-        'AMOUNT_OVER_GLOBAL_LIMIT',
-        `amount ${req.assetAmount} of asset '${req.assetId}' exceeds global limit ${cap}`,
-        { asset: req.assetId, amount: req.assetAmount, cap },
-      )
-    }
-  } else if (policy.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
+  // Which value flows: a non-BTC swap moves only its input asset; a send or
+  // keysend may carry an RGB asset on top of its satoshi amount, so both the
+  // asset and the satoshi carrier are authorised (finding 15).
+  const carriesAsset = AMOUNT_OPS.has(req.operation) && req.assetId != null && !isBtcAssetId(req.assetId)
+  const checksSats = AMOUNT_OPS.has(req.operation) && !(carriesAsset && req.operation === 'swap')
+
+  // 1. Global per-transaction caps, regardless of grants/mode. When a cap is set
+  // for an amount-op but the amount is unknown, fail CLOSED: an unknown amount
+  // must never slip past a spend limit (e.g. an unresolved amountless BOLT11).
+  if (carriesAsset) {
+    const denied = checkAssetCap(req, policy, { overCode: 'AMOUNT_OVER_GLOBAL_LIMIT', label: 'global policy' })
+    if (denied) return denied
+  }
+  if (checksSats && policy.maxAmountSat != null) {
     if (req.amountSat == null) {
       return deny(
         'AMOUNT_UNKNOWN',
@@ -204,7 +253,14 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
   if (grant.protocols && req.protocol && !grant.protocols.includes(req.protocol)) {
     return deny('PROTOCOL_NOT_GRANTED', `grant '${grant.id}' may not act on ${req.protocol}`)
   }
-  if (grant.maxAmountSat != null && AMOUNT_OPS.has(req.operation)) {
+  if (carriesAsset) {
+    const denied = checkAssetCap(req, grant, {
+      overCode: 'AMOUNT_OVER_GRANT_LIMIT',
+      label: `grant '${grant.id}'`,
+    })
+    if (denied) return denied
+  }
+  if (checksSats && grant.maxAmountSat != null) {
     if (req.amountSat == null) {
       return deny(
         'AMOUNT_UNKNOWN',
@@ -239,6 +295,51 @@ export function evaluatePolicy(req: PolicyRequest, policy: SigningPolicy): Polic
     }
   }
   return { allowed: true }
+}
+
+/** Asset fields a runtime caller can attach: typed camelCase or RLN node snake_case. */
+export interface AssetTermsInput {
+  assetId?: unknown
+  asset_id?: unknown
+  assetAmount?: unknown
+  asset_amount?: unknown
+}
+
+export interface AssetTerms {
+  assetId?: string
+  assetAmount?: string
+}
+
+function assetAmountToBaseUnits(value: unknown): string {
+  if (typeof value === 'bigint') return value.toString()
+  if (typeof value === 'string') return value.trim()
+  // Anything else stringifies to a value `evaluatePolicy` rejects unless it is
+  // a positive integer (`1.5`, `NaN`, `-1`, `[object Object]` all fail).
+  return String(value)
+}
+
+/**
+ * Normalise the asset terms attached to a send/keysend for policy evaluation.
+ * Both spellings are read because different adapters honour different ones;
+ * spellings that disagree are refused rather than resolved in the caller's
+ * favour. A BTC identifier means no asset. Throws `PolicyError` on conflict.
+ */
+export function normalizeAssetTerms(input: AssetTermsInput): AssetTerms {
+  const ids = [input.assetId, input.asset_id].filter((v) => v != null && v !== '')
+  const amounts = [input.assetAmount, input.asset_amount].filter((v) => v != null && v !== '')
+  if (ids.length === 2 && String(ids[0]).trim() !== String(ids[1]).trim()) {
+    throw new PolicyError('ASSET_MISMATCH', 'assetId and asset_id disagree', { ids })
+  }
+  if (amounts.length === 2 && assetAmountToBaseUnits(amounts[0]) !== assetAmountToBaseUnits(amounts[1])) {
+    throw new PolicyError('ASSET_MISMATCH', 'assetAmount and asset_amount disagree', { amounts })
+  }
+  const assetId = ids.length > 0 ? String(ids[0]).trim() : undefined
+  const assetAmount = amounts.length > 0 ? assetAmountToBaseUnits(amounts[0]) : undefined
+  if (assetId != null && isBtcAssetId(assetId)) return {}
+  return {
+    ...(assetId != null && assetId !== '' ? { assetId } : {}),
+    ...(assetAmount != null ? { assetAmount } : {}),
+  }
 }
 
 /** Throwing wrapper for imperative call sites (e.g. ProtocolManager). No-op when policy is undefined. */

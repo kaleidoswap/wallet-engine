@@ -45,6 +45,27 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `EsploraChainDataProvider` (`@kaleidorg/wallet-engine/swap`) over the Esplora
   HTTP API.
 
+- **Security (policy):** `lightning:`-prefixed invoices and the spend cap now go
+  through one shared normaliser (`stripLightningScheme`) used by the policy and
+  both Arkade adapters, so the policy always decodes the invoice the adapter
+  pays; an amount-bearing invoice overrides a caller-supplied `amount`.
+  (Security review 2026-10-28, finding 13.)
+- **Security (policy):** send and keysend now authorise an attached RGB asset
+  (`assetId`/`assetAmount`, runtime `asset_id`/`asset_amount`, or the terms an
+  RGB Lightning invoice encodes) in raw base units through `maxAmountByAsset`,
+  which `CapabilityGrant` now supports too. A policy or grant that sets any cap
+  denies non-BTC assets it does not list (`AMOUNT_UNKNOWN`); conflicting
+  spellings or caller terms that contradict the invoice are refused
+  (`ASSET_MISMATCH`); an RGB invoice the node cannot decode fails closed.
+  (Security review 2026-10-28, finding 15.)
+- **Security (policy, Spark):** the per-transaction cap now covers
+  `principal + maxFeeSats` for Spark Lightning sends (caller value, legacy
+  `maxFee` alias or the 1000-sat default), with safe-integer arithmetic that
+  fails closed on overflow. Native `SparkAdapter` honours the documented
+  `maxFeeSats` field; both Spark adapters refuse a malformed fee budget.
+  Callers under a cap should bound `maxFeeSats` explicitly.
+  (Security review 2026-10-28, finding 17.)
+
 ## [1.0.0-beta.79] - 2026-10-27
 
 ### Changed
