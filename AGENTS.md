@@ -17,6 +17,32 @@ Verify the shape before you write against it — one command, no network:
 npm install && npm run example:tour
 ```
 
+## This repository is public: fix security bugs without disclosing them
+
+Everything pushed here, including pull-request titles and bodies, commit
+messages, issues, comments and `CHANGELOG.md`, is visible to anyone the moment
+it lands, and the npm package lags `main`, so a merged fix is not a shipped
+fix. Until a release that contains the fix is published, a public description
+of the bug is an exploit guide for every current user.
+
+1. **Check visibility before any outward-facing action**
+   (`gh repo view --json visibility`). Assume public.
+2. **Never publish, anywhere public, before the fixed release exists:** a
+   reference to an unpublished security review or audit, finding numbers or
+   severity ratings, exploit or attack scenarios, or anything else that
+   explains how to abuse an unpatched version. This includes PR bodies,
+   commit messages, code comments, test names and the `[Unreleased]`
+   changelog.
+3. **Describe the change neutrally:** what is now validated or refused, not
+   what an attacker could do.
+4. **Prefer the private path for anything exploitable:** a GitHub security
+   advisory with a temporary private fork, or a branch the maintainer agrees
+   to merge and release promptly. Release first; the maintainer publishes the
+   advisory with the full write-up afterwards.
+5. **When in doubt, stop and ask the maintainer** before pushing or opening
+   anything. GitHub keeps edit history, so a disclosure cannot be undone.
+6. **Pass these rules on explicitly** when delegating to subagents.
+
 ## Non-negotiable invariants
 
 Violating any of these is a bug even if it type-checks and tests pass.
