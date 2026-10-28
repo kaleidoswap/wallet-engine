@@ -23,18 +23,22 @@ import { describe, expect, it, vi } from 'vitest'
  * "a locked wallet must not be able to keep signing."
  */
 
-const state = vi.hoisted(() => ({ wallet: null as any, failNext: false }))
+const state = vi.hoisted(() => ({ wallet: null as any, token: null as symbol | null, failNext: false }))
 vi.mock('../../src/lib/spark-client-manager', () => ({
   sparkClientManager: {
     initialize: async () => {
       if (state.failNext) {
         state.wallet = null // mirrors _doInitialize: teardown first, then null on failure
+        state.token = null
         throw new Error('gateway unreachable')
       }
       state.wallet = {}
+      state.token = Symbol('session')
+      return state.token
     },
-    disconnect: async () => { state.wallet = null },
+    disconnect: async () => { state.wallet = null; state.token = null },
     isInitialized: () => !!state.wallet,
+    ownsSession: (token: symbol | null) => !!state.wallet && token === state.token,
     getWallet: () => state.wallet,
   },
 }))

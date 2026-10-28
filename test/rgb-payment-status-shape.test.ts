@@ -7,6 +7,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('RgbAdapter.getPaymentStatus SDK result shape', () => {
   it('reads amt_msat and converts the provider timestamp from seconds', async () => {
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       rln: {

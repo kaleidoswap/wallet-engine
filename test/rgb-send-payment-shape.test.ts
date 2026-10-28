@@ -8,6 +8,7 @@ afterEach(() => vi.restoreAllMocks())
 describe('RgbAdapter.sendPayment SDK result shape', () => {
   it('uses the invoice amount when SendPaymentResponse has no amount or fee fields', async () => {
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       rln: {

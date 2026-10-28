@@ -18,7 +18,13 @@
  */
 
 import type { BarkConfig, BarkMaintenanceReport } from '../types/bark'
-import { WalletSessionGuard, type SessionAttempt } from './wallet-session'
+import type { BarkClient } from './bark-client'
+import {
+  ClientOwnership,
+  WalletSessionGuard,
+  type SessionAttempt,
+  type WalletSessionToken,
+} from './wallet-session'
 import { log } from './log'
 
 // The package ships its types with the bundler build; `import type` is erased,
@@ -87,9 +93,11 @@ function sameBarkConfig(a: unknown, b: unknown): boolean {
   )
 }
 
-class BarkClientManager {
+class BarkClientManager implements BarkClient {
   private wallet: BarkWallet | null = null
   private config: BarkConfig | null = null
+  /** Token of the installed wallet; adapters bind to it in connect() (see ClientOwnership). */
+  private readonly ownership = new ClientOwnership('BarkClientManager')
   private readonly session = new WalletSessionGuard({
     name: 'BarkClientManager',
     sameWallet: sameBarkConfig,
@@ -98,11 +106,19 @@ class BarkClientManager {
       new Error('Bark client is already initializing with a different config. Call dispose() first.'),
   })
 
-  initialize(config: BarkConfig): Promise<void> {
+  /**
+   * Open the wallet. Resolves with the ownership token of the wallet this call
+   * installed, or null when a teardown superseded it and nothing was installed.
+   * An adapter must keep that token and present it on every operation.
+   */
+  initialize(config: BarkConfig): Promise<WalletSessionToken | null> {
     return this.session.begin(WALLET_SLOT, config, (attempt) => this._doInitialize(config, attempt))
   }
 
-  private async _doInitialize(config: BarkConfig, attempt: SessionAttempt): Promise<void> {
+  private async _doInitialize(
+    config: BarkConfig,
+    attempt: SessionAttempt,
+  ): Promise<WalletSessionToken | null> {
     if (this.wallet) {
       log.warn('[BarkClientManager] Wallet already initialized, re-initializing...')
       await this.dispose()
@@ -139,9 +155,10 @@ class BarkClientManager {
       },
     )
 
-    if (!(await attempt.claim(() => wallet.free()))) return
+    if (!(await attempt.claim(() => wallet.free()))) return null
     this.wallet = wallet
     log.info('[BarkClientManager] Bark wallet opened in %dms', Date.now() - started)
+    return this.ownership.issue()
   }
 
   /**
@@ -168,6 +185,15 @@ class BarkClientManager {
     return this.wallet !== null
   }
 
+  /**
+   * True only while the wallet `token` was issued for is the installed one. An
+   * adapter holding an older token was superseded by a later initialize() or
+   * dispose() and must not operate on this wallet.
+   */
+  ownsSession(token: WalletSessionToken | null | undefined): boolean {
+    return this.wallet !== null && this.ownership.owns(token)
+  }
+
   /** Connected config with the mnemonic REDACTED. */
   getConfig(): BarkConfig | null {
     return this.config ? { ...this.config, mnemonic: '' } : null
@@ -175,6 +201,7 @@ class BarkClientManager {
 
   async dispose(): Promise<void> {
     this.session.invalidate()
+    this.ownership.revoke()
     const wallet = this.wallet
     this.wallet = null
     this.config = null

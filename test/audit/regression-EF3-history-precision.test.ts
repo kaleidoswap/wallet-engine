@@ -69,6 +69,7 @@ describe('E-F3: RgbAdapter.listTransactions resolves precision per asset', () =>
     Object.assign(a as any, { connected: true, config: { protocol: 'RGB_LN', network: 'regtest' } })
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue(client as any)
     return a
   }

@@ -44,6 +44,7 @@ function adapterFor(response: unknown): RgbAdapter {
   })
   vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
     maker: { getQuote: async () => response },
   } as never)
@@ -111,6 +112,7 @@ describe('E-F4: RgbAdapter.getSwapQuote applies the maker money coercion', () =>
     })
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     const swap: Record<string, unknown> = { status: 'Waiting' }
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       maker: { getAtomicSwapStatus: async () => swap },

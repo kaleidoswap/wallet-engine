@@ -1,4 +1,5 @@
 import type { BarkBalance, BarkConfig } from '../types/bark.js'
+import type { WalletSessionToken } from './wallet-session.js'
 
 /** Domain boundary shared by browser and native Bark bindings. */
 export interface BarkWalletMovement {
@@ -52,9 +53,18 @@ export interface BarkWalletPort {
 }
 
 export interface BarkClient {
-  initialize(config: BarkConfig): Promise<void>
+  /**
+   * Open the wallet and resolve with the ownership token of that install, or
+   * null when a teardown superseded the open and nothing was installed. The
+   * adapter keeps the token and presents it to `ownsSession` before every
+   * operation, so an adapter whose wallet was replaced by a later initialize()
+   * fails closed instead of operating on the replacement.
+   */
+  initialize(config: BarkConfig): Promise<WalletSessionToken | null>
   dispose(): Promise<void>
   isInitialized(): boolean
+  /** True only while `token` identifies the wallet installed right now. */
+  ownsSession(token: WalletSessionToken | null | undefined): boolean
   isBarkAddress(address: string): boolean
   getWallet(): BarkWalletPort
 }

@@ -35,9 +35,10 @@ const sparkState = vi.hoisted(() => ({ wallet: null as unknown }))
 vi.mock('../../src/lib/spark-client-manager', () => ({
   sparkClientManager: {
     isInitialized: () => sparkState.wallet !== null,
+    ownsSession: () => sparkState.wallet !== null,
     getWallet: () => sparkState.wallet,
     getConfig: () => ({ protocol: 'SPARK', network: 'regtest', mnemonic: '' }),
-    initialize: async () => {},
+    initialize: async () => Symbol('session'),
     disconnect: async () => {},
     adoptExternalWallet: () => {},
     releaseExternalWallet: () => {},

@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { RgbAdapter } from '../../src/adapters/RgbAdapter'
 import { KaleidoswapSwap } from '../../src/swap/KaleidoswapSwap'
@@ -59,6 +59,7 @@ describe('verifySwapstring', () => {
 describe('RgbAdapter.executeSwap binds the swapstring to the approval', () => {
   function adapterWith(swapstring: string) {
     const calls = { whitelisted: [] as string[], executed: 0 }
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     ;(kaleidoClientManager as any).client = {
       maker: {
         initSwap: async () => ({ swapstring, payment_hash: HASH, access_token: 'tok' }),

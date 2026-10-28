@@ -19,9 +19,10 @@ import { resolveRgbFeeRatePolicy, MAINNET_FEE_FLOOR } from '../../src/lib/rgb-fe
 const state = { client: null as any, initConfig: null as any }
 vi.mock('../../src/lib/kaleido-client-manager', () => ({
   kaleidoClientManager: {
-    initialize: (cfg: any) => { state.initConfig = cfg },
+    initialize: (cfg: any) => { state.initConfig = cfg; return Symbol('session') },
     reset: () => {},
     isInitialized: () => true,
+    ownsSession: () => true,
     hasNode: () => true,
     getClient: () => state.client,
   },

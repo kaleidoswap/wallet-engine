@@ -35,6 +35,7 @@ function platformStorage() {
 }
 
 function connectedNative(client: any): RgbAdapter {
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   ;(kaleidoClientManager as any).client = client
   ;(kaleidoClientManager as any).config = { baseUrl: 'https://maker', nodeUrl: 'https://node' }
   const adapter = new RgbAdapter()

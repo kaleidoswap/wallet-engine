@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { RgbAdapter } from '../../src/adapters/RgbAdapter'
 import { kaleidoClientManager } from '../../src/lib/kaleido-client-manager'
 import type { SwapQuote } from '../../src/types/base'
@@ -25,6 +25,7 @@ function quote(over: Partial<SwapQuote>): SwapQuote {
 let initCalls = 0
 beforeEach(() => {
   initCalls = 0
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   ;(kaleidoClientManager as any).client = {
     maker: {
       initSwap: async () => { initCalls++; return { swapstring: '1000/btc/1000/USDT/1790000000/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', payment_hash: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', access_token: 't' } },

@@ -77,8 +77,9 @@ const sparkState = vi.hoisted(() => ({ connected: true }))
 vi.mock('../../src/lib/spark-client-manager', () => ({
   sparkClientManager: {
     isInitialized: () => sparkState.connected,
+    ownsSession: () => sparkState.connected,
     getWallet: () => ({}),
-    initialize: async () => {},
+    initialize: async () => Symbol('session'),
     disconnect: async () => {},
   },
 }))
@@ -89,8 +90,9 @@ vi.mock('../../src/lib/arkade-client-manager', async (importOriginal) => {
     ...actual,
     arkadeClientManager: {
       isInitialized: () => arkadeState.connected,
+      ownsSession: () => arkadeState.connected,
       getWallet: () => ({}),
-      initialize: async () => {},
+      initialize: async () => Symbol('session'),
       disconnect: async () => {},
     },
   }

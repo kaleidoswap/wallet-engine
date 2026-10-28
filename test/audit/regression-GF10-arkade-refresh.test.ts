@@ -27,6 +27,7 @@ function connectedAdapter() {
     getVtxos: async () => [],
   }
   vi.spyOn(arkadeClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(arkadeClientManager, 'ownsSession').mockReturnValue(true)
   vi.spyOn(arkadeClientManager, 'getWallet').mockReturnValue(wallet as never)
   Object.assign(adapter as never, { config: { protocol: 'ARKADE', network: 'signet' } })
   return adapter

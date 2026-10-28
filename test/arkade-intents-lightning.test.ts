@@ -575,6 +575,7 @@ function wallet() {
 
 function nativeAdapter(intents: ArkadeIntentsLightning) {
   vi.spyOn(arkadeClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(arkadeClientManager, 'ownsSession').mockReturnValue(true)
   vi.spyOn(arkadeClientManager, 'getWallet').mockReturnValue(wallet() as never)
   return Object.assign(new ArkadeAdapter(), { intents }) as ArkadeAdapter
 }

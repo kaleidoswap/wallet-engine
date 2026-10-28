@@ -311,6 +311,8 @@ export const ErrorCode = {
   NOT_SUPPORTED: 'NOT_SUPPORTED',
   NOT_CONFIGURED: 'NOT_CONFIGURED',
   VALIDATION_ERROR: 'VALIDATION_ERROR',
+  /** The shared client this adapter instance bound to was replaced by a later connect(). */
+  SESSION_SUPERSEDED: 'SESSION_SUPERSEDED',
 } as const
 
 export type ErrorCodeType = (typeof ErrorCode)[keyof typeof ErrorCode]

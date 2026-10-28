@@ -5,10 +5,11 @@ const cleanup = vi.fn().mockResolvedValue({ status: 'absent' })
 vi.mock('../src/lib/legacy-arkade-swaps-cleanup', () => ({ cleanupLegacyArkadeSwapsDb: cleanup }))
 vi.mock('../src/lib/arkade-client-manager', () => ({
   arkadeClientManager: {
-    initialize: vi.fn().mockResolvedValue(undefined),
+    initialize: vi.fn().mockResolvedValue(Symbol('session')),
     getWallet: () => ({}),
     disconnect: vi.fn().mockResolvedValue(undefined),
     isInitialized: () => true,
+    ownsSession: () => true,
   },
 }))
 

@@ -55,6 +55,7 @@ describe('AUDIT C-F5: transfer timestamp units', () => {
       },
     }
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue(fakeClient as any)
 

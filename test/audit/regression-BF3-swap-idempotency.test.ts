@@ -122,6 +122,7 @@ describe('B-F3: approved RFQs execute at most once', () => {
       },
       rln: { getTakerPubkey: async () => 'native-wallet', whitelistSwap: async () => {} },
     }
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     ;(kaleidoClientManager as any).client = client
     ;(kaleidoClientManager as any).config = { baseUrl: 'https://maker', nodeUrl: 'https://node' }
     const adapter = new RgbAdapter()

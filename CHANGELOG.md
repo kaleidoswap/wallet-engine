@@ -65,6 +65,25 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   `maxFeeSats` field; both Spark adapters refuse a malformed fee budget.
   Callers under a cap should bound `maxFeeSats` explicitly.
   (Security review 2026-10-28, finding 17.)
+### Security
+
+- Native Spark, RGB, Arkade and browser Bark adapters are now bound to the
+  client their own `connect()` installed on the shared manager singleton
+  (security review 2026-10-28, finding 14). Each manager's `initialize()`
+  returns an ownership token and exposes `ownsSession(token)`; after
+  `connect(A)` on one instance and `connect(B)` on another, the first instance
+  reports `isConnected() === false`, every operation (send, keysend, sign,
+  swap, claim, balance) rejects with `ErrorCode.SESSION_SUPERSEDED`, and its
+  `disconnect()` only forgets its own binding instead of tearing down the
+  wallet the other instance owns. A `connect()` that is superseded mid-handshake
+  now rejects instead of resolving without a wallet. Custom `BarkClient`
+  implementations must return the token from `initialize()` and implement
+  `ownsSession()`.
+- Native Arkade: a failed direct re-connect clears the previous wallet's
+  config (adapter and manager) and `signMessage()` requires a live, owned
+  session, so a torn-down wallet can no longer keep signing (finding 18). A
+  `connect()` that fails after the wallet was installed tears that wallet down
+  again.
 
 ## [1.0.0-beta.79] - 2026-10-27
 
