@@ -262,6 +262,20 @@ const result = await swap.executeSwap({
 const status = await swap.getSwapStatus(result.swapId) // pending → confirmed/failed
 ```
 
+### Chain swap creation terms
+
+`BoltzChainSwap.createSwap` requires `minReceiveAmountSat`: the caller-approved
+minimum amount of the maker's destination-chain lockup, before the claim
+transaction fee. Set it from the terms the user accepted, including a claim-fee
+allowance when enforcing a minimum net receipt. Creation rejects a lower maker
+amount before returning a funding address. Configure `chainData` or the destination
+chain's Esplora URL so creation can also verify timeout headroom against a trusted
+tip. `allowUnverifiedClaims` does not waive these creation checks.
+
+Spark BTC sends resolve encoded invoice amounts before policy evaluation and
+reject conflicting caller amounts. Token invoices must use the asset-payment
+surface; `sendPayment` accepts sats invoices only.
+
 ### `@kaleidorg/swap-sdk` versions
 
 The engine needs `@kaleidorg/swap-sdk` 0.12 (peer range `^0.12.0`), for both the

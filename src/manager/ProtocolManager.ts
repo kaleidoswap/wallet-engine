@@ -3,6 +3,7 @@
  * Ported from rate-extension/src/protocols/manager/ProtocolManager.ts
  */
 
+import { PROTOCOL_CAPABILITIES } from '../capabilities/index'
 import {
   ProtocolType,
   UnifiedAsset,
@@ -451,7 +452,23 @@ export class ProtocolManager {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
+    // Snapshot the payment before asynchronous decoding and authorise that same request.
+    request = { ...request }
     const adapter = this.getActiveAdapterUnchecked()
+    if (this.policy && PROTOCOL_CAPABILITIES[adapter.protocolName].decodesNativePaymentTerms &&
+        !isBolt11(stripLightningScheme(request.invoice))) {
+      try {
+        const decoded = await adapter.decodeInvoice(request.invoice)
+        if (decoded.amount != null) {
+          if (request.amount != null && request.amount !== decoded.amount) {
+            throw new Error('Invoice amount differs from the requested amount')
+          }
+          request.amount = decoded.amount
+        }
+      } catch (error) {
+        throw new PolicyError('AMOUNT_UNKNOWN', "Policy denied 'send': native payment terms could not be resolved", error)
+      }
+    }
     const asset = await this.resolveSendAssetTerms(adapter, request)
     this.enforce('send', {
       amountSat: this.resolveSendAuthorizedSat(adapter, request),

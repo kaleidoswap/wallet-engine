@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { BoltzChainSwap, nextPhase } from '../src/swap/BoltzChainSwap'
 import { BoltzChainSwapStore, encode, decode } from '../src/swap/boltz-swap-store'
 import { boltzSwapClientManager } from '../src/lib/boltz-swap-client-manager'
-import type { IStorageProvider } from '../src/ports'
+import type { IStorageProvider, IChainDataProvider } from '../src/ports'
 
 /**
  * BTC <-> L-BTC chain swaps. The invariants under test decide whether a funded swap
@@ -73,9 +73,15 @@ function installFakeSdk(overrides: Record<string, any> = {}) {
   return client
 }
 
+const creationChainData: IChainDataProvider = {
+  tipHeight: async () => 900,
+  getTransaction: async () => null,
+  getOutspend: async () => ({ spent: false }),
+}
+
 function makeSwap() {
   const store = new BoltzChainSwapStore(new MemoryStorage())
-  return new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+  return new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
 }
 
 beforeEach(() => {
@@ -200,12 +206,46 @@ describe('createSwap', () => {
     fromLayer: 'BTC_L1' as const,
     toLayer: 'BTC_LIQUID' as const,
     amountSat: 100_000,
+    minReceiveAmountSat: 99_000,
     destinationAddress: 'el1qdestination',
   }
 
+  it.each([undefined, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'rejects an invalid minimum receive amount %s', async (minReceiveAmountSat) => {
+      await expect(makeSwap().createSwap({ ...PARAMS, minReceiveAmountSat } as any))
+        .rejects.toThrow(/minimum receive amount/)
+    },
+  )
+
+  it('rejects an amount below the approved minimum without storing a funding record', async () => {
+    const store = new BoltzChainSwapStore(new MemoryStorage())
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
+    await expect(swap.createSwap({ ...PARAMS, minReceiveAmountSat: 99_001 }))
+      .rejects.toThrow(/below the minimum/)
+    expect(await store.get('swap-1')).toBeNull()
+    await expect(swap.createSwap({ ...PARAMS, minReceiveAmountSat: 98_999 }))
+      .resolves.toMatchObject({ serverLockAmount: 99_000 })
+  })
+
+  it('requires trusted chain data even when unverified claims are enabled', async () => {
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', allowUnverifiedClaims: true },
+      new BoltzChainSwapStore(new MemoryStorage()))
+    await expect(swap.createSwap(PARAMS)).rejects.toThrow(/trusted destination chain data/)
+  })
+
+  it.each([4990, 5000, 5001, NaN, -1, Infinity, 1.5])(
+    'does not return a funding record for an unusable destination tip %s', async (tip) => {
+      const store = new BoltzChainSwapStore(new MemoryStorage())
+      const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic',
+        chainData: { ...creationChainData, tipHeight: async () => tip } }, store)
+      await expect(swap.createSwap(PARAMS)).rejects.toThrow(/tip|headroom/)
+      expect(await store.get('swap-1')).toBeNull()
+    },
+  )
+
   it('persists the record before returning it', async () => {
     const store = new BoltzChainSwapStore(new MemoryStorage())
-    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
     const record = await swap.createSwap(PARAMS)
     expect(record.phase).toBe('created')
     expect(await store.get('swap-1')).toMatchObject({ swapId: 'swap-1', index: 0 })
@@ -241,7 +281,7 @@ describe('createSwap', () => {
         return {
           id: 'swap-1',
           lockupDetails: { lockupAddress: 'a', amount: BigInt(PARAMS.amountSat) },
-          claimDetails: { lockupAddress: 'b', amount: 1n, timeoutBlockHeight: 5000n },
+          claimDetails: { lockupAddress: 'b', amount: 99_000n, timeoutBlockHeight: 5000n },
         }
       },
     })
@@ -314,11 +354,12 @@ describe('phase machine', () => {
 describe('refund guard', () => {
   it('refuses to refund a swap with no recorded lockup', async () => {
     const store = new BoltzChainSwapStore(new MemoryStorage())
-    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
     await swap.createSwap({
       fromLayer: 'BTC_L1',
       toLayer: 'BTC_LIQUID',
       amountSat: 100_000,
+      minReceiveAmountSat: 99_000,
       destinationAddress: 'el1qdestination',
     })
     await expect(swap.refund('swap-1')).rejects.toThrow(/nothing to refund/)
@@ -508,11 +549,12 @@ describe('sync', () => {
   it('does not take transaction.claimed as proof that the maker spent our lockup', async () => {
     installFakeSdk({ swap: async () => ({ status: 'transaction.claimed' }) })
     const store = new BoltzChainSwapStore(new MemoryStorage())
-    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
     await swap.createSwap({
       fromLayer: 'BTC_L1',
       toLayer: 'BTC_LIQUID',
       amountSat: 100_000,
+      minReceiveAmountSat: 99_000,
       destinationAddress: 'el1qdestination',
     })
     const updated = await swap.sync('swap-1')
@@ -523,11 +565,12 @@ describe('sync', () => {
   it('keeps the flag set once the preimage is out', async () => {
     installFakeSdk({ swap: async () => ({ status: 'swap.created' }) })
     const store = new BoltzChainSwapStore(new MemoryStorage())
-    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
     const created = await swap.createSwap({
       fromLayer: 'BTC_L1',
       toLayer: 'BTC_LIQUID',
       amountSat: 100_000,
+      minReceiveAmountSat: 99_000,
       destinationAddress: 'el1qdestination',
     })
     await store.put({ ...created, userLockupSpent: true })
@@ -536,11 +579,12 @@ describe('sync', () => {
 
   it('captures the claim timeout height from the create response', async () => {
     const store = new BoltzChainSwapStore(new MemoryStorage())
-    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic' }, store)
+    const swap = new BoltzChainSwap({ mnemonic: 'test mnemonic', chainData: creationChainData }, store)
     const record = await swap.createSwap({
       fromLayer: 'BTC_L1',
       toLayer: 'BTC_LIQUID',
       amountSat: 100_000,
+      minReceiveAmountSat: 99_000,
       destinationAddress: 'el1qdestination',
     })
     expect(record.claimTimeoutBlockHeight).toBe(5000)
