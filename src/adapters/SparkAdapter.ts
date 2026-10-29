@@ -16,6 +16,7 @@ import {
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
 import { decodeBolt11 } from "../lib/bolt11";
+import { resolveSparkMaxFeeSats } from "../lib/spark-fee-budget";
 import {
   type SentTokenTxRecord,
   loadSentTokenRecords,
@@ -51,9 +52,6 @@ import {
 import { resolveWalletSeed } from "../lib/wallet-seed";
 import { HDKey } from "@scure/bip32";
 import { signLnMessage, verifyLnMessage } from "../lib/ln-message-sign";
-
-/** Default maximum fee for Lightning payments (sats). */
-const DEFAULT_MAX_FEE_SATS = 1000;
 
 import {
   findLightningSendForInvoice,
@@ -671,7 +669,8 @@ export class SparkAdapter implements IProtocolAdapter {
         // can still fail. Reporting 'confirmed' on dispatch made WebLN/NWC callers
         // believe zaps succeeded when they never settled, and denied them the
         // preimage NIP-47 requires — so poll until a terminal state.
-        const extReq = request as PaymentRequest & { maxFee?: number };
+        // `maxFeeSats` is the documented field; `maxFee` is the legacy alias.
+        const maxFeeSats = resolveSparkMaxFeeSats(request);
         // Amountless ("0-sat") BOLT-11 invoices require `amountSatsToSend`
         // explicitly, and it is rejected on amount-bearing ones — so gate on the
         // invoice, not on whether the caller supplied an amount.
@@ -692,7 +691,7 @@ export class SparkAdapter implements IProtocolAdapter {
         try {
           lnResult = (await wallet.payLightningInvoice({
             invoice: destination,
-            maxFeeSats: extReq.maxFee ?? DEFAULT_MAX_FEE_SATS,
+            maxFeeSats,
             ...(invoiceIsAmountless && request.amount && request.amount > 0
               ? { amountSatsToSend: request.amount }
               : {}),

@@ -34,8 +34,17 @@ import {
 import type { KaleidoswapSwapRecord } from '../swap/kaleidoswap-swap-store'
 import type { ProtocolCapability } from '../capabilities/operations'
 import { type Logger, getLogger } from '../ports'
-import { enforcePolicy, type SigningPolicy, type PolicyOperation } from '../policy'
+import {
+  enforcePolicy,
+  normalizeAssetTerms,
+  PolicyError,
+  type AssetTermsInput,
+  type SigningPolicy,
+  type PolicyOperation,
+} from '../policy'
 import { decodeBolt11Invoice, isBolt11 } from '../lib/bolt11'
+import { stripLightningScheme } from '../lib/lightning-uri'
+import { resolveSparkMaxFeeSats } from '../lib/spark-fee-budget'
 import { isBtcAssetId } from '../lib/asset-id'
 import type {
   LiquidPsetReview,
@@ -442,8 +451,44 @@ export class ProtocolManager {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    this.enforce('send', { amountSat: this.resolveSendAmountSat(request), destination: request.invoice })
-    return this.getActiveAdapterUnchecked().sendPayment(request)
+    const adapter = this.getActiveAdapterUnchecked()
+    const asset = await this.resolveSendAssetTerms(adapter, request)
+    this.enforce('send', {
+      amountSat: this.resolveSendAuthorizedSat(adapter, request),
+      destination: request.invoice,
+      ...asset,
+    })
+    return adapter.sendPayment(request)
+  }
+
+  /**
+   * Satoshis the policy must authorise for a send: the principal plus, where
+   * the adapter debits a Lightning fee budget on top of it, that budget.
+   * Overflow fails closed (unknown amount) rather than wrapping.
+   */
+  private resolveSendAuthorizedSat(adapter: IProtocolAdapter, request: PaymentRequest): number | undefined {
+    const principal = this.resolveSendAmountSat(request)
+    if (principal == null) return undefined
+    let feeBudget: number
+    try {
+      feeBudget = this.lightningFeeBudgetSat(adapter, request)
+    } catch {
+      return undefined
+    }
+    const total = principal + feeBudget
+    return Number.isSafeInteger(total) ? total : undefined
+  }
+
+  /**
+   * Fee the adapter may spend on top of a Lightning principal. Spark selects
+   * leaves for `principal + maxFeeSats` (caller value, legacy `maxFee` alias
+   * or the native default), so that budget is money the policy must cap too
+   * (finding 17). Other adapters bound their fee elsewhere or charge none.
+   */
+  private lightningFeeBudgetSat(adapter: IProtocolAdapter, request: PaymentRequest): number {
+    if (adapter.protocolName !== 'SPARK') return 0
+    if (!isBolt11(stripLightningScheme(request.invoice))) return 0
+    return resolveSparkMaxFeeSats(request)
   }
 
   /**
@@ -452,8 +497,9 @@ export class ProtocolManager {
    * amount (so any cap denies it) rather than an amount read off its prefix.
    */
   private resolveSendAmountSat(request: PaymentRequest): number | undefined {
-    // Adapters strip a `lightning:` URI scheme before paying, so the cap must too.
-    const invoice = (request.invoice ?? '').trim().replace(/^lightning:/i, '')
+    // Adapters strip a `lightning:` URI scheme before paying, so the cap must
+    // too — through the same helper, so the two cannot drift (finding 13).
+    const invoice = stripLightningScheme(request.invoice)
     if (isBolt11(invoice)) {
       let amountMsat: string | undefined
       try {
@@ -466,9 +512,58 @@ export class ProtocolManager {
     return request.amount ?? undefined
   }
 
+  /**
+   * Non-BTC asset terms a send carries, for the per-asset policy (finding 15).
+   * Runtime callers can attach `asset_id`/`asset_amount` (RLN node fields) or
+   * `assetId`/`assetAmount`; an RGB Lightning invoice can encode the asset
+   * itself, which the node honours over anything the caller passes. Under a
+   * policy the invoice is decoded through the RGB adapter and its terms win;
+   * caller terms that contradict it, or an invoice that cannot be decoded,
+   * fail closed. No-op without a policy.
+   */
+  private async resolveSendAssetTerms(
+    adapter: IProtocolAdapter,
+    request: PaymentRequest,
+  ): Promise<{ assetId?: string; assetAmount?: string }> {
+    if (!this.policy) return {}
+    const caller = normalizeAssetTerms(request as PaymentRequest & AssetTermsInput)
+    // Only the RGB Lightning node encodes asset terms in a BOLT11; decoding
+    // through another adapter would not reveal any.
+    const invoice = stripLightningScheme(request.invoice)
+    if (adapter.protocolName !== 'RGB_LN' || !isBolt11(invoice)) return caller
+    let decoded: DecodedInvoice
+    try {
+      decoded = await adapter.decodeInvoice(invoice)
+    } catch (error) {
+      throw new PolicyError(
+        'AMOUNT_UNKNOWN',
+        "Policy denied 'send': the RGB invoice could not be decoded to authorise its asset terms",
+        error,
+      )
+    }
+    const encoded = normalizeAssetTerms({ assetId: decoded.asset_id, assetAmount: decoded.asset_amount })
+    if (encoded.assetId == null) return caller
+    if (
+      caller.assetId != null &&
+      (caller.assetId !== encoded.assetId || (caller.assetAmount != null && caller.assetAmount !== encoded.assetAmount))
+    ) {
+      throw new PolicyError(
+        'ASSET_MISMATCH',
+        "Policy denied 'send': caller asset terms contradict the terms encoded in the invoice",
+        { caller, invoice: encoded },
+      )
+    }
+    return encoded
+  }
+
   async payKeysend(request: KeysendRequest): Promise<PaymentResult> {
-    // keysend amount is in msat; policy limits are in sats.
-    this.enforce('keysend', { amountSat: Math.ceil(request.amount / 1000), destination: request.pubkey })
+    // keysend amount is in msat; policy limits are in sats. An attached RGB
+    // asset is authorised on its own, in base units (finding 15).
+    this.enforce('keysend', {
+      amountSat: Math.ceil(request.amount / 1000),
+      destination: request.pubkey,
+      ...(this.policy ? normalizeAssetTerms(request) : {}),
+    })
     const adapter = this.getActiveAdapterUnchecked()
     if (!adapter.payKeysend) {
       throw new ProtocolError(

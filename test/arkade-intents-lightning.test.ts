@@ -20,6 +20,7 @@ import { ArkadeIntentsStore, type ArkadeIntentsRecord } from '../src/swap/arkade
 import { getCapabilities } from '../src/capabilities'
 import { PROTOCOL_OPERATIONS, liveOperationAvailable } from '../src/capabilities/operations'
 import { CrossProtocolRouter } from '../src/router'
+import { ProtocolManager } from '../src/manager/ProtocolManager'
 import { ProtocolAdapterRegistry } from '../src/adapters/IProtocolAdapter'
 import type { IStorageProvider } from '../src/ports'
 
@@ -622,6 +623,39 @@ describe('adapters route Lightning through Intents', () => {
       expect(fund).not.toHaveBeenCalled()
       expect((await adapter.executeLightningSend(q.id)).status).toBe('pending')
       expect(await adapter.listLightningSwaps()).toHaveLength(1)
+    })
+  }
+
+  // Security review 2026-10-28, finding 13: the spend policy once decoded the
+  // raw destination, so a `lightning:` scheme hid the invoice amount and the
+  // policy fell back to the caller's `amount` while Arkade paid the invoice.
+  for (const [name, make] of [
+    ['ArkadeAdapter', nativeAdapter],
+    ['ArkadeWdkAdapter', wdkAdapter],
+  ] as const) {
+    for (const scheme of ['lightning:', 'LIGHTNING:', 'Lightning: ', '  lightning:']) {
+      it(`${name}: the spend cap sees the invoice amount behind '${scheme}' and nothing is funded`, async () => {
+        const { intents, fund, venue } = setup()
+        const manager = new ProtocolManager({ policy: { maxAmountSat: 1000 } })
+        manager.registerAdapter(make(intents))
+        ;(manager as any).activeProtocol = 'ARKADE'
+        await expect(manager.sendPayment({ invoice: `${scheme}${INV_5000}`, amount: 1 })).rejects.toMatchObject({
+          name: 'PolicyError',
+          code: 'AMOUNT_OVER_GLOBAL_LIMIT',
+        })
+        expect(venue.prepareLightningSend).not.toHaveBeenCalled()
+        expect(fund).not.toHaveBeenCalled()
+      })
+    }
+
+    it(`${name}: the same prefixed invoice pays under a sufficient cap`, async () => {
+      const { intents, fund } = setup()
+      const manager = new ProtocolManager({ policy: { maxAmountSat: 5000 } })
+      manager.registerAdapter(make(intents))
+      ;(manager as any).activeProtocol = 'ARKADE'
+      const res = await manager.sendPayment({ invoice: `LIGHTNING:${INV_5000}`, amount: 1 })
+      expect(res).toMatchObject({ paymentHash: HASH_5000, amount: 5000, status: 'pending' })
+      expect(fund).toHaveBeenCalledWith(LOCKUP, 5050)
     })
   }
 

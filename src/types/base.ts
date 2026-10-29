@@ -170,7 +170,12 @@ export interface DecodedInvoice {
 export interface PaymentRequest {
   invoice: string
   amount?: number
-  /** Cap on routing fee for Lightning sends (sats). Some protocols (Spark) require it. */
+  /**
+   * Cap on routing fee for Lightning sends (sats). Some protocols (Spark)
+   * require it: Spark spends `principal + maxFeeSats` (default 1000 sats when
+   * omitted; the legacy `maxFee` alias is still read), and a configured spend
+   * policy authorises that total, so bound it to stay within a cap.
+   */
   maxFeeSats?: number
 }
 

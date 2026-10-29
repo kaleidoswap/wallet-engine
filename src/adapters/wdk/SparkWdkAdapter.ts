@@ -37,6 +37,7 @@ import { getCapabilities } from '../../capabilities'
 import { PROTOCOL_OPERATIONS } from '../../capabilities/operations'
 import { loadWdkModule } from './moduleLoader'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
+import { resolveSparkMaxFeeSats } from '../../lib/spark-fee-budget'
 import {
   findLightningSendForInvoice,
   getLightningSendStatus,
@@ -68,9 +69,6 @@ import {
 } from '../../lib/spark-sent-token-records'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
-
-/** Default maximum fee for Lightning payments (sats) — mirrors the native adapter. */
-const DEFAULT_MAX_FEE_SATS = 1000
 
 /** Lower-case hex string for a Uint8Array / Buffer / hex string (for identity-key compare). */
 function toHexLower(bytes: any): string {
@@ -405,7 +403,8 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       //    settlement is async on the SSP and can still fail, so poll the send
       //    request to a terminal state for the truth plus NIP-47's preimage.
       if (isBolt11(destination)) {
-        const maxFee = (request as any).maxFeeSats ?? (request as any).maxFee ?? DEFAULT_MAX_FEE_SATS
+        // `maxFeeSats` is the documented field; `maxFee` is the legacy alias.
+        const maxFee = resolveSparkMaxFeeSats(request)
         // Amountless (0-sat) invoices require an explicit amount; the SDK
         // rejects amountSatsToSend on amount-bearing ones, so gate on the
         // invoice itself, not on whether the caller supplied an amount.

@@ -14,6 +14,7 @@
 
 import { arkadeIntentsClientManager, loadArkadeIntentsModule, type ArkadeIntentsVenueLike } from './arkade-intents-client-manager'
 import { decodeBolt11Invoice, type Bolt11Hrp } from './bolt11'
+import { stripLightningScheme } from './lightning-uri'
 import { log } from './log'
 import {
   ArkadeIntentsStore,
@@ -413,7 +414,7 @@ export class ArkadeIntentsLightning {
 
   /** Decode a bolt11 and require an amount, a live expiry and this Ark network's HRP. */
   async checkInvoice(invoice: string): Promise<{ raw: string; paymentHash: string; amountSats: number; expiresAt: number }> {
-    const raw = invoice.trim().replace(/^lightning:/i, '')
+    const raw = stripLightningScheme(invoice)
     let decoded
     try {
       decoded = decodeBolt11Invoice(raw)
