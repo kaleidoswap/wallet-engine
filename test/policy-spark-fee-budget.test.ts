@@ -26,7 +26,7 @@ import { SparkAdapter } from '../src/adapters/SparkAdapter'
 import { SparkWdkAdapter } from '../src/adapters/wdk/SparkWdkAdapter'
 import { DEFAULT_SPARK_MAX_FEE_SATS, resolveSparkMaxFeeSats } from '../src/lib/spark-fee-budget'
 import { MemoAdapter } from '../examples/minimal-adapter/MemoAdapter'
-import { bolt11Fixture } from './fixtures/bolt11'
+import { bolt11Fixture, TEST_PREIMAGE } from './fixtures/bolt11'
 
 // lnbc10u encodes exactly 1000 sats; lnbc9u 900 sats.
 const INV_1000 = bolt11Fixture({ hrp: 'lnbc10u' })
@@ -60,7 +60,7 @@ function sparkWallet() {
     encodedInvoice: opts.invoice,
     fee: { originalValue: 2, originalUnit: 'SATOSHI' },
     status: 'LIGHTNING_PAYMENT_SUCCEEDED',
-    paymentPreimage: 'ab'.repeat(32),
+    paymentPreimage: TEST_PREIMAGE,
   }))
   return { payLightningInvoice }
 }
