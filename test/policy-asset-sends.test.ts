@@ -131,6 +131,7 @@ function rgbNativeManager(policy: SigningPolicy | undefined, decoded: Record<str
     decodeLNInvoice: vi.fn(async () => ({ amt_msat: 1_000_000, payment_hash: 'h', ...decoded })),
   }
   vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({ rln } as any)
   const adapter = Object.assign(new RgbAdapter(), { connected: true })
