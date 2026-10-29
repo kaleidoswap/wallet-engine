@@ -14,6 +14,13 @@
  * amounts and the address; the host performs the send, keeping the spend an
  * explicit user-visible step. The lockup must be ONE output for EXACTLY
  * `userLockAmount` — the maker sweeps neither multiple UTXOs nor an overpayment.
+ *
+ * TRUST: the maker's status strings and `height()` are HINTS. A claim reveals the
+ * preimage, the only thing keeping the maker from taking our lockup, so every
+ * fact a claim depends on — the maker's lockup exists, pays the swap script for
+ * the agreed amount, is buried deep enough, and the timeout is far enough off —
+ * is read from the host's trusted `IChainDataProvider` instead. Without one the
+ * claim fails closed unless the host opts out by name.
  */
 
 import { Quote, QuoteRequest, Layer, ProtocolError } from '../types/base'
@@ -32,6 +39,10 @@ import {
   type BoltzChainSwapPhase,
   type BoltzChainSwapRecord,
 } from './boltz-swap-store'
+import type { ChainKind, ChainTransaction, IChainDataProvider } from '../ports'
+import { EsploraChainDataProvider } from '../lib/esplora-chain-data'
+import { scriptPubKeyFromAddress } from '../lib/address-script'
+import { log } from '../lib/log'
 
 /** The only layer pair this venue serves. */
 const LAYER_ASSET: Partial<Record<Layer, BoltzChainAsset>> = {
@@ -40,7 +51,7 @@ const LAYER_ASSET: Partial<Record<Layer, BoltzChainAsset>> = {
 }
 
 /** Chain kind the SDK expects when rebuilding a swap script. */
-const ASSET_CHAIN_KIND: Record<BoltzChainAsset, 'bitcoin' | 'liquid'> = {
+const ASSET_CHAIN_KIND: Record<BoltzChainAsset, ChainKind> = {
   BTC: 'bitcoin',
   'L-BTC': 'liquid',
 }
@@ -128,11 +139,52 @@ export interface BoltzChainSwapConfig {
    * follow the reference Boltz clients: 2 on Bitcoin, 10 on Liquid.
    */
   claimTimeoutMarginBlocks?: { bitcoin?: number; liquid?: number }
+  /**
+   * Trusted chain data for the claim guards: the maker lockup, its depth and the
+   * chain tip are read here, never from the maker. Omit to use an Esplora
+   * provider over `bitcoinEsploraUrl` / `liquidEsploraUrl` — the endpoints the
+   * SDK already broadcasts through. With neither, claims fail closed.
+   */
+  chainData?: IChainDataProvider
+  /** Confirmations the maker lockup needs before a claim. Default 1. */
+  minLockupConfirmations?: number
+  /**
+   * Claim against an UNCONFIRMED maker lockup. The lockup is still verified to
+   * exist and pay the swap script; only the depth check is waived. Zero-conf is a
+   * bet that the maker will not replace the lockup after seeing the preimage.
+   */
+  allowZeroConf?: boolean
+  /**
+   * DANGEROUS. With no chain-data provider for a chain, claim on the maker's word
+   * alone (its status and `height()`), the behaviour before the chain checks
+   * existed. A provider, when present, is still consulted. Never set in production.
+   */
+  allowUnverifiedClaims?: boolean
 }
 
-const DEFAULT_TIMEOUT_MARGIN_BLOCKS: Record<'bitcoin' | 'liquid', number> = {
+const DEFAULT_TIMEOUT_MARGIN_BLOCKS: Record<ChainKind, number> = {
   bitcoin: 2,
   liquid: 10,
+}
+
+const DEFAULT_MIN_LOCKUP_CONFIRMATIONS = 1
+
+const TXID_RE = /^[0-9a-f]{64}$/i
+
+/** Outcome of checking the maker lockup against trusted chain data. */
+type ServerLockupCheck =
+  | {
+      verified: true
+      txid: string
+      hex: string
+      confirmations: number
+      tip: number
+    }
+  | { verified: false; reason: string; code: string }
+
+/** Fields of the maker's `chainTxs` response this venue reads. */
+interface RawChainSwapTxs {
+  serverLock?: { transaction?: { id?: unknown } }
 }
 
 export interface CreateChainSwapParams {
@@ -146,11 +198,35 @@ export interface CreateChainSwapParams {
 
 export class BoltzChainSwap {
   private master: SwapMasterKeyLike | null = null
+  private chainDataProvider: IChainDataProvider | null = null
 
   constructor(
     private config: BoltzChainSwapConfig,
     private store: BoltzChainSwapStore = BoltzChainSwapStore.fromPlatform()
-  ) {}
+  ) {
+    const min = config.minLockupConfirmations
+    if (min !== undefined && (!Number.isSafeInteger(min) || min < 1)) {
+      throw new ProtocolError('minLockupConfirmations must be a positive integer', 'BTC', 'BAD_CONFIG')
+    }
+  }
+
+  /**
+   * The trusted chain-data provider for `chain`, or null when the host configured
+   * none for it. An Esplora provider is derived from the configured URLs on demand.
+   */
+  private chainData(chain: ChainKind): IChainDataProvider | null {
+    if (this.config.chainData) return this.config.chainData
+    if (!this.chainDataProvider) {
+      const { bitcoinEsploraUrl, liquidEsploraUrl } = this.config
+      if (!bitcoinEsploraUrl && !liquidEsploraUrl) return null
+      this.chainDataProvider = new EsploraChainDataProvider({
+        bitcoinUrl: bitcoinEsploraUrl,
+        liquidUrl: liquidEsploraUrl,
+      })
+    }
+    const provider = this.chainDataProvider
+    return provider instanceof EsploraChainDataProvider && !provider.serves(chain) ? null : provider
+  }
 
   private masterKey(): SwapMasterKeyLike {
     if (this.master) return this.master
@@ -343,6 +419,12 @@ export class BoltzChainSwap {
   /**
    * Poll the maker and advance the local phase. The reconciliation path replacing
    * the SDK's WebSocket stream, which an evicted service worker would drop.
+   *
+   * Maker statuses are hints. `transaction.server.confirmed` only reaches
+   * `server_locked` once the trusted provider shows the lockup at the required
+   * depth; `transaction.claimed` only sets `userLockupSpent` once the provider
+   * shows a spend of our lockup carrying the preimage. A hint the chain does not
+   * back holds the previous phase.
    */
   async sync(swapId: string): Promise<BoltzChainSwapRecord> {
     const record = await this.require(swapId)
@@ -352,13 +434,38 @@ export class BoltzChainSwap {
     const updated: BoltzChainSwapRecord = {
       ...record,
       status,
-      // The maker can only spend our lockup with the preimage, so this status is
-      // proof the secret is public — it unlocks the claim guards rather than
-      // advancing the phase.
-      userLockupSpent: record.userLockupSpent || status === 'transaction.claimed',
       phase: nextPhase(record.phase, status),
       updatedAt: Date.now(),
     }
+
+    if (updated.phase === 'server_locked' && record.phase !== 'server_locked') {
+      const check = await this.checkServerLockup(record).catch((error: unknown) => ({
+        verified: false as const,
+        reason: error instanceof Error ? error.message : String(error),
+        code: 'CHAIN_DATA_UNAVAILABLE',
+      }))
+      if (check.verified) {
+        updated.serverLockupTxid = check.txid
+        updated.serverLockupConfirmations = check.confirmations
+      } else if (check.code === 'NO_CHAIN_DATA' && this.config.allowUnverifiedClaims) {
+        log.warn(`[BoltzChainSwap] ${swapId}: taking the maker's word for its lockup (allowUnverifiedClaims)`)
+      } else {
+        log.warn(
+          `[BoltzChainSwap] ${swapId}: maker reports its lockup confirmed, holding at server_locking: ${check.reason}`
+        )
+        updated.phase = 'server_locking'
+      }
+    }
+
+    if (!record.userLockupSpent && status === 'transaction.claimed') {
+      const spent = await this.observeUserLockupSpend(record).catch((error: unknown) => {
+        const reason = error instanceof Error ? error.message : String(error)
+        log.warn(`[BoltzChainSwap] ${swapId}: could not verify the maker's spend of our lockup: ${reason}`)
+        return false
+      })
+      if (spent) updated.userLockupSpent = true
+    }
+
     await this.store.put(updated)
     return updated
   }
@@ -366,13 +473,16 @@ export class BoltzChainSwap {
   /**
    * Claim the maker's lockup to `destinationAddress`.
    *
-   * Refuses unless the lockup is CONFIRMED: a claim publishes the preimage, the
-   * only thing stopping the maker from taking our lockup, so spending that secret
-   * against a still-replaceable transaction is a one-sided bet.
+   * Refuses unless the trusted chain-data provider shows the maker lockup paying
+   * the swap script for the agreed amount at `minLockupConfirmations` depth: a
+   * claim publishes the preimage, the only thing stopping the maker from taking
+   * our lockup, so spending that secret against a still-replaceable transaction
+   * is a one-sided bet. The claim is then pinned to that exact transaction.
    *
-   * Also refuses within `claimTimeoutMarginBlocks` of the timeout, where the claim
-   * would race the maker's refund — unless the maker already spent our lockup, in
-   * which case the preimage is public and claiming late is strictly better.
+   * Also refuses within `claimTimeoutMarginBlocks` of the timeout, by the
+   * provider's tip, where the claim would race the maker's refund — unless the
+   * maker already spent our lockup, in which case the preimage is public and
+   * claiming late is strictly better.
    *
    * Takes the non-cooperative script path: the cooperative MuSig2 keyspend needs a
    * signature exchange the SDK's params object cannot express.
@@ -380,7 +490,7 @@ export class BoltzChainSwap {
   async claim(swapId: string): Promise<BoltzChainSwapRecord> {
     const record = await this.require(swapId)
     if (record.phase === 'claimed') return record
-    await this.assertClaimable(record)
+    const lockup = await this.assertClaimable(record)
     const script = this.buildScript(record, 'claim')
     const master = this.masterKey()
     const key = master.deriveSwapKey(BigInt(record.index))
@@ -388,6 +498,9 @@ export class BoltzChainSwap {
     const tx = await script.constructClaim(preimage.preimage, {
       ...this.txParams(record, key.secretKey),
       cooperative: false,
+      ...(lockup
+        ? { claimLockup: { chain: ASSET_CHAIN_KIND[record.to], hex: lockup.hex, txid: lockup.txid } }
+        : {}),
     })
     const claimTxid = requireString(
       await tx.broadcast(
@@ -402,6 +515,9 @@ export class BoltzChainSwap {
       ...record,
       phase: 'claimed',
       claimTxid,
+      ...(lockup
+        ? { serverLockupTxid: lockup.txid, serverLockupConfirmations: lockup.confirmations }
+        : {}),
       updatedAt: Date.now(),
     }
     await this.store.put(updated)
@@ -457,27 +573,77 @@ export class BoltzChainSwap {
 
   /**
    * Gate on the two conditions making a claim safe: the maker's lockup is
-   * confirmed, and the claim timeout is far enough off to land first. Both are
-   * waived once `userLockupSpent` is set — the preimage is already public.
+   * verified on chain at the required depth, and the claim timeout is far enough
+   * off (by the trusted tip) to land first. Both are waived once
+   * `userLockupSpent` is set — the preimage is already public — though the lockup
+   * is still located when a provider is available, so the claim can be pinned.
+   *
+   * Returns the verified lockup, or null when no provider serves the chain and
+   * the host opted into `allowUnverifiedClaims`.
    */
-  private async assertClaimable(record: BoltzChainSwapRecord): Promise<void> {
-    if (record.userLockupSpent) return
+  private async assertClaimable(
+    record: BoltzChainSwapRecord
+  ): Promise<{ txid: string; hex: string; confirmations: number } | null> {
+    const chainKind = ASSET_CHAIN_KIND[record.to]
+    const provider = this.chainData(chainKind)
 
-    if (record.phase !== 'server_locked') {
+    if (record.userLockupSpent) {
+      if (!provider) return null
+      const check = await this.checkServerLockup(record, { allowZeroConf: true })
+      return check.verified ? check : null
+    }
+
+    if (record.phase !== 'server_locked' && record.phase !== 'server_locking') {
       throw new ProtocolError(
-        record.phase === 'server_locking'
-          ? `Maker lockup for swap '${record.swapId}' is unconfirmed — claiming now would reveal the preimage against a replaceable transaction`
-          : `Swap '${record.swapId}' is not claimable in phase '${record.phase}'`,
+        `Swap '${record.swapId}' is not claimable in phase '${record.phase}'`,
         'BTC',
         'NOT_CLAIMABLE'
       )
     }
 
-    const chainKind = ASSET_CHAIN_KIND[record.to]
     const margin =
       this.config.claimTimeoutMarginBlocks?.[chainKind] ?? DEFAULT_TIMEOUT_MARGIN_BLOCKS[chainKind]
-    const heights = (await boltzSwapClientManager.getClient().height()) as Record<string, unknown>
-    const tip = toSats(heights?.[record.to], `height.${record.to}`)
+
+    if (!provider) {
+      if (!this.config.allowUnverifiedClaims) {
+        throw new ProtocolError(
+          `Cannot verify the maker lockup for swap '${record.swapId}': no trusted chain-data provider serves ${chainKind}. Configure chainData or ${chainKind}EsploraUrl, or set allowUnverifiedClaims to claim on the maker's word`,
+          'BTC',
+          'NO_CHAIN_DATA'
+        )
+      }
+      // Explicit opt-out: the maker's status and tip are all there is.
+      if (record.phase !== 'server_locked') {
+        throw new ProtocolError(
+          `Maker lockup for swap '${record.swapId}' is unconfirmed — claiming now would reveal the preimage against a replaceable transaction`,
+          'BTC',
+          'NOT_CLAIMABLE'
+        )
+      }
+      const heights = (await boltzSwapClientManager.getClient().height()) as Record<string, unknown>
+      const tip = toSats(heights?.[record.to], `height.${record.to}`)
+      this.assertClaimWindowOpen(record, chainKind, tip, margin)
+      return null
+    }
+
+    const check = await this.checkServerLockup(record)
+    if (!check.verified) {
+      throw new ProtocolError(
+        `Maker lockup for swap '${record.swapId}' is not claimable: ${check.reason}`,
+        'BTC',
+        check.code
+      )
+    }
+    this.assertClaimWindowOpen(record, chainKind, check.tip, margin)
+    return check
+  }
+
+  private assertClaimWindowOpen(
+    record: BoltzChainSwapRecord,
+    chainKind: ChainKind,
+    tip: number,
+    margin: number
+  ): void {
     if (tip > record.claimTimeoutBlockHeight - margin) {
       throw new ProtocolError(
         `Claim window for swap '${record.swapId}' has closed: ${chainKind} tip ${tip} is within ${margin} blocks of the timeout at ${record.claimTimeoutBlockHeight}`,
@@ -485,6 +651,136 @@ export class BoltzChainSwap {
         'CLAIM_WINDOW_CLOSED'
       )
     }
+  }
+
+  /**
+   * Verify the maker's lockup against trusted chain data: the transaction the
+   * maker names (a hint — the only thing taken from it) must exist on the
+   * destination chain, pay an output to the claim-side swap script for
+   * `serverLockAmount`, and sit `minLockupConfirmations` deep. Liquid hides the
+   * amount of a blinded output; the SDK unblinds and checks it when it builds the
+   * claim, so only a visible amount is compared here.
+   */
+  private async checkServerLockup(
+    record: BoltzChainSwapRecord,
+    options: { allowZeroConf?: boolean } = {}
+  ): Promise<ServerLockupCheck> {
+    const chainKind = ASSET_CHAIN_KIND[record.to]
+    const provider = this.chainData(chainKind)
+    if (!provider) {
+      return {
+        verified: false,
+        reason: `no trusted chain-data provider serves ${chainKind}`,
+        code: 'NO_CHAIN_DATA',
+      }
+    }
+
+    let txid = record.serverLockupTxid ?? (await this.makerServerLockupTxid(record.swapId))
+    if (!txid) {
+      return { verified: false, reason: 'the maker reports no lockup transaction', code: 'NOT_CLAIMABLE' }
+    }
+
+    let tx = await provider.getTransaction(chainKind, txid)
+    if (!tx && record.serverLockupTxid) {
+      // A previously verified lockup that vanished (reorg, replacement): ask the
+      // maker again rather than pinning a transaction the chain no longer has.
+      const fresh = await this.makerServerLockupTxid(record.swapId)
+      if (fresh && fresh !== txid) {
+        txid = fresh
+        tx = await provider.getTransaction(chainKind, txid)
+      }
+    }
+    if (!tx) {
+      return {
+        verified: false,
+        reason: `lockup ${txid} is unknown to the ${chainKind} chain source`,
+        code: 'LOCKUP_NOT_FOUND',
+      }
+    }
+    if (tx.txid.toLowerCase() !== txid.toLowerCase()) {
+      return { verified: false, reason: `chain source returned ${tx.txid} for ${txid}`, code: 'BAD_CHAIN_DATA' }
+    }
+
+    const expectedScript = this.serverLockupScript(record)
+    const output = tx.vout.find((o) => o.scriptPubKey.toLowerCase() === expectedScript)
+    if (!output) {
+      return {
+        verified: false,
+        reason: `lockup ${txid} pays no output to the swap script`,
+        code: 'LOCKUP_MISMATCH',
+      }
+    }
+    if (output.valueSat !== undefined && output.valueSat !== record.serverLockAmount) {
+      return {
+        verified: false,
+        reason: `lockup ${txid} pays ${output.valueSat} sat, expected ${record.serverLockAmount} sat`,
+        code: 'LOCKUP_MISMATCH',
+      }
+    }
+
+    const tip = await provider.tipHeight(chainKind)
+    const confirmations = tx.blockHeight === undefined ? 0 : Math.max(0, tip - tx.blockHeight + 1)
+    const minimum = this.config.minLockupConfirmations ?? DEFAULT_MIN_LOCKUP_CONFIRMATIONS
+    const zeroConf = options.allowZeroConf ?? this.config.allowZeroConf ?? false
+    if (!zeroConf && confirmations < minimum) {
+      return {
+        verified: false,
+        reason: `lockup ${txid} has ${confirmations} confirmation(s) on ${chainKind}, needs ${minimum} — claiming now would reveal the preimage against a replaceable transaction`,
+        code: 'LOCKUP_UNCONFIRMED',
+      }
+    }
+    return { verified: true, txid: tx.txid, hex: tx.hex, confirmations, tip }
+  }
+
+  /** The maker's claimed lockup txid, validated as a txid and nothing more. */
+  private async makerServerLockupTxid(swapId: string): Promise<string | null> {
+    const raw = (await boltzSwapClientManager.getClient().chainTxs(swapId)) as RawChainSwapTxs | null
+    const id = raw?.serverLock?.transaction?.id
+    if (typeof id !== 'string' || !TXID_RE.test(id)) return null
+    return id.toLowerCase()
+  }
+
+  /** scriptPubKey of the maker's lockup, from the create response we validated. */
+  private serverLockupScript(record: BoltzChainSwapRecord): string {
+    const response = decode(record.response) as { claimDetails?: { lockupAddress?: unknown } }
+    const address = response?.claimDetails?.lockupAddress
+    if (typeof address !== 'string' || !address) {
+      throw new ProtocolError(
+        `Stored response for swap '${record.swapId}' has no claimDetails.lockupAddress`,
+        'BTC',
+        'BAD_RECORD'
+      )
+    }
+    return scriptPubKeyFromAddress(address).toLowerCase()
+  }
+
+  /**
+   * Whether the source chain shows our lockup output spent by a transaction whose
+   * witness carries the swap preimage — the maker's claim, the only spend that
+   * proves the secret is public. A refund spends it too, without the preimage.
+   */
+  private async observeUserLockupSpend(record: BoltzChainSwapRecord): Promise<boolean> {
+    const chainKind = ASSET_CHAIN_KIND[record.from]
+    const provider = this.chainData(chainKind)
+    if (!provider) {
+      throw new ProtocolError(
+        `no trusted chain-data provider serves ${chainKind}`,
+        'BTC',
+        'NO_CHAIN_DATA'
+      )
+    }
+    if (!record.lockupTxid || !TXID_RE.test(record.lockupTxid)) return false
+    const lockupTx = await provider.getTransaction(chainKind, record.lockupTxid)
+    if (!lockupTx) return false
+    const script = scriptPubKeyFromAddress(record.lockupAddress).toLowerCase()
+    const vout = lockupTx.vout.findIndex((o) => o.scriptPubKey.toLowerCase() === script)
+    if (vout < 0) return false
+    const outspend = await provider.getOutspend(chainKind, lockupTx.txid, vout)
+    if (!outspend.spent || !outspend.txid || outspend.vin === undefined) return false
+    const spend = await provider.getTransaction(chainKind, outspend.txid)
+    if (!spend) return false
+    const preimage = this.masterKey().derivePreimage(BigInt(record.index)).preimage.toLowerCase()
+    return witnessRevealsPreimage(spend, outspend.vin, preimage)
   }
 
   private async require(swapId: string): Promise<BoltzChainSwapRecord> {
@@ -531,6 +827,14 @@ export class BoltzChainSwap {
       feeSatPerVb: this.config.feeSatPerVb,
     }
   }
+}
+
+/** True when input `vin` of `tx` carries `preimage` (hex) in its witness stack. */
+export function witnessRevealsPreimage(tx: ChainTransaction, vin: number, preimage: string): boolean {
+  const input = tx.vin[vin]
+  if (!input) return false
+  const want = preimage.toLowerCase()
+  return input.witness.some((item) => item.toLowerCase() === want)
 }
 
 /**

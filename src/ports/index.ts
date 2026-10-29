@@ -32,6 +32,60 @@ export interface Logger {
   error(...args: unknown[]): void
 }
 
+/** Chain a trusted chain-data read targets. */
+export type ChainKind = 'bitcoin' | 'liquid'
+
+export interface ChainTxOutput {
+  /** Hex scriptPubKey. The field matched against an expected lockup script. */
+  scriptPubKey: string
+  /**
+   * Sats, or undefined for a confidential (blinded) Liquid output whose value the
+   * explorer cannot show. Must be present on every Bitcoin output.
+   */
+  valueSat?: number
+}
+
+export interface ChainTxInput {
+  txid: string
+  vout: number
+  /** Witness stack as hex items; empty when the input has none. */
+  witness: string[]
+}
+
+export interface ChainTransaction {
+  txid: string
+  /** Raw serialized transaction, hex. */
+  hex: string
+  vin: ChainTxInput[]
+  vout: ChainTxOutput[]
+  /** Height of the including block, or undefined while unconfirmed. */
+  blockHeight?: number
+}
+
+export interface ChainOutspend {
+  spent: boolean
+  /** Spending transaction, when spent. */
+  txid?: string
+  /** Input index in the spending transaction, when spent. */
+  vin?: number
+}
+
+/**
+ * Trusted chain data for swap settlement decisions. A host points this at an
+ * explorer or node it trusts — never the swap counterparty. A swap venue consults
+ * it before any step that reveals a secret, so a provider that lies or is served by
+ * the counterparty removes the guarantee. Every method rejects on unavailable or
+ * malformed data; none returns a placeholder.
+ */
+export interface IChainDataProvider {
+  /** Current tip height of `chain`. */
+  tipHeight(chain: ChainKind): Promise<number>
+  /** A transaction by id, or null when the chain source does not know it. */
+  getTransaction(chain: ChainKind, txid: string): Promise<ChainTransaction | null>
+  /** Spend status of one output. */
+  getOutspend(chain: ChainKind, txid: string, vout: number): Promise<ChainOutspend>
+}
+
 /** Bundle of ports handed to the engine at initialization. */
 export interface PlatformContext {
   storage: IStorageProvider

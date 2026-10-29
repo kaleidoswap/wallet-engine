@@ -25,6 +25,12 @@ export {
 } from './BoltzChainSwap'
 
 export {
+  EsploraChainDataProvider,
+  EsploraChainDataError,
+  type EsploraChainDataOptions,
+} from '../lib/esplora-chain-data'
+
+export {
   BoltzChainSwapStore,
   type BoltzChainAsset,
   type BoltzChainSwapPhase,
