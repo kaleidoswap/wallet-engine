@@ -5,6 +5,7 @@
  * SDK amounts are in SATS; balance comes back as bigint.
  */
 
+import { sparkInvoiceAmount } from "../lib/spark-invoice-amount";
 import { ExitSpeed } from "@buildonspark/spark-sdk/types";
 import type { CoopExitFeeQuote } from "@buildonspark/spark-sdk/types";
 import type { Bech32mTokenIdentifier, SparkAddressFormat } from "@buildonspark/spark-sdk";
@@ -670,6 +671,10 @@ export class SparkAdapter implements IProtocolAdapter {
       return decodeSparkBolt11(input.trim(), this.config.network ?? "mainnet");
     }
 
+    if (isSparkAddressSafe(input.trim(), isValidSparkAddress)) {
+      const decoded = decodeSparkAddress(input.trim(), getNetworkFromSparkAddress(input.trim()));
+      return { paymentHash: '', expiresAt: 0, destination: input.trim(), amount: sparkInvoiceAmount(decoded) };
+    }
     // Spark address or BTC address
     return {
       paymentHash: "",
@@ -777,6 +782,7 @@ export class SparkAdapter implements IProtocolAdapter {
         const decoded = decodeSparkAddress(destination, network);
 
         if (decoded.sparkInvoiceFields) {
+          sparkInvoiceAmount(decoded, request.amount);
           // Spark invoice — use fulfillSparkInvoice
           const response = await wallet.fulfillSparkInvoice([
             {

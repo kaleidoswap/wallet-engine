@@ -17,6 +17,9 @@ export interface ProtocolCapabilities {
   /** Native swap capability exposed by the protocol/module. */
   supportsSwaps: boolean
 
+  /** Resolve non-Lightning payment terms through decodeInvoice before policy evaluation. */
+  decodesNativePaymentTerms?: boolean
+
   // --- Behavioural quirks the UI/router must know about ---
   /** Spark: transfers are zero-fee. */
   zeroFee: boolean
@@ -59,6 +62,7 @@ export const PROTOCOL_CAPABILITIES: Record<ProtocolType, ProtocolCapabilities> =
   },
   SPARK: {
     protocol: 'SPARK',
+    decodesNativePaymentTerms: true,
     layers: ['BTC_SPARK', 'SPARK_SPARK', 'BTC_LN'],
     supportsOnchain: true, // via static/single-use deposit addresses
     supportsLightning: true,

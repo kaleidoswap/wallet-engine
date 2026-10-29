@@ -14,6 +14,7 @@
  * and spark-converters is dynamic-imported on demand.
  */
 
+import { sparkInvoiceAmount } from '../../lib/spark-invoice-amount'
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
 import {
   ProtocolType,
@@ -388,7 +389,11 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
       this.assertConnected()
       return decodeSparkBolt11(dest, this.network)
     }
-    // Spark invoice/address — no on-device decode; surface the raw value.
+    if (isSparkAddressSafe(dest, this.sdk?.isValidSparkAddress)) {
+      const decoded = this.sdk.decodeSparkAddress(dest, this.sdk.getNetworkFromSparkAddress(dest))
+      return { paymentHash: '', expiresAt: 0, destination: dest, amount: sparkInvoiceAmount(decoded) }
+    }
+    // Plain destinations have no encoded amount.
     return { paymentHash: '', expiresAt: 0, destination: dest }
   }
 
@@ -482,6 +487,7 @@ export class SparkWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter 
         const decoded = this.sdk.decodeSparkAddress(destination, network)
 
         if (decoded.sparkInvoiceFields) {
+          sparkInvoiceAmount(decoded, request.amount)
           const response: any = await this.account.paySparkInvoice([
             { invoice: destination, amount: request.amount ? BigInt(request.amount) : undefined },
           ])

@@ -192,6 +192,8 @@ export interface CreateChainSwapParams {
   toLayer: Layer
   /** Sats to lock. Must sit within the pair's limits. */
   amountSat: number
+  /** Minimum maker lockup in sats, approved by the caller; excludes the claim transaction fee. */
+  minReceiveAmountSat: number
   /** Wallet address on the destination chain that the claim pays out to. */
   destinationAddress: string
 }
@@ -331,6 +333,7 @@ export class BoltzChainSwap {
    * `record.userLockAmount` in one output, then call `markLockupFunded`.
    */
   async createSwap(params: CreateChainSwapParams): Promise<BoltzChainSwapRecord> {
+    params = { ...params }
     const from = assetForLayer(params.fromLayer)
     const to = assetForLayer(params.toLayer)
     if (from === to) {
@@ -338,6 +341,9 @@ export class BoltzChainSwap {
     }
     if (!Number.isSafeInteger(params.amountSat) || params.amountSat <= 0) {
       throw new ProtocolError('Chain swap requires a positive integer sat amount', 'BTC', 'NO_AMOUNT')
+    }
+    if (!Number.isSafeInteger(params.minReceiveAmountSat) || params.minReceiveAmountSat <= 0) {
+      throw new ProtocolError('Chain swap requires a positive integer minimum receive amount', 'BTC', 'NO_AMOUNT')
     }
     if (!params.destinationAddress) {
       throw new ProtocolError('Chain swap requires a destination address', 'BTC', 'NO_ADDRESS')
@@ -375,6 +381,26 @@ export class BoltzChainSwap {
         'AMOUNT_MISMATCH'
       )
     }
+    const serverLockAmount = toSats(response?.claimDetails?.amount, 'claimDetails.amount')
+    if (serverLockAmount < params.minReceiveAmountSat) {
+      throw new ProtocolError('Maker claim amount is below the minimum receive amount', 'BTC', 'AMOUNT_MISMATCH')
+    }
+    const claimTimeoutBlockHeight = toSats(
+      response?.claimDetails?.timeoutBlockHeight, 'claimDetails.timeoutBlockHeight'
+    )
+    const chain = ASSET_CHAIN_KIND[to]
+    const provider = this.chainData(chain)
+    if (!provider) {
+      throw new ProtocolError('Creating a chain swap requires trusted destination chain data', 'BTC', 'NO_CHAIN_DATA')
+    }
+    const tip = await provider.tipHeight(chain)
+    if (!Number.isSafeInteger(tip) || tip < 0) {
+      throw new ProtocolError('Invalid trusted chain tip', 'BTC', 'BAD_RESPONSE')
+    }
+    const margin = this.config.claimTimeoutMarginBlocks?.[chain] ?? DEFAULT_TIMEOUT_MARGIN_BLOCKS[chain]
+    if (!Number.isSafeInteger(margin) || margin < 0 || claimTimeoutBlockHeight <= tip + margin) {
+      throw new ProtocolError('Insufficient claim timeout headroom', 'BTC', 'CLAIM_WINDOW_CLOSED')
+    }
     const now = Date.now()
     const record: BoltzChainSwapRecord = {
       swapId,
@@ -382,11 +408,8 @@ export class BoltzChainSwap {
       from,
       to,
       userLockAmount,
-      serverLockAmount: toSats(response?.claimDetails?.amount, 'claimDetails.amount'),
-      claimTimeoutBlockHeight: toSats(
-        response?.claimDetails?.timeoutBlockHeight,
-        'claimDetails.timeoutBlockHeight'
-      ),
+      serverLockAmount,
+      claimTimeoutBlockHeight,
       lockupAddress: requireString(response?.lockupDetails?.lockupAddress, 'lockupDetails.lockupAddress'),
       lockupBip21:
         typeof response?.lockupDetails?.bip21 === 'string' ? response.lockupDetails.bip21 : undefined,
