@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.80] - 2026-10-29
+
+### Changed
+
+- Chain swap creation requires an explicit minimum destination lockup amount and trusted destination-chain data. See the README migration notes.
+- Spark BTC payments validate native invoice terms before dispatch.
+
 ### Fixed
 - **Security (Spark Lightning sends):** a send is `confirmed` only when the SSP
   returns a 32-byte preimage whose SHA-256 equals the payment hash of the
