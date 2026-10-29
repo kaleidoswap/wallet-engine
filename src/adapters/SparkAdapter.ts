@@ -24,6 +24,7 @@ import {
   saveSentTokenRecord,
 } from "../lib/spark-sent-token-records";
 import { sparkClientManager } from "../lib/spark-client-manager";
+import { assertOwnedSession, type WalletSessionToken } from "../lib/wallet-session";
 import { sweepWindow } from "../lib/spark-deposit-sweep-window";
 import { claimStaticDeposits, supportsStaticDeposits } from "../lib/spark-static-deposit";
 import { SparkConfig, SparkTransfer } from "../types/spark";
@@ -99,6 +100,13 @@ export class SparkAdapter implements IProtocolAdapter {
   readonly capabilities = PROTOCOL_OPERATIONS.SPARK;
 
   private config: SparkConfig | null = null;
+  /**
+   * Ownership token of the wallet THIS instance's connect() installed on the
+   * shared sparkClientManager. A later connect() on any instance replaces the
+   * wallet; every operation checks the token so this instance then fails
+   * closed instead of spending from the replacement.
+   */
+  private session: WalletSessionToken | null = null;
 
   /** Maps Lightning invoice string → LightningReceiveRequest ID for status polling. */
   private invoiceRequestIds = new Map<string, string>();
@@ -114,35 +122,60 @@ export class SparkAdapter implements IProtocolAdapter {
       throw new ConnectionError("Mnemonic is required for Spark wallet", "SPARK");
     }
 
+    // Drop the previous binding and key material before the singleton tears
+    // the previous wallet down for the re-init.
+    this.session = null;
+    this.config = null;
     try {
-      await sparkClientManager.initialize(sparkConfig);
+      const session = await sparkClientManager.initialize(sparkConfig);
+      if (!session) {
+        throw new Error("wallet initialization was superseded by a teardown; nothing was installed");
+      }
+      this.session = session;
       this.config = sparkConfig;
       log.info("[SparkAdapter] Connected to Spark successfully");
     } catch (error: unknown) {
       // Drop stale key material when a wallet-switch connection fails.
+      this.session = null;
       this.config = null;
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Spark: ${msg}`, "SPARK", error);
     }
   }
 
+  /**
+   * Tear down the wallet this instance installed. An instance whose wallet was
+   * already replaced by a later connect() only forgets its binding: it must
+   * not tear down the wallet another instance now owns.
+   */
   async disconnect(): Promise<void> {
-    await sparkClientManager.disconnect();
+    const owned = sparkClientManager.ownsSession(this.session);
+    this.session = null;
     this.config = null;
+    if (owned) await sparkClientManager.disconnect();
     log.info("[SparkAdapter] Disconnected from Spark");
   }
 
   isConnected(): boolean {
-    return sparkClientManager.isInitialized();
+    return sparkClientManager.ownsSession(this.session);
+  }
+
+  /** NOT_CONNECTED before/after this instance's own session, SESSION_SUPERSEDED once replaced. */
+  private assertConnected(): void {
+    assertOwnedSession("SPARK", this.session, (token) => sparkClientManager.ownsSession(token));
+  }
+
+  /** The shared wallet, only while this instance's session still owns it. */
+  private wallet(): any {
+    this.assertConnected();
+    return sparkClientManager.getWallet();
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       await getSparkBalanceCached(wallet);
 
       return {
@@ -167,12 +200,10 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async listAssets(): Promise<UnifiedAsset[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const { balance, tokenBalances } = await getSparkBalanceCached(wallet);
       const balanceSats = Number(balance);
 
@@ -272,12 +303,10 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const limit = Math.max(0, filter?.limit ?? 20);
       const offset = Math.max(0, filter?.offset ?? 0);
       const fetchLimit = offset + limit;
@@ -300,6 +329,7 @@ export class SparkAdapter implements IProtocolAdapter {
         try {
           let btcTransfers: SparkTransfer[] = [];
           if (createdAfter || createdBefore) {
+            this.assertConnected();
             const readonlyClient = await sparkClientManager.getReadonlyClient();
             const sparkAddress = (await wallet.getSparkAddress()) as string;
             const readonlyResult = await readonlyClient.getTransfers({
@@ -534,12 +564,10 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async getTransaction(txId: string): Promise<UnifiedTransaction> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const transfer = (await wallet.getTransfer(txId)) as SparkTransfer | undefined;
 
       if (!transfer) {
@@ -558,16 +586,14 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     if (request.asset && request.asset !== "BTC") {
       throw new ProtocolError("Spark only supports BTC invoices", "SPARK", "UNSUPPORTED_ASSET");
     }
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const result = await wallet.createLightningInvoice({
         amountSats: request.amount ?? 0,
         memo: request.description,
@@ -602,12 +628,10 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async createSparkInvoice(request: InvoiceRequest): Promise<Invoice> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const invoice = await wallet.createSatsInvoice({
         amount: request.amount || undefined,
         memo: request.description,
@@ -655,12 +679,10 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const destination = request.invoice.trim();
       const lower = destination.toLowerCase();
 
@@ -839,12 +861,10 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async getPaymentStatus(paymentId: string): Promise<PaymentStatus> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
 
       // Lightning sends are SSP requests, not transfers: getTransfer never finds them.
       if (isLightningSendRequestId(paymentId)) {
@@ -892,12 +912,10 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
 
       // Spark-to-Spark native address
       if (assetId === "SPARK") {
@@ -936,14 +954,12 @@ export class SparkAdapter implements IProtocolAdapter {
   async claimSparkL1Deposit(params: {
     address: string;
   }): Promise<{ status: "awaiting" | "claimed" | "error"; txids?: string[]; error?: string }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     const address = params.address?.trim();
     if (!address) {
       return { status: "error", error: "address is required" };
     }
-    const wallet = sparkClientManager.getWallet();
+    const wallet = this.wallet();
 
     if (supportsStaticDeposits(wallet) && address === (await wallet.getStaticDepositAddress())) {
       const claim = await claimStaticDeposits(wallet, address);
@@ -994,10 +1010,8 @@ export class SparkAdapter implements IProtocolAdapter {
     claimedTxids: string[];
     errors: string[];
   }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
-    const wallet = sparkClientManager.getWallet();
+    this.assertConnected();
+    const wallet = this.wallet();
     const claimedTxids: string[] = [];
     const errors: string[] = [];
 
@@ -1070,11 +1084,9 @@ export class SparkAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async getNodeInfo(): Promise<NodeInfo> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const { balance } = await getSparkBalanceCached(wallet);
       const balanceSats = Number(balance);
       return {
@@ -1094,11 +1106,9 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const { balance } = await getSparkBalanceCached(wallet);
       const balanceSats = Number(balance);
       return {
@@ -1118,11 +1128,9 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async listPayments(): Promise<{ transfers?: SparkTransfer[] }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const { transfers } = (await withTimeout(
         wallet.getTransfers(),
         SPARK_RPC_TIMEOUT_MS,
@@ -1150,11 +1158,9 @@ export class SparkAdapter implements IProtocolAdapter {
     amount: number;
     feeRate?: number;
   }): Promise<Record<string, unknown>> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
 
       // Step 1: Get fee quote — required by the SDK for cooperative exit
       const feeQuote: CoopExitFeeQuote | null = await wallet.getWithdrawalFeeQuote({
@@ -1196,9 +1202,7 @@ export class SparkAdapter implements IProtocolAdapter {
 
   async signPsbt(psbtHex: string): Promise<{ psbt: string; unchanged: boolean }> {
     // Retained mnemonic state never authorizes signing after disconnect.
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }
@@ -1213,9 +1217,7 @@ export class SparkAdapter implements IProtocolAdapter {
 
   async signMessage(message: string): Promise<string> {
     // Same invariant as signPsbt: never sign for a wallet the host has locked.
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "SPARK", "NOT_CONNECTED");
     }
@@ -1255,9 +1257,7 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   async getInvoiceStatus(params: { invoice: string }): Promise<{ status: string }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     const requestId = this.invoiceRequestIds.get(params.invoice);
     if (!requestId) {
@@ -1266,7 +1266,7 @@ export class SparkAdapter implements IProtocolAdapter {
     }
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const request = await wallet.getLightningReceiveRequest(requestId);
 
       if (!request) {
@@ -1319,12 +1319,10 @@ export class SparkAdapter implements IProtocolAdapter {
     donation?: boolean;
     witness_data?: unknown;
   }): Promise<Record<string, unknown>> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "SPARK", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const wallet = sparkClientManager.getWallet();
+      const wallet = this.wallet();
       const senderSparkAddress = (await wallet.getSparkAddress()) as string;
       const assignmentAmount = params.assignment?.value;
       const tokenAmount =

@@ -19,7 +19,9 @@ describe('AUDIT C-F8: RgbAdapter drops config.jwt', () => {
     let captured: any = null
     vi.spyOn(kaleidoClientManager, 'initialize').mockImplementation((c: any) => {
       captured = c
+      return Symbol('session')
     })
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       rln: { getNodeInfo: async () => ({ pubkey: 'pk' }) },
       maker: { listAssets: async () => [] },

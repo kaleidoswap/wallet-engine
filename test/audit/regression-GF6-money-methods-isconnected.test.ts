@@ -43,6 +43,7 @@ const MONEY_PATHS: ReadonlyArray<[string, (a: RgbAdapter) => Promise<unknown>]> 
 function nodeConfiguredButAdapterNotConnected(): RgbAdapter {
   vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
     rln: {
       sendPayment: async () => ({ payment_hash: 'ph', status: 'Succeeded' }),
@@ -96,6 +97,7 @@ describe('G-F6: a disconnected RgbAdapter must not be able to spend', () => {
     // still gets NODE_NOT_CONFIGURED rather than a confusing "not connected".
     const a = new RgbAdapter()
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(false)
     Object.assign(a as never, { connected: true, config: { protocol: 'RGB_LN' } })
     expect(a.isConnected()).toBe(true)

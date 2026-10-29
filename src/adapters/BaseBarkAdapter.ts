@@ -9,6 +9,7 @@ import { classifyDestination } from '../router/destination.js'
 
 import { IProtocolAdapter, type ProtocolConfig } from './IProtocolAdapter'
 import type { BarkClient, BarkWalletPort } from '../lib/bark-client.js'
+import { sessionSupersededError, type WalletSessionToken } from '../lib/wallet-session.js'
 import { decodeBolt11Invoice } from '../lib/bolt11'
 import { applyTransactionFilter } from '../lib/transaction-filter'
 import { PROTOCOL_OPERATIONS } from '../capabilities/operations'
@@ -80,6 +81,14 @@ export class BaseBarkAdapter implements IProtocolAdapter {
   readonly version = '1.0.0'
   readonly capabilities = PROTOCOL_OPERATIONS.BARK
 
+  /**
+   * Ownership token of the wallet THIS instance's connect() installed. The
+   * browser client is a process-wide singleton, so a later connect() on another
+   * instance replaces the wallet; every operation checks the token so this
+   * instance then fails closed instead of spending from the replacement.
+   */
+  private session: WalletSessionToken | null = null
+
   constructor(private readonly client: BarkClient) {}
 
   // ==========================================================================
@@ -94,8 +103,14 @@ export class BaseBarkAdapter implements IProtocolAdapter {
     if (!barkConfig.arkServerUrl) {
       throw new ConnectionError('arkServerUrl is required for a bark wallet', 'BARK')
     }
+    // Drop the previous binding before the client replaces the wallet.
+    this.session = null
     try {
-      await this.client.initialize(barkConfig)
+      const session = await this.client.initialize(barkConfig)
+      if (!session) {
+        throw new Error('wallet open was superseded by a teardown; nothing was installed')
+      }
+      this.session = session
       log.info('[BarkAdapter] Connected')
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -103,12 +118,24 @@ export class BaseBarkAdapter implements IProtocolAdapter {
     }
   }
 
+  /**
+   * Close the wallet this instance installed. An instance whose wallet was
+   * already replaced by a later connect() only forgets its binding: it must
+   * not tear down the wallet another instance now owns.
+   */
   async disconnect(): Promise<void> {
+    if (!this.client.ownsSession(this.session)) {
+      this.session = null
+      return
+    }
+    // A failed close keeps the wallet (and so this binding) so a retry can
+    // finish the job; the browser client revokes its token before it frees.
     await this.client.dispose()
+    this.session = null
   }
 
   isConnected(): boolean {
-    return this.client.isInitialized()
+    return this.client.isInitialized() && this.client.ownsSession(this.session)
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -490,9 +517,10 @@ export class BaseBarkAdapter implements IProtocolAdapter {
   }
 
   private wallet(): BarkWallet {
-    if (!this.isConnected()) {
+    if (!this.session || !this.client.isInitialized()) {
       throw new ConnectionError('Bark wallet is not connected', 'BARK')
     }
+    if (!this.client.ownsSession(this.session)) throw sessionSupersededError('BARK')
     return this.client.getWallet()
   }
 }

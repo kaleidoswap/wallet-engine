@@ -12,6 +12,7 @@ import { RlnClient } from "kaleido-sdk/rln";
 import { log } from "./log";
 import { ProtocolError } from "../types/base";
 import type { RgbTransport } from "../types/rgb";
+import { ClientOwnership, type WalletSessionToken } from "./wallet-session";
 
 export interface KaleidoClientConfig {
   baseUrl: string;
@@ -125,12 +126,21 @@ class KaleidoClientManager {
   private config: KaleidoClientConfig | null = null;
   /** Held only in NWC mode so reset() can tear down the relay pool. */
   private nwcRln: NwcRlnClientLike | null = null;
+  /** Token of the installed client; adapters bind to it in connect() (see ClientOwnership). */
+  private readonly ownership = new ClientOwnership("KaleidoClientManager");
 
-  /** Initialize the KaleidoClient with configuration. */
-  initialize(config: KaleidoClientConfig): void {
+  /**
+   * Initialize the KaleidoClient with configuration. Returns the ownership
+   * token of the client this call installed; a later initialize() or reset()
+   * supersedes it. An adapter must keep that token and present it on every
+   * operation.
+   */
+  initialize(config: KaleidoClientConfig): WalletSessionToken {
     // Tear down any prior NWC relay pool before replacing the client.
     this.nwcRln?.close();
     this.nwcRln = null;
+    // Every adapter bound to the client being replaced is superseded from here.
+    this.ownership.revoke();
     this.config = config;
 
     if (config.transport === "nwc") {
@@ -165,7 +175,7 @@ class KaleidoClientManager {
       } as unknown as KaleidoClient;
 
       log.info("[KaleidoClientManager] Initialized NWC transport:", { hasMakerUrl: hasMaker });
-      return;
+      return this.ownership.issue();
     }
 
     // `apiKey` here is the RLN node credential (the maker API is public), so it
@@ -190,6 +200,7 @@ class KaleidoClientManager {
       hasNodeUrl: !!config.nodeUrl,
       hasApiKey: !!config.apiKey,
     });
+    return this.ownership.issue();
   }
 
   /** @throws if not initialized */
@@ -202,6 +213,15 @@ class KaleidoClientManager {
 
   isInitialized(): boolean {
     return this.client !== null;
+  }
+
+  /**
+   * True only while the client `token` was issued for is the installed one. An
+   * adapter holding an older token was superseded by a later initialize() or
+   * reset() and must not operate on this client.
+   */
+  ownsSession(token: WalletSessionToken | null | undefined): boolean {
+    return this.client !== null && this.ownership.owns(token);
   }
 
   /**
@@ -233,6 +253,7 @@ class KaleidoClientManager {
     this.nwcRln = null;
     this.client = null;
     this.config = null;
+    this.ownership.revoke();
     log.info("[KaleidoClientManager] Reset complete");
   }
 

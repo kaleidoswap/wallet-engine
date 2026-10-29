@@ -1,6 +1,7 @@
 /** Prevent singleton clients from crossing wallet identities or teardown generations. */
 
 import { log } from './log'
+import { ErrorCode, ProtocolError, type ProtocolType } from '../types/base'
 
 /** How a different wallet is handled while another initialization is pending. */
 export type WalletConflictPolicy = 'supersede' | 'reject'
@@ -137,4 +138,78 @@ export class WalletSessionGuard {
     this.invalidate()
     return true
   }
+}
+
+// ---------------------------------------------------------------------------
+// Per-install ownership of a singleton signing client
+// ---------------------------------------------------------------------------
+
+/**
+ * Opaque identity of ONE client install on a shared manager. A fresh token is
+ * issued every time a client is installed and the current one is dropped when
+ * that client is torn down or replaced, so a token is never valid twice.
+ */
+export type WalletSessionToken = symbol
+
+/**
+ * Binds adapter instances to the client install their own `connect()` produced.
+ *
+ * Several adapter instances may share one manager singleton. Without a binding,
+ * an instance left behind by a later `connect()` — on another instance, or a
+ * re-connect that failed — still reads as connected and sends, signs and swaps
+ * through whatever wallet the singleton holds NOW. The manager issues a token
+ * when it installs a client and the adapter must present that token before
+ * every operation, so a superseded adapter fails closed instead.
+ */
+export class ClientOwnership {
+  private token: WalletSessionToken | null = null
+  private serial = 0
+
+  constructor(private readonly name: string) {}
+
+  /** Issue the token for a client installed right now, replacing any current one. */
+  issue(): WalletSessionToken {
+    this.token = Symbol(`${this.name}#${++this.serial}`)
+    return this.token
+  }
+
+  /** Drop the current token: the installed client is gone. */
+  revoke(): void {
+    this.token = null
+  }
+
+  /** The token of the client installed right now, or null. */
+  get current(): WalletSessionToken | null {
+    return this.token
+  }
+
+  /** True only for the token of the client installed right now. */
+  owns(token: WalletSessionToken | null | undefined): boolean {
+    return token != null && this.token !== null && token === this.token
+  }
+}
+
+/** The error an adapter throws once the singleton it bound to was replaced. */
+export function sessionSupersededError(protocol: ProtocolType): ProtocolError {
+  return new ProtocolError(
+    `Adapter session superseded: a later connect() replaced the shared ${protocol} client. ` +
+      'Reconnect this adapter before using it.',
+    protocol,
+    ErrorCode.SESSION_SUPERSEDED,
+  )
+}
+
+/**
+ * Guard for an operation on an adapter bound to a shared client. Throws
+ * NOT_CONNECTED when the adapter never connected (or disconnected) and
+ * SESSION_SUPERSEDED when its install was replaced.
+ */
+export function assertOwnedSession(
+  protocol: ProtocolType,
+  token: WalletSessionToken | null,
+  owns: (token: WalletSessionToken | null) => boolean,
+): void {
+  if (owns(token)) return
+  if (!token) throw new ProtocolError('Not connected', protocol, 'NOT_CONNECTED')
+  throw sessionSupersededError(protocol)
 }

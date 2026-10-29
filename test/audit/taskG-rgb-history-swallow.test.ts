@@ -15,6 +15,7 @@ vi.mock('../../src/lib/kaleido-client-manager', () => ({
   kaleidoClientManager: {
     hasNode: () => true,
     isInitialized: () => true,
+    ownsSession: () => true,
     getClient: () => state.client,
     reset: () => {},
   },

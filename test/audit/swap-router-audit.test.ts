@@ -50,6 +50,7 @@ function swapWithProto(proto: any) {
 
 /** Wire an RgbAdapter to a fully fake kaleido client (no network anywhere). */
 function rgbAdapterWithClient(client: any) {
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   ;(kaleidoClientManager as any).client = client
   ;(kaleidoClientManager as any).config = { baseUrl: 'http://maker.local' }
   const adapter = new RgbAdapter()

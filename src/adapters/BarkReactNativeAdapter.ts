@@ -6,6 +6,7 @@ import { decodeBolt11Invoice, validateBolt11Invoice } from '../lib/bolt11.js'
 import { preimageMatchesPaymentHash } from '../lightning/preimages.js'
 import { getPlatform, type IRuntimeProvider } from '../ports/index.js'
 import type { BarkClient } from '../lib/bark-client.js'
+import { ClientOwnership } from '../lib/wallet-session.js'
 import type { BarkConfig } from '../types/bark.js'
 import type { Invoice, InvoiceRequest, PaymentRequest, PaymentResult, PaymentStatus } from '../types/base.js'
 import { CapabilityError, ConfigurationError, ValidationError } from '../types/base.js'
@@ -19,6 +20,9 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
     const runtime = options.runtime ?? getPlatform()?.runtime
     if (!runtime) throw new ConfigurationError('Inject a runtime or call setPlatform before creating BarkReactNativeAdapter', 'BARK')
     const backend = new BarkReactNativeBackend()
+    // The backend is per-instance, so ownership only tracks this adapter's own
+    // connect/disconnect; it is what lets BaseBarkAdapter treat both hosts alike.
+    const ownership = new ClientOwnership('BarkReactNativeAdapter')
     const client: BarkClient = {
       initialize: async (config: BarkConfig) => {
         if (!config.dataDir || !config.network) throw new ConfigurationError('Bark React Native requires dataDir and an explicit network', 'BARK')
@@ -31,9 +35,17 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
           createIfMissing: config.createIfMissing, onchain: true,
           vtxoRefreshExpiryThreshold: config.vtxoRefreshExpiryThreshold, userAgent: config.userAgent,
         })
+        return ownership.issue()
       },
-      dispose: () => backend.disconnect(),
+      dispose: async () => {
+        // A failed shutdown keeps the handles, so the session stays live until
+        // a retry actually closes the wallet.
+        await backend.disconnect()
+        ownership.revoke()
+      },
       isInitialized: () => backend.isConnected(),
+      // Ownership outlives a failed shutdown so disconnect() can retry it.
+      ownsSession: token => ownership.owns(token),
       isBarkAddress: address => backend.isBarkAddress(address),
       getWallet: () => backend.getWalletPort(),
     }

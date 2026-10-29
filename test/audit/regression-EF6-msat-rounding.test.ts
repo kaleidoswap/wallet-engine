@@ -11,6 +11,7 @@ describe('E-F6: one integer-sat rendering for millisatoshis', () => {
   it('native RGB decode rounds 1500 msat to 2 sats and preserves msat', async () => {
     vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue({
       rln: { decodeLNInvoice: async () => ({ amt_msat: 1500 }) },
     } as never)

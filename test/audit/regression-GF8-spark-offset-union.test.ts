@@ -4,6 +4,7 @@ const state = vi.hoisted(() => ({ wallet: null as any }))
 vi.mock('../../src/lib/spark-client-manager', () => ({
   sparkClientManager: {
     isInitialized: () => state.wallet !== null,
+    ownsSession: () => state.wallet !== null,
     getWallet: () => state.wallet,
     getConfig: () => ({ protocol: 'SPARK', network: 'regtest', mnemonic: '' }),
   },

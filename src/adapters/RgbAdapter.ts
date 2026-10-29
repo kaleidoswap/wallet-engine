@@ -6,6 +6,7 @@ import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
 import { isBtcAssetId } from "../lib/asset-id";
 import { kaleidoClientManager } from "../lib/kaleido-client-manager";
+import { assertOwnedSession, type WalletSessionToken } from "../lib/wallet-session";
 import {
   KaleidoError,
   APIError,
@@ -77,6 +78,13 @@ export class RgbAdapter implements IProtocolAdapter {
 
   private connected = false;
   private config: RgbConfig | null = null;
+  /**
+   * Ownership token of the client THIS instance's connect() installed on the
+   * shared kaleidoClientManager. A later connect() on any instance replaces
+   * the client; every operation checks the token so this instance then fails
+   * closed instead of spending through the replacement node.
+   */
+  private session: WalletSessionToken | null = null;
   private swapStore: KaleidoswapSwapStore | null = null;
   private swapStoreIdentity: string | null = null;
   /** Hot cache only; durable records are authoritative across restarts. */
@@ -106,9 +114,13 @@ export class RgbAdapter implements IProtocolAdapter {
       } makerUrl=${rgbConfig.makerUrl || "(none)"} hasApiKey=${!!rgbConfig.apiKey}`,
     );
 
+    // Drop the previous binding before the singleton replaces the client.
+    this.connected = false;
+    this.session = null;
+    this.config = null;
     try {
       // Initialize Kaleido SDK client (maker URL is optional, transport-independent)
-      kaleidoClientManager.initialize({
+      const session = kaleidoClientManager.initialize({
         baseUrl: rgbConfig.makerUrl || "",
         nodeUrl: rgbConfig.nodeUrl,
         // Prefer the documented node credential over the maker API key alias.
@@ -116,8 +128,12 @@ export class RgbAdapter implements IProtocolAdapter {
         transport,
         nwcUri: rgbConfig.nwcUri,
       });
+      if (!session) {
+        throw new Error("client initialization installed nothing");
+      }
+      this.session = session;
 
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
 
       log.info(`[RgbAdapter] Calling client.rln.getNodeInfo() → ${rgbConfig.nodeUrl}`);
       const t0 = Date.now();
@@ -151,10 +167,13 @@ export class RgbAdapter implements IProtocolAdapter {
         log.info("[RgbAdapter] No maker URL provided (swaps disabled)");
       }
     } catch (error: unknown) {
-      // Revoke the initialized node client when its connection handshake fails.
+      // Revoke the initialized node client when its connection handshake fails —
+      // but only the one this attempt installed, never a client a later
+      // connect() on another instance now owns.
       this.connected = false;
       this.config = null;
-      kaleidoClientManager.reset();
+      if (kaleidoClientManager.ownsSession(this.session)) kaleidoClientManager.reset();
+      this.session = null;
       const msg = error instanceof Error ? error.message : String(error);
       log.error(`[RgbAdapter] connect() failed: ${msg}`);
       throw new ConnectionError(
@@ -165,35 +184,52 @@ export class RgbAdapter implements IProtocolAdapter {
     }
   }
 
+  /**
+   * Tear down the client this instance installed. An instance whose client was
+   * already replaced by a later connect() only forgets its binding: it must
+   * not reset the client another instance now owns.
+   */
   async disconnect(): Promise<void> {
-    kaleidoClientManager.reset();
+    const owned = kaleidoClientManager.ownsSession(this.session);
     this.connected = false;
+    this.session = null;
     this.config = null;
     this.swapStore = null;
     this.swapStoreIdentity = null;
     this.swapAccessTokens.clear();
+    if (owned) kaleidoClientManager.reset();
     log.info("[RgbAdapter] Disconnected");
   }
 
   isConnected(): boolean {
-    return this.connected && kaleidoClientManager.isInitialized();
+    return this.connected && kaleidoClientManager.ownsSession(this.session);
+  }
+
+  /** NOT_CONNECTED before/after this instance's own handshake, SESSION_SUPERSEDED once replaced. */
+  private assertConnected(): void {
+    if (!this.connected) throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
+    assertOwnedSession("RGB_LN", this.session, (token) => kaleidoClientManager.ownsSession(token));
+  }
+
+  /** The shared SDK client, only while this instance's session still owns it. */
+  private nodeClient(): ReturnType<typeof kaleidoClientManager.getClient> {
+    // During connect() the handshake has not completed yet, so only the binding
+    // is checked; afterwards the handshake flag is required too.
+    assertOwnedSession("RGB_LN", this.session, (token) => kaleidoClientManager.ownsSession(token));
+    return kaleidoClientManager.getClient();
   }
 
   private assertNodeConnected(): void {
     // The shared manager can be initialized independently; require this adapter's
     // own successful handshake before any node operation, especially money paths.
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     if (!kaleidoClientManager.hasNode()) {
       throw new ProtocolError("Node not configured", "RGB_LN", "NODE_NOT_CONFIGURED");
     }
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     const info: ConnectionInfo = {
       protocol: "RGB_LN",
@@ -204,7 +240,7 @@ export class RgbAdapter implements IProtocolAdapter {
     // Try to get node info if node is configured
     if (kaleidoClientManager.hasNode()) {
       try {
-        const client = kaleidoClientManager.getClient();
+        const client = this.nodeClient();
         const nodeInfo = await client.rln.getNodeInfo();
         const networkInfo = await client.rln.getNetworkInfo();
         info.nodeId = nodeInfo.pubkey || "";
@@ -226,11 +262,9 @@ export class RgbAdapter implements IProtocolAdapter {
   // ========================================================================
 
   async listAssets(): Promise<UnifiedAsset[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
-    const client = kaleidoClientManager.getClient();
+    const client = this.nodeClient();
 
     // Get node assets (always works if node is connected)
     let nodeAssetsArray: Record<string, unknown>[] = [];
@@ -296,7 +330,7 @@ export class RgbAdapter implements IProtocolAdapter {
     }
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
 
       // Check if requesting BTC balance
       if (isBtcAssetId(assetId)) {
@@ -319,7 +353,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient() as unknown as {
+      const client = this.nodeClient() as unknown as {
         refreshTransfers?: (request: { skip_sync: boolean }) => Promise<unknown>;
         rln?: {
           refreshTransfers?: (request: { skip_sync: boolean }) => Promise<unknown>;
@@ -345,7 +379,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
 
       // listTransfers requires asset_id for RGB on-chain transfers
       if (!filter?.asset) {
@@ -484,7 +518,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
 
       // Create Lightning invoice (BTC or RGB over Lightning)
       // Build params - always include expiry_sec
@@ -531,7 +565,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const decoded = (await client.rln.decodeLNInvoice({ invoice })) as DecodeLNInvoiceResponse & {
         description?: string;
       };
@@ -562,7 +596,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const sendParams: Record<string, unknown> = {
         invoice: request.invoice,
       };
@@ -605,7 +639,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const result = (await client.rln.keysend({
         dest_pubkey: request.pubkey,
         amt_msat: request.amount,
@@ -630,7 +664,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const response = await client.rln.getPayment({
         payment_hash: paymentHash,
       });
@@ -659,7 +693,7 @@ export class RgbAdapter implements IProtocolAdapter {
     this.assertNodeConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const addressData = (await client.rln.getAddress()) as { address?: string };
 
       return {
@@ -679,7 +713,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async getNodeInfo(): Promise<NodeInfo> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       return await client.rln.getNodeInfo();
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get node info");
@@ -689,7 +723,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const btcBalance = await client.rln.getBtcBalance();
       const vanilla = btcBalance?.vanilla || {};
 
@@ -709,7 +743,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async listChannels(): Promise<unknown[]> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const response = (await client.rln.listChannels()) as
         | unknown[]
         | { channels?: unknown[] }
@@ -727,7 +761,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async listPayments(): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       return await client.rln.listPayments();
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to list payments");
@@ -737,7 +771,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       if (!options?.asset_id) {
         return { transfers: [] } as ListTransfersResponse;
       }
@@ -754,7 +788,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async createRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const durationSeconds = ((params.durationSeconds as number) ||
         (params.duration_seconds as number) ||
         3600) as number;
@@ -783,7 +817,7 @@ export class RgbAdapter implements IProtocolAdapter {
   ): Promise<{ success: boolean }> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       await client.rln.createUtxos({
         up_to: params.upTo ?? false,
         num: params.num ?? 3,
@@ -809,7 +843,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const response = await client.rln.listUnspents();
       return response as unknown as Awaited<ReturnType<RgbAdapter["listRgbUnspents"]>>;
     } catch (error: unknown) {
@@ -845,7 +879,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async estimateRgbFee(blocks: number): Promise<{ fee_rate: number }> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const response = await client.rln.estimateFee({ blocks });
       return { fee_rate: response?.fee_rate ?? 1 };
     } catch (error: unknown) {
@@ -859,7 +893,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const balance = await client.rln.getBtcBalance();
       const empty = { settled: 0, future: 0, spendable: 0 };
       return {
@@ -874,7 +908,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async decodeRgbInvoice(params: Record<string, unknown>): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       return await client.rln.decodeRgbInvoice({
         invoice: (params.invoice as string) || (params as unknown as string),
       });
@@ -886,7 +920,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async getInvoiceStatus(params: { invoice: string }): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       return await client.rln.getInvoiceStatus(params);
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to get invoice status");
@@ -896,7 +930,7 @@ export class RgbAdapter implements IProtocolAdapter {
   async sendAsset(params: Record<string, unknown>): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const assetId = ((params.assetId as string) || (params.asset_id as string)) as string;
       const assignmentObj = params.assignment as Record<string, unknown> | undefined;
       const amount = (params.amount ?? assignmentObj?.value) as number | undefined;
@@ -938,7 +972,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }): Promise<unknown> {
     this.assertNodeConnected();
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       return await client.rln.sendBtc({
         address: params.address,
         amount: params.amount,
@@ -969,9 +1003,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async getSwapQuote(request: QuoteRequest): Promise<Quote> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     // Check if maker is configured
     if (!this.config?.makerUrl) {
@@ -983,7 +1015,7 @@ export class RgbAdapter implements IProtocolAdapter {
     }
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const quoteResponse = (await client.maker.getQuote({
         from_asset: {
           asset_id: request.fromAsset,
@@ -1043,9 +1075,7 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async executeSwap(quote: Quote): Promise<SwapResult> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     // Check if maker is configured
     if (!this.config?.makerUrl) {
@@ -1092,7 +1122,7 @@ export class RgbAdapter implements IProtocolAdapter {
     let executionAttempted = false;
     let quoteClaimed = false;
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       const rln = client.rln as unknown as {
         whitelistSwap(body: { swapstring: string }): Promise<void>;
         getTakerPubkey(): Promise<string>;
@@ -1190,12 +1220,10 @@ export class RgbAdapter implements IProtocolAdapter {
 
   /** `swapId` is the atomic swap's payment hash. */
   async getSwapStatus(swapId: string, accessToken?: string): Promise<SwapResult> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     try {
-      const client = kaleidoClientManager.getClient();
+      const client = this.nodeClient();
       let recordStore = this.swapStore;
       if (!recordStore) {
         try {
@@ -1253,10 +1281,8 @@ export class RgbAdapter implements IProtocolAdapter {
   }
 
   async listIncompleteSwaps(): Promise<KaleidoswapSwapRecord[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "RGB_LN", "NOT_CONNECTED");
-    }
-    const client = kaleidoClientManager.getClient();
+    this.assertConnected();
+    const client = this.nodeClient();
     const takerPubkey = await (client.rln as any).getTakerPubkey();
     if (!takerPubkey) {
       throw new ProtocolError(

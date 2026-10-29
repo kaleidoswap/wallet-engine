@@ -19,9 +19,10 @@ import { describe, it, expect, vi, afterEach } from 'vitest'
 const state = { client: null as any }
 vi.mock('../../src/lib/kaleido-client-manager', () => ({
   kaleidoClientManager: {
-    initialize: () => {},
+    initialize: () => Symbol('session'),
     reset: () => {},
     isInitialized: () => true,
+    ownsSession: () => true,
     hasNode: () => true,
     getClient: () => state.client,
   },

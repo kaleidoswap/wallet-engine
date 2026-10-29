@@ -25,6 +25,8 @@ describe("G-F2 payment status lookup failures", () => {
     const rln = connected(new RlnWdkAdapter(), { listPayments: fail });
 
     vi.spyOn(arkadeClientManager, "isInitialized").mockReturnValue(true);
+
+    vi.spyOn(arkadeClientManager, "ownsSession").mockReturnValue(true);
     vi.spyOn(arkadeClientManager, "getWallet").mockReturnValue({
       getTransactionHistory: fail,
     } as never);

@@ -17,6 +17,7 @@ import {
   invalidateArkadeSnapshotCache,
 } from "../lib/arkade-snapshot-cache";
 import { arkadeClientManager } from "../lib/arkade-client-manager";
+import { assertOwnedSession, type WalletSessionToken } from "../lib/wallet-session";
 import { arkadeIntentsClientManager } from "../lib/arkade-intents-client-manager";
 import { cleanupLegacyArkadeSwapsDb } from "../lib/legacy-arkade-swaps-cleanup";
 import {
@@ -110,6 +111,13 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   private config: ArkadeConfig | null = null;
+  /**
+   * Ownership token of the wallet THIS instance's connect() installed on the
+   * shared arkadeClientManager. A later connect() on any instance replaces the
+   * wallet; every operation checks the token so this instance then fails
+   * closed instead of spending from the replacement.
+   */
+  private session: WalletSessionToken | null = null;
   private assetDetailsCache = new Map<string, Record<string, unknown> | null>();
   private intents: ArkadeIntentsLightning | null = null;
   private arkNetwork: string | null = null;
@@ -128,8 +136,17 @@ export class ArkadeAdapter implements IProtocolAdapter {
       throw new ConnectionError("arkServerUrl is required for Arkade wallet", "ARKADE");
     }
 
+    // The singleton tears the previous wallet down before it opens the new one,
+    // so drop the previous binding and its secret first: a failed re-connect
+    // must leave nothing this adapter could still sign with.
+    this.session = null;
+    this.config = null;
     try {
-      await arkadeClientManager.initialize(arkadeConfig);
+      const session = await arkadeClientManager.initialize(arkadeConfig);
+      if (!session) {
+        throw new Error("wallet initialization was superseded by a teardown; nothing was installed");
+      }
+      this.session = session;
       this.config = arkadeConfig;
       this.assetDetailsCache.clear();
       log.info("[ArkadeAdapter] Connected to Arkade successfully");
@@ -140,7 +157,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       this.arkNetwork = null;
       this.intents = new ArkadeIntentsLightning({
         config: arkadeConfig.intents ?? {},
-        getWallet: () => arkadeClientManager.getWallet(),
+        getWallet: () => this.wallet(),
         getNetwork: () => this.getArkNetwork(),
         arkServerUrl: arkadeConfig.arkServerUrl,
         fund: async (address, amount) =>
@@ -149,32 +166,59 @@ export class ArkadeAdapter implements IProtocolAdapter {
       // Opt-in: a host that wires its own venue still gets the Lightning paths.
       if (arkadeConfig.intents) await this.intents.start();
     } catch (error: unknown) {
+      // Fail closed: no config to sign with, no Intents venue, and no wallet
+      // left live for an adapter that reports its connect() as failed.
+      this.config = null;
+      this.intents?.stop();
+      this.intents = null;
+      if (arkadeClientManager.ownsSession(this.session)) {
+        await arkadeClientManager.disconnect();
+      }
+      this.session = null;
       const msg = error instanceof Error ? error.message : String(error);
       throw new ConnectionError(`Failed to connect to Arkade: ${msg}`, "ARKADE");
     }
   }
 
+  /**
+   * Tear down the wallet this instance installed. An instance whose wallet was
+   * already replaced by a later connect() only forgets its binding: it must
+   * not tear down the wallet another instance now owns.
+   */
   async disconnect(): Promise<void> {
     // Close the Intents transport first so it never uses the wallet after
     // teardown. Defensive: Intents is host-initialized, so this no-ops when the
     // host never wired it.
     this.intents?.stop();
     this.intents = null;
-    await arkadeIntentsClientManager.dispose();
-    await arkadeClientManager.disconnect();
+    const owned = arkadeClientManager.ownsSession(this.session);
+    this.session = null;
     this.config = null;
     this.assetDetailsCache.clear();
+    if (owned) {
+      await arkadeIntentsClientManager.dispose();
+      await arkadeClientManager.disconnect();
+    }
     log.info("[ArkadeAdapter] Disconnected from Arkade");
   }
 
   isConnected(): boolean {
-    return arkadeClientManager.isInitialized();
+    return arkadeClientManager.ownsSession(this.session);
+  }
+
+  /** NOT_CONNECTED before/after this instance's own session, SESSION_SUPERSEDED once replaced. */
+  private assertConnected(): void {
+    assertOwnedSession("ARKADE", this.session, (token) => arkadeClientManager.ownsSession(token));
+  }
+
+  /** The shared wallet, only while this instance's session still owns it. */
+  private wallet(): ReturnType<typeof arkadeClientManager.getWallet> {
+    this.assertConnected();
+    return arkadeClientManager.getWallet();
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     return {
       protocol: "ARKADE",
       connected: true,
@@ -188,11 +232,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async listAssets(): Promise<UnifiedAsset[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       // Both reads go through the shared snapshot — the summary reuses the
       // same getBalance() RPC instead of issuing a second one.
       const rawBalance = await getArkadeBalanceCached(wallet);
@@ -321,11 +363,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const history: ArkTransaction[] = await wallet.getTransactionHistory();
 
       const resolveDetails = (assetId: string) => this.getCachedAssetDetails(wallet, assetId);
@@ -362,9 +402,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
 
   /** Never answer a Lightning request with an Ark address. */
   async createInvoice(request: InvoiceRequest): Promise<Invoice> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     if (request.layer === "BTC_LN") {
       const receive = await this.requireIntents().createReceive(request.amount ?? 0, { amountSide: "from" });
       return {
@@ -376,7 +414,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       };
     }
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const address: string = await wallet.getAddress();
       return {
         invoice: address,
@@ -423,9 +461,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     // Checked before the amount so a bolt11 never falls through to sendBitcoin.
     if (isLightningInvoice(request.invoice)) {
@@ -450,7 +486,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       throw new ProtocolError("Amount is required for Arkade payments", "ARKADE", "INVALID_AMOUNT");
     }
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, request.amount);
       const txid: string = await wallet.sendBitcoin({
         address: request.invoice, // Ark or on-chain address
@@ -479,7 +515,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   private requireIntents(): ArkadeIntentsLightning {
-    if (!this.isConnected()) throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
+    this.assertConnected();
     if (!this.intents) {
       throw new ProtocolError("Lightning on Arkade needs Arkade Intents", "ARKADE", "NOT_CONFIGURED");
     }
@@ -488,7 +524,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
 
   private async getArkNetwork(): Promise<string> {
     if (!this.arkNetwork) {
-      const info = await arkadeClientManager.getWallet().arkProvider.getInfo();
+      const info = await this.wallet().arkProvider.getInfo();
       this.arkNetwork = String(info?.network ?? "");
     }
     return this.arkNetwork;
@@ -526,9 +562,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   /** Resolve public payment IDs against transaction history. */
   async getPaymentStatus(paymentHash: string): Promise<PaymentStatus> {
     // Disconnection is a lookup failure, not evidence that payment is pending.
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     if (!paymentHash) {
       return { paymentHash, status: "pending" as TransactionStatus };
     }
@@ -544,7 +578,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       };
     }
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const history = (await wallet.getTransactionHistory()) as Array<{
         key?: { txid?: string } | string;
         settled?: boolean;
@@ -579,11 +613,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async getReceiveAddress(assetId?: string): Promise<Address> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
 
       // 'onchain' or 'boarding' → return on-chain boarding address
       if (assetId === "onchain" || assetId === "boarding") {
@@ -613,11 +645,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async getNodeInfo(): Promise<NodeInfo> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const balance = await this.getWalletBalanceSummary(wallet);
       const spendableSats = balance.available;
       return {
@@ -637,11 +667,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async getBtcBalance(): Promise<{ confirmed: number; unconfirmed: number; total: number }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const balance = await this.getWalletBalanceSummary(wallet);
       // preconfirmed VTXOs are spendable (isSpendable = !vtxo.isSpent in the SDK),
       // so include them in `confirmed` so the Withdraw UI sees the full spendable balance.
@@ -669,11 +697,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
    * VTXOs first and manual coin selection picks the shortest-lived coins.
    */
   async getVtxos(): Promise<Record<string, unknown>[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const vtxos = await getArkadeVtxosCached(wallet);
       const sorted = sortVtxosByExpiry(vtxos);
       return normalizeVtxos(sorted).map((vtxo) => ({
@@ -693,11 +719,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }
 
   async getBoardingUtxos(): Promise<Record<string, unknown>[]> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const utxos: ExtendedCoin[] = await wallet.getBoardingUtxos();
       return (utxos ?? []).map((u: ExtendedCoin) => ({
         txid: u.txid,
@@ -720,11 +744,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
    * Requires a confirmed boarding UTXO; returns the commitment txid.
    */
   async onboard(): Promise<{ txid: string }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       // Get current fee info from server
       const info = await wallet.arkProvider.getInfo();
       const commitmentTxid: string = await new Ramps(wallet).onboard(info.fees);
@@ -742,9 +764,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
    * @param amount   Optional sats; undefined = exit all
    */
   async offboard(address: string, amount?: number): Promise<{ txid: string }> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     if (!address) {
       throw new ProtocolError(
         "Destination address required for offboard",
@@ -760,7 +780,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       );
     }
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const info = await wallet.arkProvider.getInfo();
       const exitTxid: string = await new Ramps(wallet).offboard(
         address,
@@ -784,9 +804,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async sendAsset(params: Record<string, unknown>): Promise<Record<string, unknown>> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
 
     const request = (params ?? {}) as {
       assetId?: string;
@@ -809,7 +827,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
     }
 
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const txid: string = await wallet.send({
         address: recipientId,
         assets: [{ assetId, amount }],
@@ -826,11 +844,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
     address: string;
     amount: number;
   }): Promise<Record<string, unknown>> {
-    if (!this.isConnected()) {
-      throw new ProtocolError("Not connected", "ARKADE", "NOT_CONNECTED");
-    }
+    this.assertConnected();
     try {
-      const wallet = arkadeClientManager.getWallet();
+      const wallet = this.wallet();
       const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, params.amount);
       const txid: string = await wallet.sendBitcoin({
         address: params.address,
@@ -870,6 +886,9 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   async signMessage(message: string): Promise<string> {
+    // Same invariant as Spark: never sign for a wallet that is not live, and
+    // never with a secret left over from a wallet that was torn down.
+    this.assertConnected();
     if (!this.config?.mnemonic) {
       throw new ProtocolError("Wallet mnemonic not available", "ARKADE", "NOT_CONNECTED");
     }

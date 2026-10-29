@@ -110,6 +110,7 @@ describe('G-F2 (disconnected case): a disconnected adapter must not report a pay
 describe('G-F3: SparkAdapter.getInvoiceStatus must not map RPC failure to Pending', () => {
   it('a throwing gateway must surface as an error', async () => {
     vi.spyOn(sparkClientManager, 'isInitialized').mockReturnValue(true)
+    vi.spyOn(sparkClientManager, 'ownsSession').mockReturnValue(true)
     vi.spyOn(sparkClientManager, 'getWallet').mockReturnValue({
       getLightningReceiveRequest: async () => {
         throw new Error('gateway 500')

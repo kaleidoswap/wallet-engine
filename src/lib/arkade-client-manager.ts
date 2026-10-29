@@ -1,7 +1,12 @@
 /** Arkade wallet lifecycle with injected platform providers. */
 
 import type { ArkadeConfig } from "../types/arkade";
-import { WalletSessionGuard, type SessionAttempt } from "./wallet-session";
+import {
+  ClientOwnership,
+  WalletSessionGuard,
+  type SessionAttempt,
+  type WalletSessionToken,
+} from "./wallet-session";
 import { DEFAULT_VTXO_THRESHOLD_SECONDS } from "./arkade-vtxo-lifecycle";
 import { log } from "./log";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
@@ -130,6 +135,8 @@ class ArkadeClientManager {
   private wallet: Wallet | null = null;
   private _vtxoManager: VtxoManager | null = null;
   private config: ArkadeConfig | null = null;
+  /** Token of the installed wallet; adapters bind to it in connect() (see ClientOwnership). */
+  private readonly ownership = new ClientOwnership("ArkadeClientManager");
   /** Reject a wallet switch that races an in-flight handshake. */
   private readonly session = new WalletSessionGuard({
     name: "ArkadeClientManager",
@@ -155,21 +162,25 @@ class ArkadeClientManager {
   /**
    * Initialize the Arkade wallet. Concurrent calls share the in-flight promise;
    * throws if already initializing with a different identity or network (call
-   * dispose() first).
+   * dispose() first). Resolves with the ownership token of the wallet this call
+   * installed, or null when a teardown superseded it and nothing was installed.
+   * An adapter must keep that token and present it on every operation.
    */
-  initialize(config: ArkadeConfig): Promise<void> {
+  initialize(config: ArkadeConfig): Promise<WalletSessionToken | null> {
     return this.session.begin(WALLET_SLOT, config, (attempt) =>
       this._doInitialize(config, attempt),
     );
   }
 
-  private async _doInitialize(config: ArkadeConfig, attempt: SessionAttempt): Promise<void> {
+  private async _doInitialize(
+    config: ArkadeConfig,
+    attempt: SessionAttempt,
+  ): Promise<WalletSessionToken | null> {
     if (this.wallet) {
       log.warn("[ArkadeClientManager] Wallet already initialized, re-initializing...");
       await this.disconnect();
     }
 
-    this.config = config;
     // Marked AFTER the re-init disconnect above, which invalidates the session itself.
     attempt.mark();
 
@@ -225,9 +236,12 @@ class ArkadeClientManager {
       const claimed = await attempt.claim(() =>
         (created as unknown as { dispose?: () => Promise<void> | void })?.dispose?.(),
       );
-      if (!claimed) return;
+      if (!claimed) return null;
 
       this.wallet = created;
+      // The config (and its secret) is held only alongside a live wallet.
+      this.config = config;
+      const token = this.ownership.issue();
 
       // HD balances need a gap scan; failure does not make the wallet unusable.
       if (hdMode) {
@@ -251,12 +265,17 @@ class ArkadeClientManager {
         vtxoThreshold,
         hdMode ? "hd" : "static",
       );
+      return token;
     } catch (error: unknown) {
       // Only clear the wallet if this init still owns the session; a failure here
-      // must not tear down a newer, successful one.
+      // must not tear down a newer, successful one. The config goes with it: a
+      // failed (re)connect must not leave the previous or the rejected secret
+      // behind as if a wallet were live.
       if (attempt.isCurrent) {
         this.wallet = null;
         this._vtxoManager = null;
+        this.config = null;
+        this.ownership.revoke();
       }
       const msg = error instanceof Error ? error.message : String(error);
       throw Object.assign(new Error(`Failed to initialize Arkade wallet: ${msg}`), {
@@ -311,6 +330,15 @@ class ArkadeClientManager {
   }
 
   /**
+   * True only while the wallet `token` was issued for is the installed one. An
+   * adapter holding an older token was superseded by a later initialize() or
+   * teardown and must not operate on this wallet.
+   */
+  ownsSession(token: WalletSessionToken | null | undefined): boolean {
+    return this.wallet !== null && this.ownership.owns(token);
+  }
+
+  /**
    * Connected config with the mnemonic REDACTED — one careless
    * `log(getConfig())` in a host would otherwise leak the seed.
    */
@@ -331,6 +359,7 @@ class ArkadeClientManager {
     }
     this.wallet = null;
     this.config = null;
+    this.ownership.revoke();
     this.session.invalidate();
     log.info("[ArkadeClientManager] Wallet disconnected");
   }
@@ -348,6 +377,7 @@ class ArkadeClientManager {
     }
     this.wallet = null;
     this.config = null;
+    this.ownership.revoke();
     this.session.invalidate();
     log.info("[ArkadeClientManager] Complete reset performed");
   }

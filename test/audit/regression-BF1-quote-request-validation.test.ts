@@ -51,6 +51,7 @@ function getQuote(
     },
   });
   vi.spyOn(kaleidoClientManager, "isInitialized").mockReturnValue(true);
+  vi.spyOn(kaleidoClientManager, "ownsSession").mockReturnValue(true);
   vi.spyOn(kaleidoClientManager, "getClient").mockReturnValue({
     maker: {
       getQuote: async () => ({

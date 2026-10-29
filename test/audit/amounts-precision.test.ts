@@ -38,6 +38,7 @@ function connectedRgbAdapter(client: unknown): RgbAdapter {
   })
   vi.spyOn(kaleidoClientManager, 'hasNode').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'isInitialized').mockReturnValue(true)
+  vi.spyOn(kaleidoClientManager, 'ownsSession').mockReturnValue(true)
   vi.spyOn(kaleidoClientManager, 'getClient').mockReturnValue(client as any)
   return adapter
 }

@@ -7,7 +7,12 @@ import { saveSentTokenRecord } from './spark-sent-token-records'
 import { bech32 } from '@scure/base'
 import { bytesToHex, utf8ToBytes } from '@noble/hashes/utils.js'
 import { sha256 } from '@noble/hashes/sha2.js'
-import { WalletSessionGuard, type SessionAttempt } from './wallet-session'
+import {
+  ClientOwnership,
+  WalletSessionGuard,
+  type SessionAttempt,
+  type WalletSessionToken,
+} from './wallet-session'
 
 /** Matches the SDK's internal NetworkType (keyof typeof Network). Not exported by the SDK. */
 type SparkNetworkType = 'MAINNET' | 'TESTNET' | 'SIGNET' | 'REGTEST' | 'LOCAL'
@@ -79,6 +84,8 @@ class SparkClientManager {
   private config: SparkConfig | null = null
   /** One generation invalidates both wallet and readonly-client construction. */
   private readonly session = new WalletSessionGuard({ name: 'SparkClientManager' })
+  /** Token of the installed wallet; adapters bind to it in connect() (see ClientOwnership). */
+  private readonly ownership = new ClientOwnership('SparkClientManager')
   /** Optional SDK factory escape hatch (React Native / Metro). */
   private sdkFactory: SparkSdkFactory | null = null
 
@@ -90,14 +97,24 @@ class SparkClientManager {
     this.sdkFactory = factory
   }
 
-  /** Initialize the SparkWallet. Concurrent calls share the in-flight promise. */
-  initialize(config: SparkConfig): Promise<void> {
+  /**
+   * Initialize the SparkWallet. Concurrent calls share the in-flight promise.
+   * Resolves with the ownership token of the wallet this call installed, or
+   * null when a teardown or wallet switch superseded it and nothing was
+   * installed. An adapter must keep that token and present it on every
+   * operation; reading the manager's current token afterwards could bind it to
+   * a wallet another caller installed in the meantime.
+   */
+  initialize(config: SparkConfig): Promise<WalletSessionToken | null> {
     return this.session.begin(WALLET_SLOT, walletKey(config), (attempt) =>
       this._doInitialize(config, attempt),
     )
   }
 
-  private async _doInitialize(config: SparkConfig, attempt: SessionAttempt): Promise<void> {
+  private async _doInitialize(
+    config: SparkConfig,
+    attempt: SessionAttempt,
+  ): Promise<WalletSessionToken | null> {
     if (this.wallet) {
       log.warn('[SparkClientManager] Wallet already initialized, re-initializing...')
       await this.disconnect()
@@ -123,10 +140,11 @@ class SparkClientManager {
       }
 
       // Never revive a signing wallet after its session was torn down.
-      if (!(await attempt.claim(() => result.wallet?.cleanupConnections?.()))) return
+      if (!(await attempt.claim(() => result.wallet?.cleanupConnections?.()))) return null
 
       this.wallet = result.wallet
       this.config = config
+      const token = this.ownership.issue()
       this.installTokenSendRecorder(this.wallet)
       log.info('[SparkClientManager] SparkWallet initialized, network:', network)
 
@@ -138,20 +156,28 @@ class SparkClientManager {
         const privMsg = privacyError instanceof Error ? privacyError.message : String(privacyError)
         log.warn('[SparkClientManager] Failed to enable privacy mode:', privMsg)
       }
+      return token
     } catch (error: unknown) {
       // Only clear the wallet if this init still owns the session; a failure here
       // must not tear down a newer, successful one.
-      if (attempt.isCurrent) this.wallet = null
+      if (attempt.isCurrent) {
+        this.wallet = null
+        this.ownership.revoke()
+      }
       const msg = error instanceof Error ? error.message : String(error)
       throw Object.assign(new Error(`Failed to initialize SparkWallet: ${msg}`), { cause: error })
     }
   }
 
-  /** Adopt a WDK-owned wallet without deriving or initializing another one. */
+  /**
+   * Adopt a WDK-owned wallet without deriving or initializing another one.
+   * Replacing the wallet supersedes every adapter bound to the previous one.
+   */
   adoptExternalWallet(wallet: any, network: string): void {
     if (!wallet || this.wallet === wallet) return
     this.wallet = wallet
     this.config = { protocol: 'SPARK', network: network as SparkConfig['network'], mnemonic: '' }
+    this.ownership.issue()
     this.installTokenSendRecorder(this.wallet)
   }
 
@@ -161,6 +187,7 @@ class SparkClientManager {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
+    this.ownership.revoke()
   }
 
   /** Record every token send because the SDK history does not expose direction. */
@@ -198,6 +225,15 @@ class SparkClientManager {
 
   isInitialized(): boolean {
     return this.wallet !== null
+  }
+
+  /**
+   * True only while the wallet `token` was issued for is the installed one. An
+   * adapter holding an older token was superseded by a later initialize(),
+   * adoptExternalWallet() or teardown and must not operate on this wallet.
+   */
+  ownsSession(token: WalletSessionToken | null | undefined): boolean {
+    return this.wallet !== null && this.ownership.owns(token)
   }
 
   /**
@@ -256,6 +292,7 @@ class SparkClientManager {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
+    this.ownership.revoke()
     this.session.invalidate()
   }
 
@@ -263,6 +300,7 @@ class SparkClientManager {
     this.wallet = null
     this.readonlyClient = null
     this.config = null
+    this.ownership.revoke()
     this.session.invalidate()
     log.info('[SparkClientManager] Complete reset performed')
   }
