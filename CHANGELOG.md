@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+- **Security (Spark Lightning sends):** a send is `confirmed` only when the SSP
+  returns a 32-byte preimage whose SHA-256 equals the payment hash of the
+  invoice that was sent. A success status with an empty or unrelated preimage
+  is reported as `pending` without a preimage, and a polled
+  `LightningSendRequest` for another request id or another invoice is ignored
+  (`getPaymentStatus` reports it as not found / `unknown`). Both `SparkAdapter`
+  and `SparkWdkAdapter` now refuse to dispatch a BOLT11 whose payment hash
+  cannot be decoded (`INVALID_INVOICE`), since its settlement could never be
+  proven. Security review 2026-10-28, finding 16.
+
 ## [1.0.0-beta.79] - 2026-10-27
 
 ### Changed

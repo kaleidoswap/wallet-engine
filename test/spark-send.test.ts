@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { SparkWdkAdapter } from '../src/adapters/wdk/SparkWdkAdapter'
+import { bolt11Fixture, TEST_PREIMAGE } from './fixtures/bolt11'
 
 /** Connected adapter capturing the options passed to payLightningInvoice(). */
 function adapterPayingLn() {
@@ -20,7 +21,7 @@ function adapterPayingLn() {
           idempotencyKey: 'idem-1',
           status: 'LIGHTNING_PAYMENT_SUCCEEDED',
           typename: 'LightningSendRequest',
-          paymentPreimage: 'ab'.repeat(32),
+          paymentPreimage: TEST_PREIMAGE,
         }
       },
     },
@@ -28,7 +29,8 @@ function adapterPayingLn() {
   return { adapter, calls }
 }
 
-const LN_INVOICE = 'lnbc1exampleinvoice'
+// Amountless invoice; settlement is proven by TEST_PREIMAGE for its payment hash.
+const LN_INVOICE = bolt11Fixture({ hrp: 'lnbc' })
 
 describe('SparkWdkAdapter.sendPayment Lightning (amountless invoice parity)', () => {
   it('passes amountSatsToSend for an amountless invoice (explicit amount given)', async () => {
@@ -52,10 +54,10 @@ describe('SparkWdkAdapter.sendPayment Lightning (amountless invoice parity)', ()
 
   it('maps the declared LightningSendRequest fields and invoice amount', async () => {
     const { adapter } = adapterPayingLn()
-    const result = await adapter.sendPayment({ invoice: 'lnbc1m1pexample' } as any)
+    const result = await adapter.sendPayment({ invoice: bolt11Fixture({ hrp: 'lnbc1m' }) } as any)
     expect(result).toEqual({
       paymentHash: 'SparkLightningSendRequest:req-1',
-      preimage: 'ab'.repeat(32),
+      preimage: TEST_PREIMAGE,
       amount: 100_000,
       fee: 2,
       status: 'confirmed',
