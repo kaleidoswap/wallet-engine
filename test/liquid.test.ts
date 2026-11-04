@@ -482,6 +482,31 @@ describe('LiquidWdkAdapter', () => {
     expect(account.compileSimplicityProgram).toHaveBeenCalledWith({ source: 'main := unit' })
   })
 
+  it('forwards fundLiquidPset and reports NOT_SUPPORTED on an older account', async () => {
+    const request = {
+      pset: 'template',
+      swapInputIndex: 0,
+      paymentOutputIndex: 0,
+      policyAssetId: 'policy',
+      maxFeeSat: 500,
+      outputAddress: 'addr',
+      swapAssetId: 'usdt',
+      swapAmount: 1000,
+      lockupTxHex: '00',
+    }
+    const funded = {
+      pset: 'funded',
+      paymentOutputSecrets: { assetId: 'usdt', value: '1000', assetBlindingFactor: 'a', valueBlindingFactor: 'b' },
+    }
+    const fundLiquidPset = vi.fn(async () => funded)
+    await expect(connected({ fundLiquidPset }).fundLiquidPset(request)).resolves.toEqual(funded)
+    expect(fundLiquidPset).toHaveBeenCalledWith(request)
+    await expect(connected({}).fundLiquidPset(request)).rejects.toMatchObject({
+      code: 'NOT_SUPPORTED',
+      protocol: 'LIQUID',
+    })
+  })
+
   it('degrades cleanly with a pre-Simplicity WDK account', async () => {
     const adapter = connected({})
     await expect(adapter.getSimplicityCapabilities()).resolves.toMatchObject({
