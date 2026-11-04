@@ -43,6 +43,8 @@ import { LIQUID_USDT_ASSET_ID, LIQUID_TESTNET_USDT_ASSET_ID } from '../../consta
 import { formatAmount } from '../../lib/amount'
 import type {
   LiquidPsetReview,
+  LiquidPsetFundRequest,
+  LiquidPsetFundResult,
   LiquidPsetSignRequest,
   LiquidPsetSignResult,
   SimplicityCapabilities,
@@ -571,6 +573,13 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const broadcast = this.requireExperimentalAccountMethod('broadcastPset')
     return this.withLock(() => broadcast(psetBase64))
+  }
+
+  /** Pays the L-BTC fee of a caller-built PSET and signs only this wallet's inputs. */
+  async fundLiquidPset(request: LiquidPsetFundRequest): Promise<LiquidPsetFundResult> {
+    this.assertConnected()
+    const fund = this.requireExperimentalAccountMethod('fundLiquidPset')
+    return this.withLock(() => fund(request))
   }
 
   async deriveSimplicityPublicKey(derivationPath?: string): Promise<{ publicKey: string; derivationPath: string }> {
