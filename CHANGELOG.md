@@ -9,7 +9,7 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ### Added
 
-- `LiquidWdkAdapter.fundLiquidPset`: pays the L-BTC network fee of a caller-built Liquid PSET (an L-USDT swap claim or refund) and signs only this wallet's inputs. Needs a `@kaleidorg/wdk-wallet-liquid` build that provides it; older accounts report `NOT_SUPPORTED`.
+- `LiquidWdkAdapter.fundLiquidPset`: pays the L-BTC network fee of a caller-built Liquid PSET (an L-USDT swap claim or refund) and signs only this wallet's inputs. Needs `@kaleidorg/wdk-wallet-liquid` 1.0.0-beta.10 or later; older accounts report `NOT_SUPPORTED`.
 
 ## [1.0.0-beta.80] - 2026-10-29
 
