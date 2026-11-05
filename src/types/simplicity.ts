@@ -46,6 +46,31 @@ export interface LiquidPsetSignResult {
   unchanged: boolean
 }
 
+/** A caller-built PSET template whose L-BTC network fee the wallet pays. */
+export interface LiquidPsetFundRequest {
+  pset: string
+  swapInputIndex: number
+  paymentOutputIndex: number
+  policyAssetId: string
+  maxFeeSat: number
+  /** Payout destination, explicit or confidential; must match the template payout. */
+  outputAddress: string
+  swapAssetId: string
+  swapAmount: number | bigint | string
+  /** Transaction that created the swap input. */
+  lockupTxHex: string
+}
+
+export interface LiquidPsetFundResult {
+  pset: string
+  paymentOutputSecrets: {
+    assetId: string
+    value: string
+    assetBlindingFactor: string
+    valueBlindingFactor: string
+  }
+}
+
 export interface SimplicityCompileRequest {
   source: string
   arguments?: SimplicityArgument[]
