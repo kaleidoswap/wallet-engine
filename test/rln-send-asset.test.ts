@@ -123,6 +123,17 @@ describe('RlnWdkAdapter.sendBtcOnchain', () => {
     expect(listCalls).toEqual([{ skipSync: true }, undefined])
   })
 
+  it('does not take another spend from the account for the send', async () => {
+    const history = { rows: [row('old', 0, 5_000)] }
+    const { adapter } = rlnWithHistory(async () => {
+      // A swap lockup of a very different amount lands in the history.
+      history.rows = [row('lockup', 250_000, 0), ...history.rows]
+      return undefined
+    }, history)
+    const failure = await adapter.sendBtcOnchain({ address: 'tb1qx', amount: 1000 }).catch((e) => e)
+    expect(failure).toMatchObject({ code: 'SEND_ACCEPTED_NO_TXID' })
+  })
+
   it('reports an accepted send the history cannot name yet as ambiguous, not as a failure', async () => {
     const { adapter } = rlnWithHistory(async () => undefined, { rows: [row('old', 0, 5_000)] })
     const failure = await adapter.sendBtcOnchain({ address: 'tb1qx', amount: 1000 }).catch((e) => e)

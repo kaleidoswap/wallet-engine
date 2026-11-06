@@ -28,7 +28,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   disposes the account and manager.
 - `RlnWdkAdapter.sendBtcOnchain` resolves an accepted `/sendbtc` that came
   back without a txid by reading the node's history: it returns the txid of
-  the new send (`txidRecovered: true`, `status: 'pending'`) and otherwise
+  the new send whose net debit matches the requested amount plus a plausible
+  fee (`txidRecovered: true`, `status: 'pending'`) and otherwise
   throws `SEND_ACCEPTED_NO_TXID` with `details.ambiguous = true`, which
   callers treat as pending.
 

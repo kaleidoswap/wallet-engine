@@ -496,7 +496,7 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     const r: any = await this.account.sendBtc(params)
     const txid: string = r?.txid ?? ''
     if (txid) return { ok: true, txid }
-    const recovered = await this.newOnchainSendSince(before)
+    const recovered = await this.newOnchainSendSince(before, params.amount)
     if (recovered) return { ok: true, txid: recovered, status: 'pending', txidRecovered: true }
     // Accepted, not traceable yet. This is the opposite of a failure to
     // retry: the caller must treat the payment as pending until its history
@@ -521,16 +521,23 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
     }
   }
 
-  /** The txid of a send that joined the history since `before`, if the node shows one. */
-  private async newOnchainSendSince(before: Set<string> | null): Promise<string | null> {
+  /**
+   * The txid of a send that joined the history since `before` and can be the
+   * one attempted: its net debit covers `amountSat` plus at most a plausible
+   * fee. Another spend from the same account (a swap lockup, a concurrent
+   * send) is not taken for it.
+   */
+  private async newOnchainSendSince(before: Set<string> | null, amountSat: number): Promise<string | null> {
     if (!before || typeof this.account?.listTransactions !== 'function') return null
+    const feeAllowance = Math.max(50_000, Math.ceil(amountSat * 0.1))
     try {
       const r: any = await this.account.listTransactions()
       const txs: any[] = r?.transactions ?? []
       for (const t of txs) {
         const id = String(t?.txid ?? t?.transaction_id ?? '')
         if (!id || before.has(id)) continue
-        if (Number(t?.sent ?? 0) > Number(t?.received ?? 0)) return id
+        const debit = Number(t?.sent ?? 0) - Number(t?.received ?? 0)
+        if (debit >= amountSat && debit <= amountSat + feeAllowance) return id
       }
       return null
     } catch {
