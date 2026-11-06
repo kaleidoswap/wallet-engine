@@ -21,6 +21,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   lwk's `redeposit` to it (amount = the fee). A transaction the chain has not
   dated yet is dated by when the adapter first saw it, stable across listings.
 
+- `@utexo/wdk-wallet-rgb` is no longer declared as an optional peer or
+  installed for development: the package is not on the npm registry.
+  `RgbLibWdkAdapter` still loads it through the WDK module loader when the
+  host provides it (`registerWdkModule`), as before.
+- The `@kaleidorg/wdk-wallet-liquid` optional peer is `^1.0.0-beta.11`, which
+  `sendBtcOnchain({ sendMax })` and the reported `amount` rely on.
+
 ### Fixed
 
 - `LiquidWdkAdapter.disconnect()` (and the teardown a re-`connect()` performs)

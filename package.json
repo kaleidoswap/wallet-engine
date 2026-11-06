@@ -110,12 +110,11 @@
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/swap-sdk": "^0.12.0",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.3",
-    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.9",
+    "@kaleidorg/wdk-wallet-liquid": "^1.0.0-beta.11",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.5",
     "@secondts/bark": "^0.24.0",
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
     "@utexo/rgb-lib-wasm": "^1.0.0-beta.3",
-    "@utexo/wdk-wallet-rgb": "^2.0.3",
     "kaleido-sdk": "^0.1.18",
     "@secondts/bark-react-native": "0.25.0"
   },
@@ -150,9 +149,6 @@
     "@utexo/rgb-lib-wasm": {
       "optional": true
     },
-    "@utexo/wdk-wallet-rgb": {
-      "optional": true
-    },
     "kaleido-sdk": {
       "optional": true
     },
@@ -166,11 +162,12 @@
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/swap-sdk": "^0.12.0",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.3",
-    "@kaleidorg/wdk-wallet-liquid": "1.0.0-beta.9",
+    "@kaleidorg/wdk-wallet-liquid": "1.0.0-beta.11",
     "@kaleidorg/wdk-wallet-rln": "^1.0.0-beta.5",
     "@secondts/bark": "^0.24.0",
+    "@tetherto/wdk-wallet": "1.0.0-beta.18",
     "@tetherto/wdk-wallet-spark": "^1.0.0-beta.17",
-    "@utexo/wdk-wallet-rgb": "^2.0.3",
+    "bip32": "5.0.1",
     "fast-check": "^4.9.0",
     "kaleido-sdk": "^0.1.18",
     "tsx": "^4.23.12",
