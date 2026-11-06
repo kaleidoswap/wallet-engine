@@ -7,6 +7,31 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- `LiquidWdkAdapter` fee rates are sat/vB on both sides of the adapter, like
+  every other adapter's: `getFeeRates()` converts lwk's sat/kvB figures (never
+  below the 0.1 sat/vB network minimum), and `sendAsset` / `sendBtcOnchain`
+  convert an explicit `feeRate` to sat/kvB once, clamped to lwk's 100 sat/kvB
+  floor.
+- `LiquidWdkAdapter.sendBtcOnchain` takes `sendMax: true` for an explicit
+  drain (requires `@kaleidorg/wdk-wallet-liquid` with `transfer({ sendMax })`)
+  and reports the amount the recipient actually received in `amount`.
+- `TransactionType` gains `'self'`: `LiquidWdkAdapter.listTransactions` maps
+  lwk's `redeposit` to it (amount = the fee). A transaction the chain has not
+  dated yet is dated by when the adapter first saw it, stable across listings.
+
+### Fixed
+
+- `LiquidWdkAdapter.disconnect()` (and the teardown a re-`connect()` performs)
+  stops admitting lwk operations, waits for the one in flight, and only then
+  disposes the account and manager.
+- `RlnWdkAdapter.sendBtcOnchain` resolves an accepted `/sendbtc` that came
+  back without a txid by reading the node's history: it returns the txid of
+  the new send (`txidRecovered: true`, `status: 'pending'`) and otherwise
+  throws `SEND_ACCEPTED_NO_TXID` with `details.ambiguous = true`, which
+  callers treat as pending.
+
 ## [1.0.0-beta.80] - 2026-10-29
 
 ### Changed
