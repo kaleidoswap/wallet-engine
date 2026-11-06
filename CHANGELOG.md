@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.81] - 2026-11-06
+
 ### Changed
 
 - `LiquidWdkAdapter` fee rates are sat/vB on both sides of the adapter, like
