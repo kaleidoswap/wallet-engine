@@ -121,6 +121,8 @@ export interface UnifiedTransaction {
 export type TransactionType =
   | 'send'
   | 'receive'
+  /** A transaction from this wallet back to itself (consolidation, redeposit); only the fee left. */
+  | 'self'
   | 'swap'
   | 'channel_open'
   | 'channel_close'

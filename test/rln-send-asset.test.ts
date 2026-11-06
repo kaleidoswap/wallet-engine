@@ -80,3 +80,67 @@ describe('RlnWdkAdapter.sendAsset', () => {
     expect(calls[0].recipientMap).toBe(recipientMap)
   })
 })
+
+describe('RlnWdkAdapter.sendBtcOnchain', () => {
+  function rlnWithHistory(sendBtc: () => Promise<unknown>, history: { rows: any[] }) {
+    const adapter = new RlnWdkAdapter()
+    const listCalls: any[] = []
+    Object.assign(adapter as any, {
+      connected: true,
+      account: {
+        sendBtc,
+        listTransactions: async (opts: unknown) => {
+          listCalls.push(opts)
+          return { transactions: history.rows }
+        },
+      },
+    })
+    return { adapter, listCalls }
+  }
+  const row = (txid: string, sent: number, received: number) => ({ txid, sent, received })
+
+  it('returns the node\'s txid', async () => {
+    const { adapter } = rlnWithHistory(async () => ({ txid: 'ab'.repeat(32) }), { rows: [] })
+    await expect(adapter.sendBtcOnchain({ address: 'tb1qx', amount: 1000 })).resolves.toEqual({
+      ok: true,
+      txid: 'ab'.repeat(32),
+    })
+  })
+
+  it('recovers the txid of an accepted send from the history when the answer carries none', async () => {
+    const history = { rows: [row('old', 0, 5_000)] }
+    const { adapter, listCalls } = rlnWithHistory(async () => {
+      history.rows = [row('new', 1_100, 0), ...history.rows]
+      return undefined
+    }, history)
+    await expect(adapter.sendBtcOnchain({ address: 'tb1qx', amount: 1000 })).resolves.toEqual({
+      ok: true,
+      txid: 'new',
+      status: 'pending',
+      txidRecovered: true,
+    })
+    // The pre-send snapshot does not make the node sync; the post-send read does.
+    expect(listCalls).toEqual([{ skipSync: true }, undefined])
+  })
+
+  it('does not take another spend from the account for the send', async () => {
+    const history = { rows: [row('old', 0, 5_000)] }
+    const { adapter } = rlnWithHistory(async () => {
+      // A swap lockup of a very different amount lands in the history.
+      history.rows = [row('lockup', 250_000, 0), ...history.rows]
+      return undefined
+    }, history)
+    const failure = await adapter.sendBtcOnchain({ address: 'tb1qx', amount: 1000 }).catch((e) => e)
+    expect(failure).toMatchObject({ code: 'SEND_ACCEPTED_NO_TXID' })
+  })
+
+  it('reports an accepted send the history cannot name yet as ambiguous, not as a failure', async () => {
+    const { adapter } = rlnWithHistory(async () => undefined, { rows: [row('old', 0, 5_000)] })
+    const failure = await adapter.sendBtcOnchain({ address: 'tb1qx', amount: 1000 }).catch((e) => e)
+    expect(failure).toMatchObject({
+      code: 'SEND_ACCEPTED_NO_TXID',
+      details: { ambiguous: true },
+    })
+    expect(String(failure.message)).toMatch(/did not return a transaction ID/)
+  })
+})

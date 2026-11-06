@@ -489,13 +489,60 @@ export class RlnWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter {
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
+    // The node answers /sendbtc with the txid. Should the answer arrive
+    // without one, the send has still happened: the history is what can
+    // name it, so note what the history held before.
+    const before = await this.onchainTxids({ skipSync: true })
     const r: any = await this.account.sendBtc(params)
     const txid: string = r?.txid ?? ''
-    // A successful send must be traceable and reconcilable.
-    if (!txid) {
-      throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_LN', 'SEND_ERROR')
+    if (txid) return { ok: true, txid }
+    const recovered = await this.newOnchainSendSince(before, params.amount)
+    if (recovered) return { ok: true, txid: recovered, status: 'pending', txidRecovered: true }
+    // Accepted, not traceable yet. This is the opposite of a failure to
+    // retry: the caller must treat the payment as pending until its history
+    // shows it.
+    throw new ProtocolError(
+      'BTC send was accepted but did not return a transaction ID; treat it as pending and check the wallet history',
+      'RGB_LN',
+      'SEND_ACCEPTED_NO_TXID',
+      { ambiguous: true }
+    )
+  }
+
+  /** The txids of the on-chain history, or null when the node cannot list it. */
+  private async onchainTxids(options?: { skipSync?: boolean }): Promise<Set<string> | null> {
+    if (typeof this.account?.listTransactions !== 'function') return null
+    try {
+      const r: any = await this.account.listTransactions(options)
+      const txs: any[] = r?.transactions ?? []
+      return new Set(txs.map((t) => String(t?.txid ?? t?.transaction_id ?? '')).filter(Boolean))
+    } catch {
+      return null
     }
-    return { ok: true, txid }
+  }
+
+  /**
+   * The txid of a send that joined the history since `before` and can be the
+   * one attempted: its net debit covers `amountSat` plus at most a plausible
+   * fee. Another spend from the same account (a swap lockup, a concurrent
+   * send) is not taken for it.
+   */
+  private async newOnchainSendSince(before: Set<string> | null, amountSat: number): Promise<string | null> {
+    if (!before || typeof this.account?.listTransactions !== 'function') return null
+    const feeAllowance = Math.max(50_000, Math.ceil(amountSat * 0.1))
+    try {
+      const r: any = await this.account.listTransactions()
+      const txs: any[] = r?.transactions ?? []
+      for (const t of txs) {
+        const id = String(t?.txid ?? t?.transaction_id ?? '')
+        if (!id || before.has(id)) continue
+        const debit = Number(t?.sent ?? 0) - Number(t?.received ?? 0)
+        if (debit >= amountSat && debit <= amountSat + feeAllowance) return id
+      }
+      return null
+    } catch {
+      return null
+    }
   }
 
   // --- RGB on-chain UTXO management ----------------------------------------

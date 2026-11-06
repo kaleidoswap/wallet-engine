@@ -226,7 +226,8 @@ describe('LiquidWdkAdapter', () => {
       amount: 250,
       feeRate: 0.1,
     })
-    expect(seen).toEqual({ assetId: LIQUID_USDT_ASSET_ID, recipient: 'lq1qdest', amount: 250, feeRate: 0.1 })
+    // 0.1 sat/vB in, lwk's 100 sat/kvB out.
+    expect(seen).toEqual({ assetId: LIQUID_USDT_ASSET_ID, recipient: 'lq1qdest', amount: 250, feeRate: 100 })
     expect(res).toMatchObject({ paymentHash: 'txid-usdt', amount: 250, fee: 90, status: 'pending' })
   })
 
@@ -239,13 +240,88 @@ describe('LiquidWdkAdapter', () => {
       },
     })
     const res = await adapter.sendBtcOnchain({ address: 'lq1qdest', amount: 800, feeRate: 0.2 })
-    expect(seen).toEqual({ recipient: 'lq1qdest', amount: 800, feeRate: 0.2 })
-    expect(res).toMatchObject({ txid: 'btc-onchain', fee: 50 })
+    // sat/vB in, sat/kvB out to lwk — converted once, here.
+    expect(seen).toEqual({ recipient: 'lq1qdest', amount: 800, feeRate: 200 })
+    expect(res).toMatchObject({ txid: 'btc-onchain', fee: 50, amount: 800 })
   })
 
-  it('normalizes lwk fee-rate bigints to numbers', async () => {
+  it('never hands lwk a fee rate below the Liquid minimum', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      transfer: async (opts: any) => {
+        Object.assign(seen, opts)
+        return { hash: 'btc-onchain', fee: 50n }
+      },
+      sendAsset: async (opts: any) => {
+        Object.assign(seen, opts)
+        return { hash: 'asset', fee: 50n }
+      },
+    })
+    // A Bitcoin-style "1 sat/vB" must become 1000 sat/kvB, not be read as 1.
+    await adapter.sendBtcOnchain({ address: 'lq1qdest', amount: 800, feeRate: 1 })
+    expect(seen.feeRate).toBe(1000)
+    // The 0.1 sat/vB hint this adapter publishes is lwk's own 100 sat/kvB floor.
+    await adapter.sendAsset({ assetId: LIQUID_USDT_ASSET_ID, address: 'lq1qdest', amount: 1, feeRate: 0.1 })
+    expect(seen.feeRate).toBe(100)
+    await adapter.sendAsset({ assetId: LIQUID_USDT_ASSET_ID, address: 'lq1qdest', amount: 1, feeRate: 0.01 })
+    expect(seen.feeRate).toBe(100)
+    // No explicit rate: lwk's default, untouched.
+    await adapter.sendBtcOnchain({ address: 'lq1qdest', amount: 800 })
+    expect(seen.feeRate).toBeUndefined()
+  })
+
+  it('reports fee-rate hints in sat/vB, never below the Liquid minimum', async () => {
     const adapter = connected({}, { getFeeRates: async () => ({ normal: 100n, fast: 250n }) })
-    expect(await adapter.getFeeRates()).toEqual({ normal: 100, fast: 250 })
+    expect(await adapter.getFeeRates()).toEqual({ normal: 0.1, fast: 0.25 })
+    const placeholder = connected({}, { getFeeRates: async () => ({ normal: 1n, fast: 1n }) })
+    expect(await placeholder.getFeeRates()).toEqual({ normal: 0.1, fast: 0.1 })
+  })
+
+  it('passes sendMax through as an explicit drain and reports what the recipient got', async () => {
+    const seen: any = {}
+    const adapter = connected({
+      transfer: async (opts: any) => {
+        Object.assign(seen, opts)
+        return { hash: 'drain', fee: 40n, amount: 9_960n }
+      },
+    })
+    const res = await adapter.sendBtcOnchain({ address: 'lq1qdest', amount: 10_000, sendMax: true })
+    expect(seen).toEqual({ recipient: 'lq1qdest', amount: undefined, feeRate: undefined, sendMax: true })
+    expect(res).toMatchObject({ txid: 'drain', fee: 40, amount: 9_960 })
+  })
+
+  it('disconnect waits for the operation in flight before disposing lwk', async () => {
+    let releaseSend!: () => void
+    const sendStarted = new Promise<void>((resolve) => {
+      releaseSend = resolve
+    })
+    const events: string[] = []
+    const account = {
+      transfer: async () => {
+        events.push('send:start')
+        await sendStarted
+        events.push('send:done')
+        return { hash: 'txid-late', fee: 1n }
+      },
+      dispose: () => events.push('account:dispose'),
+      getBalance: async () => 1n,
+    }
+    const manager = { dispose: () => events.push('manager:dispose') }
+    const adapter = connected(account, manager)
+
+    const send = adapter.sendBtcOnchain({ address: 'lq1qdest', amount: 1 })
+    await Promise.resolve() // let the send enter the queue
+    const teardown = adapter.disconnect()
+    await Promise.resolve()
+    // Nothing new is admitted while the teardown waits, and nothing is freed yet.
+    expect(adapter.isConnected()).toBe(false)
+    await expect(adapter.getBtcBalance()).rejects.toThrow(/not connected|disconnecting/i)
+    expect(events).toEqual(['send:start'])
+
+    releaseSend()
+    await expect(send).resolves.toMatchObject({ txid: 'txid-late' })
+    await teardown
+    expect(events).toEqual(['send:start', 'send:done', 'account:dispose', 'manager:dispose'])
   })
 
   it('maps transactions to send/receive + confirmed/pending, scaling timestamps to ms', async () => {
@@ -255,9 +331,30 @@ describe('LiquidWdkAdapter', () => {
         { txid: 'out', type: 'outgoing', fee: '20', height: null, timestamp: null },
       ],
     })
-    const txs = await adapter.listTransactions()
-    expect(txs[0]).toMatchObject({ id: 'in', type: 'receive', status: 'confirmed', fee: 10, timestamp: 1700000 })
-    expect(txs[1]).toMatchObject({ id: 'out', type: 'send', status: 'pending', fee: 20, timestamp: 0 })
+    const byId = (txs: Awaited<ReturnType<typeof adapter.listTransactions>>) =>
+      Object.fromEntries(txs.map((tx) => [tx.id, tx]))
+    const txs = byId(await adapter.listTransactions())
+    expect(txs.in).toMatchObject({ type: 'receive', status: 'confirmed', fee: 10, timestamp: 1700000 })
+    // No chain timestamp yet: dated by when this adapter first saw it, not 1970,
+    // so it lists with the newest rather than after everything.
+    expect(txs.out).toMatchObject({ type: 'send', status: 'pending', fee: 20 })
+    expect(txs.out.timestamp).toBeGreaterThan(Date.now() - 5_000)
+    expect((await adapter.listTransactions())[0].id).toBe('out')
+    // And that date is stable across listings until the chain supplies one.
+    const again = byId(await adapter.listTransactions())
+    expect(again.out.timestamp).toBe(txs.out.timestamp)
+  })
+
+  it('maps a redeposit as a self transfer of its fee, never a receive', async () => {
+    const adapter = connected({
+      getNetworkInfo: async () => netInfo,
+      listTransactions: async () => [
+        { txid: 're', type: 'redeposit', fee: '40', height: null, timestamp: null, balance: [{ asset_id: POLICY, value: '-40' }] },
+      ],
+    })
+    const [tx] = await adapter.listTransactions()
+    expect(tx).toMatchObject({ id: 're', type: 'self', status: 'pending', fee: 40, amount: 40 })
+    expect(tx.asset.id).toBe(POLICY)
   })
 
   it('derives per-tx amount + asset from lwk balance deltas (L-BTC + Liquid asset)', async () => {

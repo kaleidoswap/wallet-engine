@@ -125,6 +125,24 @@ export interface LiquidAdapterConfig extends BaseProtocolConfig {
 /** Local mirror of the lwk network union (kept here so WDK/lwk types never cross the contract). */
 type LiquidNetwork = 'mainnet' | 'testnet' | 'regtest'
 
+/** Liquid's network minimum, which is also lwk's default (100 sat/kvB). */
+const LIQUID_MIN_FEE_RATE_SAT_PER_VB = 0.1
+
+/**
+ * sat/vB → sat/kvB for lwk, never below its 100 sat/kvB floor: a rate that
+ * came in as Bitcoin-style "1 sat/vB" must become 1000, not be read as 1.
+ */
+function toSatPerKvb(satPerVb: number | undefined): number | undefined {
+  if (satPerVb == null || !Number.isFinite(satPerVb)) return undefined
+  return Math.max(100, Math.round(satPerVb * 1000))
+}
+
+/** The amount the wdk reports as sent, else what was requested. */
+function sentAmount(result: any, requested: number): number {
+  const reported = result?.amount
+  return reported == null ? requested : Number(reported)
+}
+
 const LIQUID_NETWORK_MAP: Record<string, LiquidNetwork> = {
   mainnet: 'mainnet',
   testnet: 'testnet',
@@ -182,7 +200,13 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   // sync panics ("recursive use of an object"). The dashboard fires balance +
   // listAssets + address concurrently, so serialize every lwk op onto one queue.
   private opLock: Promise<unknown> = Promise.resolve()
+  // Set while a teardown waits for the queue to drain: nothing new may join
+  // it, since the account it would run against is about to be freed.
+  private closing = false
   private withLock<T>(op: () => T | Promise<T>): Promise<T> {
+    if (this.closing) {
+      return Promise.reject(new ProtocolError('LiquidWdkAdapter is disconnecting', 'LIQUID', 'NOT_CONNECTED'))
+    }
     // Run `op` after the previous op settles (success OR failure). Cast the
     // then() result: `this.account` is `any`, so op's inferred type would
     // otherwise collapse T to `unknown` at call sites.
@@ -233,9 +257,26 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.connected = true
   }
 
+  /**
+   * Stop admitting lwk operations, let the one in flight finish, and only
+   * then free the account and manager. A send that is mid-broadcast keeps
+   * its wasm objects until it has its txid; disposing them under it would
+   * either abort the worker or lose a transaction that did go out.
+   */
   async disconnect(): Promise<void> {
-    await super.disconnect()
-    this.policyAsset = null
+    this.closing = true
+    this.connected = false
+    try {
+      await this.opLock.then(
+        () => undefined,
+        () => undefined,
+      )
+      await super.disconnect()
+    } finally {
+      this.policyAsset = null
+      this.firstSeenAt.clear()
+      this.closing = false
+    }
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -342,14 +383,17 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     }
     return {
       paymentHash: hash,
-      amount: request.amount,
+      amount: sentAmount(r, request.amount),
       fee: Number(r?.fee ?? 0),
       status: 'pending', // on-chain — confirms later
       timestamp: Date.now(),
     }
   }
 
-  /** Liquid asset send (e.g. USDt). */
+  /**
+   * Liquid asset send (e.g. USDt). `feeRate` is sat/vB, like every other
+   * adapter's; the wdk and lwk take sat/kvB, so it is converted here, once.
+   */
   async sendAsset(params: { assetId: string; address: string; amount: number; feeRate?: number }): Promise<any> {
     this.assertConnected()
     const r: any = await this.withLock(() =>
@@ -357,27 +401,42 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
         assetId: params.assetId,
         recipient: params.address,
         amount: params.amount,
-        feeRate: params.feeRate,
+        feeRate: toSatPerKvb(params.feeRate),
       })
     )
     const assetHash: string = r?.hash ?? ''
     if (!assetHash) {
       throw new ProtocolError('Liquid asset send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
     }
-    return { paymentHash: assetHash, fee: Number(r?.fee ?? 0), amount: params.amount, status: 'pending' as TransactionStatus }
+    return {
+      paymentHash: assetHash,
+      fee: Number(r?.fee ?? 0),
+      amount: sentAmount(r, params.amount),
+      status: 'pending' as TransactionStatus,
+    }
   }
 
-  /** L-BTC on-chain send (alias of sendPayment's transfer). */
-  async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
+  /**
+   * L-BTC on-chain send. A fixed `amount` is paid with the fee on top;
+   * `sendMax: true` drains the account to the recipient instead, fee
+   * deducted, and the result's `amount` is what the recipient received.
+   * `feeRate` is sat/vB (converted to lwk's sat/kvB here).
+   */
+  async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number; sendMax?: boolean }): Promise<any> {
     this.assertConnected()
     const r: any = await this.withLock(() =>
-      this.account.transfer({ recipient: params.address, amount: params.amount, feeRate: params.feeRate })
+      this.account.transfer({
+        recipient: params.address,
+        amount: params.sendMax ? undefined : params.amount,
+        feeRate: toSatPerKvb(params.feeRate),
+        ...(params.sendMax ? { sendMax: true } : {}),
+      })
     )
     const btcTxid: string = r?.hash ?? ''
     if (!btcTxid) {
       throw new ProtocolError('Liquid send did not return a transaction ID', 'LIQUID', 'SEND_ERROR')
     }
-    return { txid: btcTxid, fee: Number(r?.fee ?? 0) }
+    return { txid: btcTxid, fee: Number(r?.fee ?? 0), amount: sentAmount(r, params.amount) }
   }
 
   // --- Transactions -------------------------------------------------------
@@ -395,15 +454,22 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     }> = await this.withLock(() => this.account.listTransactions())
     if (!policy) policy = this.inferPolicyAsset(txs)
     const mapped = txs.map((t) => {
+      // lwk's types: incoming, outgoing, redeposit (wallet to itself), plus
+      // issuance/reissuance/burn/unknown. Only an outgoing one is a send; a
+      // redeposit moved nothing but its fee and must not read as a receive.
+      const isSelf = t.type === 'redeposit'
       const isSend = t.type === 'outgoing'
       const fee = Number(t.fee ?? 0)
-      const { assetId, amount } = this.primaryMovement(t.balance ?? [], policy, fee, isSend)
+      const movement = isSelf
+        ? { assetId: policy || undefined, amount: fee }
+        : this.primaryMovement(t.balance ?? [], policy, fee, isSend)
+      const { assetId, amount } = movement
       const precision = assetId ? (KNOWN_ASSETS[assetId]?.precision ?? 8) : 8
       return {
         id: t.txid,
-        type: (isSend ? 'send' : 'receive') as UnifiedTransaction['type'],
+        type: (isSelf ? 'self' : isSend ? 'send' : 'receive') as UnifiedTransaction['type'],
         status: (t.height != null ? 'confirmed' : 'pending') as TransactionStatus,
-        timestamp: (t.timestamp ?? 0) * 1000,
+        timestamp: this.transactionTimestamp(t.txid, t.timestamp),
         amount,
         amountDisplay: formatAmount(amount, precision),
         fee,
@@ -424,6 +490,24 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
    * (direction rides on the tx `type`); for an L-BTC send the fee is stripped,
    * since lwk's policy-asset delta includes it.
    */
+  // When this adapter first saw each transaction that the chain has not
+  // dated yet, so a pending one keeps a stable, recent position instead of
+  // reading as the epoch.
+  private readonly firstSeenAt = new Map<string, number>()
+
+  private transactionTimestamp(txid: string, chainTimestamp: number | null | undefined): number {
+    if (chainTimestamp != null && chainTimestamp > 0) {
+      this.firstSeenAt.delete(txid)
+      return chainTimestamp * 1000
+    }
+    let seen = this.firstSeenAt.get(txid)
+    if (seen === undefined) {
+      seen = Date.now()
+      this.firstSeenAt.set(txid, seen)
+    }
+    return seen
+  }
+
   private primaryMovement(
     balance: Array<{ asset_id: string; value: string }>,
     policy: string,
@@ -522,11 +606,17 @@ export class LiquidWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     return (await this.getBtcBalance()).total
   }
 
-  /** Fee-rate hints (sat/vB) for the send UI. lwk returns bigints; normalize to number. */
+  /**
+   * Fee-rate hints in sat/vB for the send UI — the unit every other adapter
+   * speaks and the unit `sendAsset` / `sendBtcOnchain` take. The wdk reports
+   * lwk's sat/kvB figures; they are converted here, never below the Liquid
+   * network minimum of 0.1 sat/vB (lwk's default of 100 sat/kvB).
+   */
   async getFeeRates(): Promise<{ normal: number; fast: number }> {
     this.assertConnected()
     const r: any = await this.withLock(() => this.manager.getFeeRates())
-    return { normal: Number(r?.normal ?? 0), fast: Number(r?.fast ?? 0) }
+    const satPerVb = (value: unknown) => Math.max(LIQUID_MIN_FEE_RATE_SAT_PER_VB, Number(value ?? 0) / 1000)
+    return { normal: satPerVb(r?.normal), fast: satPerVb(r?.fast) }
   }
 
   // --- External PSET + Simplicity ----------------------------------------
