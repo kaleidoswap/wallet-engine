@@ -7,6 +7,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- The `@kaleidorg/swap-sdk` peer range admits 0.14 (`^0.12.0 || ^0.14.0`), and
+  the engine develops and tests against 0.14.0. The engine does not use the
+  `PayThroughClient` option that release makes required.
+
 ## [1.0.0-beta.81] - 2026-11-06
 
 ### Changed

@@ -278,7 +278,7 @@ surface; `sendPayment` accepts sats invoices only.
 
 ### `@kaleidorg/swap-sdk` versions
 
-The engine needs `@kaleidorg/swap-sdk` 0.12 (peer range `^0.12.0`), for both the
+The engine needs `@kaleidorg/swap-sdk` 0.12 or 0.14 (peer range `^0.12.0 || ^0.14.0`), for both the
 BTC ↔ L-BTC chain swaps (`BoltzChainSwap`) and the Arkade Intents venue
 (`@kaleidorg/swap-sdk/arkade`) behind Lightning on Arkade. Earlier releases strand
 Arkade swaps: with `@arkade-os/swap` 0.0.21+ the 0.10 venue fails refunds and claims
