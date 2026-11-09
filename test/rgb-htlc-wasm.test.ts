@@ -210,3 +210,62 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     ])
   })
 })
+
+describe('RgbLibWasmAdapter.fundRgbHtlcLock', () => {
+  const FUND = {
+    assetId: ASSET,
+    amount: 5_000_000,
+    recipientId: 'wvout:maker',
+    blinding: '18446744073709551557',
+    htlcSat: 1_000,
+    transportEndpoints: ['rpcs://maker.example/json-rpc'],
+    minConfirmations: 1,
+  }
+
+  function sender(seen: any[], txid: unknown = 'lock-txid') {
+    return connected({
+      sync: async () => {},
+      refresh: async () => ({}),
+      sendBegin: async (_o: any, map: any, donation: any, feeRate: any, minConf: any) => {
+        seen.push({ map, donation, feeRate, minConf })
+        return 'unsigned'
+      },
+      signPsbt: (p: string) => `signed:${p}`,
+      sendEnd: async () => ({ txid }),
+    })
+  }
+
+  it('passes the u64 blinding to rgb-lib unrounded and returns the txid', async () => {
+    const seen: any[] = []
+    expect(await sender(seen).fundRgbHtlcLock(FUND)).toEqual({ txid: 'lock-txid' })
+    const recipient = seen[0].map[ASSET][0]
+    expect(recipient.recipientId).toBe('wvout:maker')
+    expect(recipient.assignment).toEqual({ Fungible: 5_000_000 })
+    expect(recipient.witnessData).toEqual({ amountSat: '1000', amount_sat: '1000', blinding: '18446744073709551557' })
+    expect(recipient.transportEndpoints).toEqual(['rpcs://maker.example/json-rpc'])
+    expect(seen[0].donation).toBe(false)
+    expect(seen[0].minConf).toBe(1)
+  })
+
+  it('falls back to the wallet transport endpoints', async () => {
+    const seen: any[] = []
+    await sender(seen).fundRgbHtlcLock({ ...FUND, transportEndpoints: [] })
+    expect(seen[0].map[ASSET][0].transportEndpoints).toEqual(['rpcs://proxy.example/json-rpc'])
+  })
+
+  it.each([
+    ['a non-decimal blinding', { blinding: '0x10' }],
+    ['a blinding above u64', { blinding: '18446744073709551616' }],
+    ['a fractional amount', { amount: 1.5 }],
+    ['zero HTLC sats', { htlcSat: 0 }],
+    ['no recipient', { recipientId: '' }],
+  ])('refuses %s before sending', async (_label, patch) => {
+    const seen: any[] = []
+    await expect(sender(seen).fundRgbHtlcLock({ ...FUND, ...patch })).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+    expect(seen).toHaveLength(0)
+  })
+
+  it('fails when the send returns no txid', async () => {
+    await expect(sender([], null).fundRgbHtlcLock(FUND)).rejects.toMatchObject({ code: 'SEND_ERROR' })
+  })
+})
