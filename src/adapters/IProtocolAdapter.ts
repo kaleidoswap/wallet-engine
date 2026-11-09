@@ -250,6 +250,22 @@ export interface RgbHtlcOperation {
  */
 export interface IRgbHtlcOperations {
   /**
+   * Lock `amount` of `assetId` in a swap HTLC: a witness send to the
+   * counterparty's `recipientId` on an output of `htlcSat`, sealed with its
+   * `blinding` (a u64 as a decimal string, passed to rgb-lib unrounded).
+   * Transport endpoints default to the wallet's own.
+   */
+  fundRgbHtlcLock(params: {
+    assetId: string
+    amount: number
+    recipientId: string
+    blinding: string
+    htlcSat: number
+    transportEndpoints?: string[]
+    minConfirmations?: number
+    feeRate?: number
+  }): Promise<{ txid: string }>
+  /**
    * Accept the counterparty's lock consignment for `recipientId` and register the
    * asset. `awaitingConfirmations` while the lock has fewer than `minConfirmations`.
    * Fails if the lock assigns anything other than `amount` of `assetId`.

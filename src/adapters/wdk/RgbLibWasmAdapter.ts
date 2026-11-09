@@ -110,6 +110,8 @@ function wasmErrorStartsWith(err: unknown, prefix: string): boolean {
   return typeof message === 'string' && message.startsWith(prefix)
 }
 
+const U64_MAX = (1n << 64n) - 1n
+
 function toHtlcOperation(raw: any): RgbHtlcOperation {
   const allocations: RgbHtlcAllocation[] = (raw?.allocations ?? []).map((a: any) => {
     const fungible = a?.assignment?.Fungible
@@ -597,6 +599,54 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   // builds the spend and this wallet colors it. Each step is recorded by
   // rgb-lib before it resolves, so a restart resumes from the operation.
 
+  async fundRgbHtlcLock(params: {
+    assetId: string
+    amount: number
+    recipientId: string
+    blinding: string
+    htlcSat: number
+    transportEndpoints?: string[]
+    minConfirmations?: number
+    feeRate?: number
+  }): Promise<{ txid: string }> {
+    this.assertConnected()
+    if (!params.assetId || !params.recipientId) {
+      throw new ProtocolError('HTLC lock needs an asset id and a recipient id', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    if (!Number.isSafeInteger(params.amount) || params.amount <= 0) {
+      throw new ProtocolError('HTLC lock amount must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    if (!Number.isSafeInteger(params.htlcSat) || params.htlcSat <= 0) {
+      throw new ProtocolError('HTLC output sats must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    // The maker seals to this exact u64; a JS number would round it above 2^53.
+    if (!/^\d{1,20}$/.test(params.blinding) || BigInt(params.blinding) > U64_MAX) {
+      throw new ProtocolError('HTLC lock blinding must be a u64 decimal string', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    const transportEndpoints =
+      params.transportEndpoints && params.transportEndpoints.length > 0
+        ? params.transportEndpoints
+        : this.transportEndpoints
+    const sat = String(params.htlcSat)
+    const witnessData = { amountSat: sat, amount_sat: sat, blinding: params.blinding }
+    const recipient = {
+      recipientId: params.recipientId,
+      recipient_id: params.recipientId,
+      assignment: { Fungible: params.amount },
+      witnessData,
+      witness_data: witnessData,
+      transportEndpoints,
+      transport_endpoints: transportEndpoints,
+    }
+    const result = await this.sendRecipients({ [params.assetId]: [recipient] }, {
+      feeRate: params.feeRate,
+      minConfirmations: params.minConfirmations,
+    })
+    const txid = typeof result?.txid === 'string' ? result.txid : ''
+    if (!txid) throw new ProtocolError('HTLC lock send returned no txid', 'RGB_L1', 'SEND_ERROR')
+    return { txid }
+  }
+
   async acceptRgbHtlcLock(params: {
     recipientId: string
     consignmentEndpoint: string
@@ -835,20 +885,28 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       recipient.witnessData = witnessData
       recipient.witness_data = witnessData
     }
-    const recipientMap = {
-      [token]: [recipient],
-    }
+    return this.sendRecipients({ [token]: [recipient] }, {
+      feeRate: params.feeRate,
+      minConfirmations: params.minConfirmations,
+      donation: params.donation,
+    })
+  }
+
+  private async sendRecipients(
+    recipientMap: Record<string, Record<string, unknown>[]>,
+    opts: { feeRate?: number; minConfirmations?: number; donation?: boolean },
+  ): Promise<any> {
     // rgb-lib's `send` only spends *settled* allocations it knows locally, so
     // without a fresh sync+refresh sendBegin fails with "Insufficient total
     // assignments" despite a non-zero UI balance.
     await this.refreshBalances()
-    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
+    const feeRate = BigInt(Math.round(opts.feeRate ?? defaultRgbFeeRate(this.network)))
     const unsigned: string = await this.account.sendBegin(
       this.online,
       recipientMap,
-      params.donation ?? false,
+      opts.donation ?? false,
       feeRate,
-      params.minConfirmations ?? 1
+      opts.minConfirmations ?? 1
     )
     const signed = await this.account.signPsbt(unsigned)
     const result = await this.account.sendEnd(this.online, signed, false)

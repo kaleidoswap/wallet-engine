@@ -10,6 +10,7 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 ### Added
 
 - `LiquidWdkAdapter.fundLiquidPset`: pays the L-BTC network fee of a caller-built Liquid PSET (an L-USDT swap claim or refund) and signs only this wallet's inputs. Needs a `@kaleidorg/wdk-wallet-liquid` build that provides it; older accounts report `NOT_SUPPORTED`.
+- `RgbLibWasmAdapter.fundRgbHtlcLock`: locks an RGB asset in a swap HTLC with a witness send to the counterparty's recipient, sealed with its blinding. The blinding is a u64 decimal string and reaches rgb-lib unrounded; `sendAsset` narrows it to a JS number, which changes values above 2^53.
 
 ## [1.0.0-beta.82] - 2026-11-09
 
