@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.82] - 2026-11-09
+
 ### Changed
 
 - The `@kaleidorg/swap-sdk` peer range admits 0.14 (`^0.12.0 || ^0.14.0`), and
