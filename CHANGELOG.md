@@ -7,6 +7,11 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- The engine develops and tests against `@kaleidorg/swap-sdk` 0.14.1, the
+  current patch release. The peer range is unchanged.
+
 ## [1.0.0-beta.83] - 2026-11-09
 
 ### Added
