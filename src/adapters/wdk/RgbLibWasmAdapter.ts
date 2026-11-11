@@ -1065,9 +1065,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // can't leave the wallet thinking the inputs are still spendable (which would
     // later fail as "insufficient assignments" or attempt a double-spend).
     await this.flushState()
+    // `entropy` is a random u64 that reaches JS as a BigInt, which a host's
+    // structured clone or JSON message transport cannot carry.
     return {
-      ...result,
+      txid: typeof result?.txid === 'string' ? result.txid : '',
       batchTransferIdx: result?.batchTransferIdx != null ? Number(result.batchTransferIdx) : undefined,
+      entropy: result?.entropy != null ? String(result.entropy) : undefined,
     }
   }
 
