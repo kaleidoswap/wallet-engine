@@ -117,7 +117,7 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
     if (/^lno1/i.test(target)) return this.payOffer(target, amountOverride, timestamp)
     if (classifyDestination(target).kind === 'BTC_ONCHAIN') {
       positiveSats(amountOverride!)
-      const txid = await wallet.sendOnchain(target, amountOverride!)
+      const { txid } = await wallet.sendOnchain(target, amountOverride!)
       return { paymentHash: txid, txid, amount: amountOverride!, fee: 0, feeKnown: false, status: 'pending', timestamp }
     }
     if (this.backend.isBarkAddress(target)) {
@@ -184,6 +184,6 @@ export class BarkReactNativeAdapter extends BaseBarkAdapter {
     if (params.feeRate !== undefined) throw new CapabilityError('Bark off-chain sends do not expose a fee-rate override', 'BARK')
     if (!params.address?.trim()) throw new ValidationError('An on-chain destination is required', 'BARK')
     positiveSats(params.amount)
-    return { txid: await this.backend.getWalletPort().sendOnchain(params.address, params.amount) }
+    return { txid: (await this.backend.getWalletPort().sendOnchain(params.address, params.amount)).txid }
   }
 }

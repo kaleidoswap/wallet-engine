@@ -10,7 +10,7 @@ import {
 import { DEFAULT_VTXO_THRESHOLD_SECONDS } from "./arkade-vtxo-lifecycle";
 import { log } from "./log";
 import { mnemonicToSeedSync, validateMnemonic } from "@scure/bip39";
-import { wordlist } from "@scure/bip39/wordlists/english";
+import { wordlist } from "@scure/bip39/wordlists/english.js";
 import { HDKey } from "@scure/bip32";
 import { bech32 } from "@scure/base";
 import { bytesToHex } from "@noble/hashes/utils.js";

@@ -31,7 +31,7 @@ beforeEach(() => {
     newAddress: vi.fn().mockResolvedValue('ark-address-from-native'),
     sync: vi.fn().mockResolvedValue(undefined),
     validateArkoorAddress: vi.fn().mockResolvedValue(true),
-    sendArkoorPayment: vi.fn().mockResolvedValue(undefined),
+    sendArkoorPayment: vi.fn().mockResolvedValue(1),
     stopDaemonWait: vi.fn().mockResolvedValue(undefined),
     uniffiDestroy: vi.fn(),
   }
@@ -174,7 +174,8 @@ describe('Bark React Native backend', () => {
     const sending = backend.sendArkPayment(request)
     request.address = 'attacker'
     request.amountSats = 100
-    expect(await sending).toEqual({ status: 'submitted', address: 'destination', amountSats: 21 })
+    // movementId is bark 0.27's own booking record, not a fabricated receipt.
+    expect(await sending).toEqual({ status: 'submitted', address: 'destination', amountSats: 21, movementId: 1 })
     expect(wallet.sendArkoorPayment).toHaveBeenCalledWith('destination', 21n)
   })
 

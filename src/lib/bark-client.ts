@@ -43,8 +43,9 @@ export interface BarkWalletPort {
   payLightningOffer?(request: { offer: string; amountSats?: number; wait: boolean }): Promise<BarkLightningStatus>
   lightningSendState(hash: string): Promise<BarkLightningStatus>
   lightningReceiveState(hash: string): Promise<{ state: string; amountSats?: number; settledAt?: number }>
-  sendArkoorPayment(address: string, amount: number): Promise<void>
-  sendOnchain(address: string, amount: number): Promise<string>
+  /** Resolves when submitted; the number is bark's movement id for the payment. */
+  sendArkoorPayment(address: string, amount: number): Promise<number>
+  sendOnchain(address: string, amount: number): Promise<{ txid: string }>
   broadcastTx(hex: string): Promise<string>
   boardFundingAddress(): Promise<{ address: string; expiryHeight: number; keypairIndex: number }>
   boardAmount(amount: number): Promise<object>

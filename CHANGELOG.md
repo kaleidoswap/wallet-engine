@@ -16,6 +16,28 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - Dependency lockfile refresh within declared ranges (`@scure/base` 2.4.0,
   `@scure/btc-signer` 2.4.1, `fast-check` 4.10.2, `tsx` 4.23.15). Floors are
   unchanged.
+- `@scure/bip32` and `@scure/bip39` move to the 2.x line (`^2.4.0`): the
+  APIs the engine uses are unchanged, and the bip39 wordlist import goes
+  through the package's new `exports` map
+  (`@scure/bip39/wordlists/english.js`).
+- Bark moves to 0.27 (`@secondts/bark` peer `^0.27.0`,
+  `@secondts/bark-react-native` peer `0.27.0`). `sendOnchain` returns the
+  offboard `{ txid }` (bark's `OffboardResult` narrowed at the port
+  boundary) and `sendArkoorPayment` resolves to bark's movement id. The
+  React Native backend passes bark 0.27's new positional arguments
+  (`bolt11Invoice` token/expirySecs, `payLightningInvoice` /
+  `payLightningOffer` retryForSecs) as undefined, so SDK defaults apply.
+- The WDK stack develops against `@tetherto/wdk-wallet` 1.0.0-beta.26 and
+  `@tetherto/wdk-wallet-spark` 1.0.0-beta.31. The Spark WDK adapter's
+  account surface is unchanged; wdk-wallet-spark 0.31 keeps its own exact
+  nested `wdk-wallet` beta.17 / `spark-sdk` 0.10.0 pins, which the
+  adapter's dynamic-load seam already tolerates.
+- Evaluated and deliberately not taken: `@buildonspark/spark-sdk` 0.15.
+  Its `SparkWallet` replaces the flat per-call methods the adapter's
+  runtime seam is written against with service objects
+  (`TransferService`, `SwapService`, …), so the bump is an adapter
+  rewrite to be validated against live nodes, not a dependency refresh.
+  The peer range stays `^0.7.10`.
 
 ## [1.0.0-beta.85] - 2026-11-11
 

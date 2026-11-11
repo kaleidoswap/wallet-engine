@@ -26,10 +26,11 @@ export interface BarkArkPaymentRequest {
 }
 
 export interface BarkArkPaymentResult {
-  /** The SDK returned successfully; it does not return a payment id or receipt. */
+  /** The SDK returned successfully; bark 0.27 reports the movement id it booked. */
   status: 'submitted'
   address: string
   amountSats: number
+  movementId: number
 }
 
 export interface BarkWalletInfo {

@@ -1,5 +1,5 @@
 import { validateMnemonic } from '@scure/bip39'
-import { wordlist } from '@scure/bip39/wordlists/english'
+import { wordlist } from '@scure/bip39/wordlists/english.js'
 import { BarkBackendError } from '../types/bark-native.js'
 import type {
   BarkReactNativeConfig, BarkBalance, BarkArkPaymentRequest, BarkArkPaymentResult, BarkWalletInfo, BarkMovement,
@@ -234,12 +234,13 @@ export class BarkReactNativeBackend {
         validation('Bark cannot deliver to this Ark address on the current server and network')
       }
       try {
-        await wallet.sendArkoorPayment(address, BigInt(amountSats))
+        // bark 0.27 returns the id of the movement that records the payment.
+        const movementId = Number(await wallet.sendArkoorPayment(address, BigInt(amountSats)))
+        return { status: 'submitted', address, amountSats, movementId }
       } catch {
         // A transport failure after submission is not evidence the payment failed.
         throw new BarkBackendError('PAYMENT_OUTCOME_UNKNOWN', 'Bark payment outcome is unknown; inspect wallet history before retrying')
       }
-      return { status: 'submitted', address, amountSats }
     })
   }
 
@@ -276,14 +277,16 @@ export class BarkReactNativeBackend {
       sync: () => this.sync(),
       newAddress: () => this.getReceiveAddress(),
       bolt11Invoice: r => this.withWallet(async w => {
-        const invoice = await w.bolt11Invoice(positiveSats(r.amountSats), r.description, undefined)
+        // token/expirySecs stay undefined: the port carries neither, so bark
+        // keeps its server default invoice expiry.
+        const invoice = await w.bolt11Invoice(positiveSats(r.amountSats), r.description, undefined, undefined)
         return { invoice: invoice.invoice, paymentHash: invoice.paymentHash, amountSats: sats(invoice.amountSats) }
       }),
       payLightningInvoice: r => this.mutate(async w => this.lightningStatus(await w.payLightningInvoice(
-        r.invoice, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait,
+        r.invoice, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait, undefined,
       ))),
       payLightningOffer: r => this.mutate(async w => this.lightningStatus(await w.payLightningOffer(
-        r.offer, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait,
+        r.offer, r.amountSats === undefined ? undefined : positiveSats(r.amountSats), r.wait, undefined,
       ))),
       lightningSendState: hash => this.withWallet(async w => this.lightningStatus(await w.lightningSendState(hash))),
       lightningReceiveState: hash => this.withWallet(async w => {
@@ -291,7 +294,7 @@ export class BarkReactNativeBackend {
         return { state: r.state, amountSats: r.amountSats === undefined ? undefined : sats(r.amountSats),
           settledAt: r.settledAt === undefined ? undefined : nativeNumber(r.settledAt) }
       }),
-      sendArkoorPayment: async (address, amountSats) => { await this.sendArkPayment({ address, amountSats }) },
+      sendArkoorPayment: async (address, amountSats) => (await this.sendArkPayment({ address, amountSats })).movementId,
       sendOnchain: (address, amount) => this.mutate(w => w.sendOnchain(address, positiveSats(amount))),
       broadcastTx: hex => this.mutate(w => w.broadcastTx(hex)),
       boardFundingAddress: () => this.withWallet(w => w.boardFundingAddress()),
