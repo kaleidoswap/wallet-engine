@@ -7,6 +7,14 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+
+- `RgbLibWasmAdapter.sendAsset` returns `{ txid, batchTransferIdx, entropy }`
+  with `entropy` as a decimal string. rgb-lib-wasm 1.0.0-beta.4 added the
+  commitment entropy to the send result as a BigInt, which a host's message
+  transport cannot serialize, so a send that went out reached the caller as a
+  failed reply.
+
 ## [1.0.0-beta.84] - 2026-11-11
 
 ### Changed

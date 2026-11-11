@@ -172,10 +172,16 @@ describe('RgbLibWasmAdapter', () => {
         return { psbt: 'unsigned-psbt', batchTransferIdx: 4 }
       },
       signPsbt: (p: string) => `signed:${p}`,
-      sendEnd: async (_online: any, signed: string) => ({ txid: 'sent', batchTransferIdx: 4n, signed }),
+      sendEnd: async (_online: any, signed: string) => {
+        seen.signed = signed
+        return { txid: 'sent', batchTransferIdx: 4, entropy: 18446744073709551557n }
+      },
     })
     const res = await adapter.sendAsset({ token: 'rgb:USDT', recipient: 'rgb:USDT/blinded', amount: 42, feeRate: 3 })
-    expect(res).toMatchObject({ txid: 'sent', batchTransferIdx: 4, signed: 'signed:unsigned-psbt' })
+    // plain values only: a host passes this through structured clone or JSON
+    expect(res).toEqual({ txid: 'sent', batchTransferIdx: 4, entropy: '18446744073709551557' })
+    expect(JSON.parse(JSON.stringify(res))).toEqual(res)
+    expect(seen.signed).toBe('signed:unsigned-psbt')
     expect(seen.online).toEqual({ _online: true })
     expect(seen.feeRate).toBe(3n)
     expect(seen.senderEndpoint).toBe('rpc://proxy.example')

@@ -56,13 +56,15 @@ describe.skipIf(!ARKADE.enabled)('Arkade mutinynet (Alice & Bob)', () => {
     expect(info.network).toBe('signet')
   }, 120_000)
 
+  // The first balance read syncs the wallet's VTXOs, which takes close to two
+  // minutes on mutinynet.
   it('Alice is funded on Arkade', async () => {
     assertFunded('Alice/Arkade', await alice.getBtcBalance())
-  }, 120_000)
+  }, 240_000)
 
   it('Bob is funded on Arkade', async () => {
     assertFunded('Bob/Arkade', await bob.getBtcBalance())
-  }, 120_000)
+  }, 240_000)
 
   it('exposes an Ark address and an on-chain boarding address', async () => {
     const ark = await alice.getReceiveAddress()
