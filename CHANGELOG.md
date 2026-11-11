@@ -7,6 +7,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- The engine develops and tests against `kaleido-sdk` 0.1.23, and the peer
+  range becomes `^0.1.23`: `client.rln.listTransfers` takes an `asset_filter`
+  (`AssetFilter::Id`) instead of the removed `asset_id` field, so older
+  `kaleido-sdk` minors no longer work with the engine.
+- Dependency lockfile refresh within declared ranges (`@scure/base` 2.4.0,
+  `@scure/btc-signer` 2.4.1, `fast-check` 4.10.2, `tsx` 4.23.15). Floors are
+  unchanged.
+
 ## [1.0.0-beta.85] - 2026-11-11
 
 ### Fixed

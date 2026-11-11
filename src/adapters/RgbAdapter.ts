@@ -23,6 +23,7 @@ import type {
   SendPaymentResponse,
   ListTransfersResponse,
 } from "kaleido-sdk/rln";
+import { AssetFilterIdType } from "kaleido-sdk/rln";
 import {
   ProtocolType,
   Layer,
@@ -381,7 +382,8 @@ export class RgbAdapter implements IProtocolAdapter {
     try {
       const client = this.nodeClient();
 
-      // listTransfers requires asset_id for RGB on-chain transfers
+      // The transfers rail filters server-side by one asset (AssetFilter::Id),
+      // so an asset id is required to list history.
       if (!filter?.asset) {
         throw new ProtocolError(
           "Asset ID is required for listing RGB transfers",
@@ -394,7 +396,9 @@ export class RgbAdapter implements IProtocolAdapter {
       // move via all three rails. listPayments()/listSwaps() return ALL entries, so
       // filter client-side by asset_id.
       const [transfersResponse, paymentsResponse, swapsResponse] = await Promise.all([
-        client.rln.listTransfers({ asset_id: filter.asset }) as Promise<{
+        client.rln.listTransfers({
+          asset_filter: { type: AssetFilterIdType.Id, value: filter.asset },
+        }) as Promise<{
           transfers?: Record<string, unknown>[];
         }>,
         // Without a partial-result marker, a failed rail must fail the whole view.
@@ -775,7 +779,9 @@ export class RgbAdapter implements IProtocolAdapter {
       if (!options?.asset_id) {
         return { transfers: [] } as ListTransfersResponse;
       }
-      return await client.rln.listTransfers({ asset_id: options.asset_id });
+      return await client.rln.listTransfers({
+        asset_filter: { type: AssetFilterIdType.Id, value: options.asset_id },
+      });
     } catch (error: unknown) {
       throw this.handleSdkError(error, "Failed to list transfers");
     }
