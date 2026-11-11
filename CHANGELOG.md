@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.86] - 2026-11-11
+
 ### Changed
 
 - The engine develops and tests against `kaleido-sdk` 0.1.23, and the peer
