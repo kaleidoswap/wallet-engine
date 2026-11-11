@@ -32,6 +32,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   account surface is unchanged; wdk-wallet-spark 0.31 keeps its own exact
   nested `wdk-wallet` beta.17 / `spark-sdk` 0.10.0 pins, which the
   adapter's dynamic-load seam already tolerates.
+- Evaluated and deliberately not taken: `@buildonspark/spark-sdk` 0.15.
+  Its `SparkWallet` replaces the flat per-call methods the adapter's
+  runtime seam is written against with service objects
+  (`TransferService`, `SwapService`, …), so the bump is an adapter
+  rewrite to be validated against live nodes, not a dependency refresh.
+  The peer range stays `^0.7.10`.
 
 ## [1.0.0-beta.85] - 2026-11-11
 
