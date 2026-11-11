@@ -46,6 +46,22 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     expect(asRgbHtlcOperations(new RgbLibWasmAdapter())).not.toBeNull()
   })
 
+  it('refuses every HTLC step on a build without the PSBT-operation bindings', async () => {
+    const adapter = connected({})
+    const notSupported = { code: 'NOT_SUPPORTED' }
+    await expect(adapter.acceptRgbHtlcLock(LOCK)).rejects.toMatchObject(notSupported)
+    await expect(adapter.rgbHtlcPayoutAddress()).rejects.toMatchObject(notSupported)
+    await expect(
+      adapter.prepareRgbHtlcSpend({ psbt: '', assetId: ASSET, outputIndex: 1, amount: 1, inputOutpoints: [`${LOCK_TXID}:0`] }),
+    ).rejects.toMatchObject(notSupported)
+    await expect(adapter.getRgbHtlcOperation(LOCK_TXID)).rejects.toMatchObject(notSupported)
+    await expect(adapter.applyRgbHtlcOperation('op')).rejects.toMatchObject(notSupported)
+    await expect(adapter.abortRgbHtlcOperation('op')).rejects.toMatchObject(notSupported)
+    await expect(
+      adapter.fundRgbHtlcLock({ assetId: ASSET, amount: 1, recipientId: 'wvout:x', blinding: '1', htlcSat: 1000 }),
+    ).rejects.toMatchObject(notSupported)
+  })
+
   it('accepts a lock with the expected transfer, then registers the asset', async () => {
     const calls: any[] = []
     const adapter = connected({
@@ -107,7 +123,7 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
   })
 
   it('needs a transport endpoint for the payout receive', async () => {
-    const adapter = connected({}, { transportEndpoints: [] })
+    const adapter = connected({}, { transportEndpoints: [], wasmModule: { scriptBufFromRecipientId: () => '' } })
     await expect(adapter.rgbHtlcPayoutAddress()).rejects.toThrow(/transport endpoint/)
   })
 
@@ -226,9 +242,11 @@ describe('RgbLibWasmAdapter.fundRgbHtlcLock', () => {
     return connected({
       sync: async () => {},
       refresh: async () => ({}),
+      // a build that ships the PSBT-operation bindings
+      psbtOpPrepare: async () => ({}),
       sendBegin: async (_o: any, map: any, donation: any, feeRate: any, minConf: any) => {
         seen.push({ map, donation, feeRate, minConf })
-        return 'unsigned'
+        return { psbt: 'unsigned' }
       },
       signPsbt: (p: string) => `signed:${p}`,
       sendEnd: async () => ({ txid }),

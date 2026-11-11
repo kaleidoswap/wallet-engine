@@ -8,14 +8,46 @@ import { createWdkRegistry } from '../src/registry/createWdkRegistry'
  * goal is to pin the translation + begin/sign/end orchestration, not rgb-lib.
  */
 describe('RgbLibWasmAdapter', () => {
+  const INVOICE_EXPIRATION = Math.floor(Date.now() / 1000) + 86_400
+  /** Invoices the fake WasmInvoice decodes, as rgb-lib-wasm's invoiceData() shapes them. */
+  const INVOICES: Record<string, Record<string, unknown>> = {
+    'rgb:USDT/blinded': {
+      recipientId: 'utxob:x',
+      assetId: 'rgb:USDT',
+      transportEndpoints: ['rpc://recipient.proxy'],
+      publicKey: 'aa'.repeat(32),
+      encryption: 'Required',
+      expirationTimestamp: BigInt(INVOICE_EXPIRATION),
+    },
+    'rgb:USDT/witness': {
+      recipientId: 'bcrt:wvout:w',
+      assetId: null,
+      transportEndpoints: ['rpc://recipient.proxy'],
+      publicKey: 'bb'.repeat(32),
+      encryption: 'Optional',
+      expirationTimestamp: BigInt(INVOICE_EXPIRATION),
+    },
+  }
+  const wasmModule = {
+    WasmInvoice: class {
+      constructor(private readonly invoice: string) {
+        if (!INVOICES[invoice]) throw 'Invalid invoice'
+      }
+      invoiceData() {
+        return INVOICES[this.invoice]
+      }
+    },
+  }
+
   function connected(account: Record<string, any>, online: any = { _online: true }) {
     const adapter = new RgbLibWasmAdapter()
     Object.assign(adapter as any, {
       connected: true,
-      account,
+      account: { sync: async () => {}, refresh: async () => new Map(), ...account },
       online,
       network: 'regtest',
       transportEndpoints: ['rpc://proxy.example'],
+      wasmModule,
     })
     return adapter
   }
@@ -77,29 +109,35 @@ describe('RgbLibWasmAdapter', () => {
   it('generates a blinded RGB invoice (Fungible assignment from the amount)', async () => {
     const calls: any[] = []
     const adapter = connected({
-      blindReceive: async (assetId: any, assignment: any, duration: any, eps: any, minConf: any) => {
-        calls.push({ assetId, assignment, duration, eps, minConf })
-        return { invoice: `rgb:inv:${assetId}`, recipient_id: 'rid' }
+      blindReceive: async (online: any, assetId: any, assignment: any, expiration: any, eps: any, minConf: any, enc: any) => {
+        calls.push({ online, assetId, assignment, expiration, eps, minConf, enc })
+        return { invoice: `rgb:inv:${assetId}`, recipientId: 'rid', publicKey: 'pk' }
       },
     })
-    const inv = await adapter.createInvoice({ asset: 'rgb:USDT', assetAmount: 10 } as any)
+    const before = Math.floor(Date.now() / 1000)
+    const inv = await adapter.createInvoice({ asset: 'rgb:USDT', assetAmount: 10, expirySeconds: 600 } as any)
     expect(inv.invoice).toBe('rgb:inv:rgb:USDT')
     expect(inv.paymentHash).toBe('rid')
+    expect(calls[0].online).toEqual({ _online: true })
     expect(calls[0].assignment).toEqual({ Fungible: 10 })
     expect(calls[0].eps).toEqual(['rpc://proxy.example'])
+    // rgb-lib takes an absolute expiration, not a duration.
+    expect(calls[0].expiration).toBeGreaterThanOrEqual(before + 600)
+    expect(calls[0].expiration).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 600)
+    expect(calls[0].enc).toBeNull()
   })
 
   it('createRgbInvoice converts the host assignment + honors witness vs blinded', async () => {
     const blind: any[] = []
     const witness: any[] = []
     const adapter = connected({
-      blindReceive: async (assetId: any, assignment: any) => {
+      blindReceive: async (_online: any, assetId: any, assignment: any) => {
         blind.push({ assetId, assignment })
-        return { invoice: 'blinded', recipient_id: 'b' }
+        return { invoice: 'blinded', recipientId: 'b' }
       },
-      witnessReceive: async (assetId: any, assignment: any) => {
+      witnessReceive: async (_online: any, assetId: any, assignment: any) => {
         witness.push({ assetId, assignment })
-        return { invoice: 'witness', recipient_id: 'w' }
+        return { invoice: 'witness', recipientId: 'w' }
       },
     })
 
@@ -116,81 +154,128 @@ describe('RgbLibWasmAdapter', () => {
     expect(witness[0]).toEqual({ assetId: 'rgb:X', assignment: 'Any' })
   })
 
-  it('sends an asset via begin → signPsbt → end with rgb-lib recipient casing', async () => {
+  it('sends an asset to an invoice via begin → signPsbt → end', async () => {
     const seen: any = {}
     const adapter = connected({
-      sendBegin: async (online: any, map: any, donation: any, feeRate: any, minConf: any) => {
-        Object.assign(seen, { online, map, donation, feeRate, minConf })
-        return 'unsigned-psbt'
+      sendBegin: async (
+        online: any,
+        map: any,
+        donation: any,
+        feeRate: any,
+        minConf: any,
+        expiration: any,
+        senderEndpoint: any,
+        lockTime: any,
+        dryRun: any,
+      ) => {
+        Object.assign(seen, { online, map, donation, feeRate, minConf, expiration, senderEndpoint, lockTime, dryRun })
+        return { psbt: 'unsigned-psbt', batchTransferIdx: 4 }
       },
       signPsbt: (p: string) => `signed:${p}`,
-      sendEnd: async (_online: any, signed: string) => ({ txid: 'sent', signed }),
+      sendEnd: async (_online: any, signed: string) => ({ txid: 'sent', batchTransferIdx: 4n, signed }),
     })
-    const res = await adapter.sendAsset({ token: 'rgb:USDT', recipient: 'utxob:x', amount: 42, feeRate: 3 })
-    expect(res).toMatchObject({ txid: 'sent', signed: 'signed:unsigned-psbt' })
+    const res = await adapter.sendAsset({ token: 'rgb:USDT', recipient: 'rgb:USDT/blinded', amount: 42, feeRate: 3 })
+    expect(res).toMatchObject({ txid: 'sent', batchTransferIdx: 4, signed: 'signed:unsigned-psbt' })
     expect(seen.online).toEqual({ _online: true })
     expect(seen.feeRate).toBe(3n)
-    expect(seen.map['rgb:USDT'][0]).toMatchObject({
+    expect(seen.senderEndpoint).toBe('rpc://proxy.example')
+    expect(seen.dryRun).toBe(false)
+    expect(seen.map['rgb:USDT'][0]).toEqual({
       recipientId: 'utxob:x',
-      recipient_id: 'utxob:x',
       assignment: { Fungible: 42 },
+      transportEndpoints: ['rpc://recipient.proxy'],
+      publicKey: 'aa'.repeat(32),
+      encryption: 'Required',
+      expirationTimestamp: INVOICE_EXPIRATION,
     })
-    expect(seen.map['rgb:USDT'][0].amount).toBeUndefined()
-    // No transportEndpoints supplied ⇒ falls back to the wallet's configured ones.
-    expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://proxy.example'])
-    expect(seen.map['rgb:USDT'][0].transport_endpoints).toEqual(['rpc://proxy.example'])
-    // Blinded send ⇒ no witnessData key.
-    expect(seen.map['rgb:USDT'][0].witnessData).toBeUndefined()
-    expect(seen.map['rgb:USDT'][0].witness_data).toBeUndefined()
+    // An hour at most, and never within rgb-lib's margin of the invoice expiration.
+    expect(seen.expiration).toBeLessThanOrEqual(Math.floor(Date.now() / 1000) + 3600)
+    expect(seen.expiration).toBeLessThanOrEqual(INVOICE_EXPIRATION - 600)
   })
 
-  it('routes the consignment to the invoice transport endpoints (not the sender default)', async () => {
+  it('refuses a send to a bare recipient id: protocol 1.0 needs the invoice', async () => {
+    const sendBegin = vi.fn()
+    const adapter = connected({ sendBegin })
+    await expect(
+      adapter.sendAsset({ token: 'rgb:USDT', recipient: 'utxob:x', amount: 1 }),
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(sendBegin).not.toHaveBeenCalled()
+  })
+
+  it('refuses an invoice for another asset', async () => {
+    const sendBegin = vi.fn()
+    const adapter = connected({ sendBegin })
+    await expect(
+      adapter.sendAsset({ token: 'rgb:OTHER', recipient: 'x', invoice: 'rgb:USDT/blinded', amount: 1 }),
+    ).rejects.toThrow(/rgb:USDT/)
+    expect(sendBegin).not.toHaveBeenCalled()
+  })
+
+  it('refuses an invoice that expires within the operation margin', async () => {
+    INVOICES['rgb:USDT/soon'] = { ...INVOICES['rgb:USDT/blinded'], expirationTimestamp: BigInt(Math.floor(Date.now() / 1000) + 300) }
+    const sendBegin = vi.fn()
+    const adapter = connected({ sendBegin })
+    await expect(
+      adapter.sendAsset({ token: 'rgb:USDT', recipient: 'rgb:USDT/soon', amount: 1 }),
+    ).rejects.toMatchObject({ code: 'INVOICE_EXPIRED' })
+    expect(sendBegin).not.toHaveBeenCalled()
+  })
+
+  it('lets the caller override the invoice transport endpoints', async () => {
     const seen: any = {}
     const adapter = connected({
       sendBegin: async (_o: any, map: any) => {
         seen.map = map
-        return 'unsigned'
+        return { psbt: 'unsigned' }
       },
       signPsbt: (p: string) => `signed:${p}`,
       sendEnd: async () => ({ txid: 'sent' }),
     })
     await adapter.sendAsset({
       assetId: 'rgb:USDT',
-      recipientId: 'utxob:x',
+      recipientId: 'rgb:USDT/blinded',
       amount: 1,
       assignment: { type: 'Fungible', value: 1 },
-      transportEndpoints: ['rpc://recipient.proxy'],
+      transportEndpoints: ['rpc://override.proxy'],
     } as any)
-    expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://recipient.proxy'])
-    expect(seen.map['rgb:USDT'][0].transport_endpoints).toEqual(['rpc://recipient.proxy'])
+    expect(seen.map['rgb:USDT'][0].transportEndpoints).toEqual(['rpc://override.proxy'])
   })
 
-  it('passes witness data in both wasm and desktop-client casings', async () => {
+  it('sends witness data with a decimal amount and no blinding', async () => {
     const seen: any = {}
     const adapter = connected({
       sendBegin: async (_o: any, map: any) => {
         seen.map = map
-        return 'unsigned'
+        return { psbt: 'unsigned' }
       },
       signPsbt: (p: string) => `signed:${p}`,
       sendEnd: async () => ({ txid: 'sent' }),
     })
     await adapter.sendAsset({
       token: 'rgb:USDT',
-      recipient: 'witness-rid',
+      recipient: 'rgb:USDT/witness',
       amount: 7,
       witness_data: { amount_sat: 1200 },
     })
-    expect(seen.map['rgb:USDT'][0].witnessData).toEqual({
-      amountSat: '1200',
-      amount_sat: '1200',
-      blinding: null,
+    expect(seen.map['rgb:USDT'][0]).toMatchObject({
+      recipientId: 'bcrt:wvout:w',
+      encryption: 'Optional',
+      witnessData: { amountSat: '1200', blinding: null },
     })
-    expect(seen.map['rgb:USDT'][0].witness_data).toEqual({
-      amountSat: '1200',
-      amount_sat: '1200',
-      blinding: null,
-    })
+  })
+
+  it('refuses a witness send that picks its own blinding', async () => {
+    const sendBegin = vi.fn()
+    const adapter = connected({ sendBegin })
+    await expect(
+      adapter.sendAsset({
+        token: 'rgb:USDT',
+        recipient: 'rgb:USDT/witness',
+        amount: 7,
+        witness_data: { amount_sat: 1200, blinding: 5 },
+      }),
+    ).rejects.toThrow(/blinding/)
+    expect(sendBegin).not.toHaveBeenCalled()
   })
 
   it('normalizes the rgb-lib transaction type (deposit/send → User, machinery kept)', async () => {
@@ -607,8 +692,9 @@ describe('RgbLibWasmAdapter', () => {
       return {
         calls,
         listAssets: () => ({ nia: [{ assetId: 'rgb:NIA', precision: 0 }], ifa: [] }),
-        listTransfers: (assetId: string | null) => {
-          calls.push(assetId)
+        listTransfers: (filter: { id: string } | 'noAsset') => {
+          calls.push(filter)
+          const assetId = filter === 'noAsset' ? null : filter.id
           return db.filter((t) => t.assetId === assetId).map(({ assetId: _a, ...row }) => row)
         },
       }
@@ -626,14 +712,14 @@ describe('RgbLibWasmAdapter', () => {
       const rows: any = await connected(acc).listTransfers()
       expect(rows.map((t: any) => t.idx).sort()).toEqual([1, 2, 3])
       expect(rows.find((t: any) => t.idx === 1).assetId).toBe('rgb:NIA')
-      expect(acc.calls).toEqual(['rgb:NIA', null])
+      expect(acc.calls).toEqual([{ id: 'rgb:NIA' }, 'noAsset'])
     })
 
     it('listTransfers({ asset_id }) stays a single filtered call', async () => {
       const acc = account()
       const rows: any = await connected(acc).listTransfers({ asset_id: 'rgb:NIA' })
       expect(rows.map((t: any) => t.idx)).toEqual([1, 2])
-      expect(acc.calls).toEqual(['rgb:NIA'])
+      expect(acc.calls).toEqual([{ id: 'rgb:NIA' }])
     })
   })
 

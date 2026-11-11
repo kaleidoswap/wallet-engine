@@ -58,6 +58,12 @@ export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
   dataDir?: string
   /** Max allocations per UTXO (rgb-lib tuning). Defaults to 5. */
   maxAllocationsPerUtxo?: number
+  /**
+   * Skip rgb-lib's go-online consistency check (DB vs RGB stock, then a full
+   * scan). It catches a store that drifted from the chain but costs a full scan
+   * on every connect. Defaults to false.
+   */
+  skipConsistencyCheck?: boolean
 }
 
 /** Map the engine network string → rgb-lib's network enum casing. */
@@ -111,6 +117,37 @@ function wasmErrorStartsWith(err: unknown, prefix: string): boolean {
 }
 
 const U64_MAX = (1n << 64n) - 1n
+
+/** rgb-lib-wasm refuses a send whose operation expires within this much of the invoice. */
+const INVOICE_EXPIRATION_MARGIN_SECS = 600
+const OPERATION_DURATION_SECS = 3600
+const DEFAULT_RECEIVE_DURATION_SECS = 86_400
+
+function nowSeconds(): number {
+  return Math.floor(Date.now() / 1000)
+}
+
+/**
+ * HTLC locks need the PSBT-operation bindings of our rgb-lib-wasm fork, which
+ * the proxy protocol 1.0 builds do not ship yet.
+ */
+function htlcUnsupported(): ProtocolError {
+  return new ProtocolError(
+    'HTLC swap locks are not available in this rgb-lib-wasm build',
+    'RGB_L1',
+    'NOT_SUPPORTED',
+  )
+}
+
+/** The recipient fields a proxy protocol 1.0 send copies from the invoice. */
+interface InvoiceRecipient {
+  recipientId: string
+  assetId: string | null
+  transportEndpoints: string[]
+  publicKey: string | null
+  encryption: string | null
+  expirationTimestamp: number | null
+}
 
 function toHtlcOperation(raw: any): RgbHtlcOperation {
   const allocations: RgbHtlcAllocation[] = (raw?.allocations ?? []).map((a: any) => {
@@ -212,9 +249,24 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // Not reentrant: an op starting mid-flight corrupts thread-locals and panics
     // ("Lazy instance poisoned"). Queue every wallet call so they never overlap.
     this.account = serializeWasmAccount(rawWallet)
-    this.online = await this.account.goOnline(false, cfg.indexerUrl)
+    const skipConsistencyCheck = cfg.skipConsistencyCheck ?? false
+    try {
+      this.online = await this.account.goOnline({
+        indexerConfig: { Esplora: { url: cfg.indexerUrl } },
+        skipConsistencyCheck,
+        proxyAuthKeys: {},
+        evmChains: {},
+      })
+    } catch (e) {
+      // The store disagrees with the chain: surface it instead of trading on it.
+      if (wasmErrorStartsWith(e, 'Inconsistency')) {
+        throw new ProtocolError(`RGB wallet state is inconsistent: ${errorMessage(e)}`, 'RGB_L1', 'INCONSISTENT')
+      }
+      throw e
+    }
     this.connected = true
-    await this.recoverBtcStateIfThin()
+    // The consistency check already ran a full scan.
+    if (skipConsistencyCheck) await this.recoverBtcStateIfThin()
   }
 
   /**
@@ -500,15 +552,13 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
     this.assertConnected()
-    if (options?.asset_id) return this.account.listTransfers(options.asset_id)
+    if (options?.asset_id) return this.account.listTransfers({ id: options.asset_id })
     return this.listAllTransfers()
   }
 
   /**
-   * Every transfer the wallet knows. rgb-lib's `listTransfers(null)` is not "all":
-   * it returns only transfers with no asset, and a blank-invoice receive leaves
-   * that set as soon as its consignment validates and gets an asset id (#107).
-   * Asset rows carry no asset id of their own, so tag them with it.
+   * Every transfer the wallet knows, each tagged with its asset id: rgb-lib's
+   * transfer rows carry none, so list per asset, then the ones with no asset.
    */
   private async listAllTransfers(): Promise<any[]> {
     const rows = (raw: any): any[] => (Array.isArray(raw) ? raw : raw?.transfers ?? [])
@@ -518,11 +568,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     for (const a of assets) {
       const assetId = normalizeAsset(a).asset_id
       if (!assetId) continue
-      for (const t of rows(await this.account.listTransfers(assetId))) {
+      for (const t of rows(await this.account.listTransfers({ id: assetId }))) {
         out.push({ ...t, assetId: t?.assetId ?? t?.asset_id ?? assetId })
       }
     }
-    out.push(...rows(await this.account.listTransfers(null)))
+    out.push(...rows(await this.account.listTransfers('noAsset')))
     return out
   }
 
@@ -561,12 +611,16 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
           ? opts.assignment.value
           : undefined
     const assignment = fungibleValue != null ? { Fungible: Number(fungibleValue) } : 'Any'
+    // rgb-lib takes an absolute expiration and reserves the invoice on the proxy.
+    const expirationTimestamp = nowSeconds() + (opts.durationSeconds ?? DEFAULT_RECEIVE_DURATION_SECS)
     const args = [
+      this.online,
       opts.assetId ?? null,
       assignment,
-      opts.durationSeconds ?? null,
+      expirationTimestamp,
       this.transportEndpoints,
       opts.minConfirmations ?? 1,
+      null,
     ] as const
     const res: any = await (opts.witness
       ? this.account.witnessReceive(...args)
@@ -585,6 +639,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         res?.expirationTimestamp != null ? Number(res.expirationTimestamp) : undefined,
       batchTransferIdx:
         res?.batchTransferIdx != null ? Number(res.batchTransferIdx) : undefined,
+      publicKey: res?.publicKey ?? res?.public_key ?? undefined,
     }
   }
 
@@ -610,6 +665,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     feeRate?: number
   }): Promise<{ txid: string }> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpPrepare')
     if (!params.assetId || !params.recipientId) {
       throw new ProtocolError('HTLC lock needs an asset id and a recipient id', 'RGB_L1', 'INVALID_PARAMS')
     }
@@ -657,6 +713,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     lockTxid: string
   }): Promise<{ status: 'accepted' | 'awaitingConfirmations' }> {
     this.assertConnected()
+    this.requireHtlcBinding('fetchAndAcceptTransferByRecipientId')
     if (!Number.isSafeInteger(params.amount) || params.amount <= 0) {
       throw new ProtocolError('HTLC lock amount must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
     }
@@ -690,6 +747,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async rgbHtlcPayoutAddress(params?: { assetId?: string }): Promise<{ address: string; recipientId: string }> {
     this.assertConnected()
+    if (typeof this.wasmModule?.scriptBufFromRecipientId !== 'function') throw htlcUnsupported()
     if (this.transportEndpoints.length === 0) {
       // rgb-lib-wasm settles the payout receive through its transport endpoint.
       throw new ProtocolError('An HTLC payout needs a transport endpoint', 'RGB_L1', 'CONFIG')
@@ -709,6 +767,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     inputOutpoints: string[]
   }): Promise<RgbHtlcOperation> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpPrepare')
     if (!Number.isSafeInteger(params.amount) || params.amount <= 0) {
       throw new ProtocolError('HTLC spend amount must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
     }
@@ -740,6 +799,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async getRgbHtlcOperation(txid: string): Promise<RgbHtlcOperation | null> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpByTxid')
     try {
       return toHtlcOperation(await this.account.psbtOpByTxid(txid))
     } catch (e) {
@@ -750,17 +810,20 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async listRgbHtlcOperationsSpending(outpoint: string): Promise<RgbHtlcOperation[]> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpsSpending')
     const raw: any[] = (await this.account.psbtOpsSpending(parseOutpoint(outpoint))) ?? []
     return raw.map(toHtlcOperation)
   }
 
   async markRgbHtlcBroadcast(operationId: string): Promise<void> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpMarkBroadcast')
     await this.account.psbtOpMarkBroadcast(operationId)
   }
 
   async applyRgbHtlcOperation(operationId: string): Promise<void> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpApply')
     await this.account.psbtOpApply(this.online, operationId)
     await this.flushState()
   }
@@ -769,6 +832,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     status: 'provided' | 'alreadyProvided'
   }> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpProvideReceiveConsignment')
     try {
       await this.account.psbtOpProvideReceiveConsignment(this.online, params.operationId, params.assetId)
     } catch (e) {
@@ -784,7 +848,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   private async receivedHtlcPayout(params: { assetId: string; txid: string }): Promise<boolean> {
-    const raw: any = await this.account.listTransfers(params.assetId)
+    const raw: any = await this.account.listTransfers({ id: params.assetId })
     const rows: any[] = Array.isArray(raw) ? raw : (raw?.transfers ?? [])
     return rows.some((t) => {
       const kind = String(t?.kind ?? '')
@@ -799,8 +863,13 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async abortRgbHtlcOperation(operationId: string): Promise<void> {
     this.assertConnected()
+    this.requireHtlcBinding('psbtOpAbort')
     await this.account.psbtOpAbort(this.online, operationId)
     await this.flushState()
+  }
+
+  private requireHtlcBinding(name: string): void {
+    if (typeof (this.account as Record<string, unknown> | null)?.[name] !== 'function') throw htlcUnsupported()
   }
 
   async finalizeRgbPsbt(psbt: string): Promise<string> {
@@ -835,55 +904,70 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     token: string
     recipientId?: string
     recipient: string
+    /**
+     * The recipient's RGB invoice. Proxy protocol 1.0 sends need its public key,
+     * encryption preference and expiration, so a bare recipient id is refused.
+     * `recipient`/`recipientId` may carry the invoice instead.
+     */
+    invoice?: string
     amount: number
     assignment?: { type?: string; value?: number } | null
     feeRate?: number
     minConfirmations?: number
     donation?: boolean
-    /** Transport endpoints from the recipient's invoice; falls back to the sender's. */
+    /** Overrides the invoice's transport endpoints. */
     transportEndpoints?: string[]
     /** Set only for witness invoices (blinded otherwise). */
-    witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number } | null
-    witness_data?: { amountSat?: number; amount_sat?: number; blinding?: number } | null
+    witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number | null } | null
+    witness_data?: { amountSat?: number; amount_sat?: number; blinding?: number | null } | null
   }): Promise<any> {
     this.assertConnected()
-    const token = params.token ?? params.assetId
-    const recipientId = params.recipient ?? params.recipientId
-    if (!token) throw new ProtocolError('RGB-L1 asset send requires an asset id', 'RGB_L1', 'INVALID_REQUEST')
-    if (!recipientId) throw new ProtocolError('RGB-L1 asset send requires a recipient id', 'RGB_L1', 'INVALID_REQUEST')
     const amount = Number(params.amount ?? params.assignment?.value ?? 0)
     if (!Number.isFinite(amount) || amount <= 0) {
       throw new ProtocolError('RGB-L1 asset send requires a positive amount', 'RGB_L1', 'INVALID_REQUEST')
     }
+    const invoice = [params.invoice, params.recipient, params.recipientId].find(isRgbInvoice)
+    if (!invoice) {
+      throw new ProtocolError(
+        "RGB-L1 asset send requires the recipient's invoice, not just its recipient id",
+        'RGB_L1',
+        'INVALID_REQUEST',
+      )
+    }
+    const target = this.parseInvoiceRecipient(invoice)
+    const token = params.token ?? params.assetId ?? target.assetId
+    if (!token) throw new ProtocolError('RGB-L1 asset send requires an asset id', 'RGB_L1', 'INVALID_REQUEST')
+    if (target.assetId && target.assetId !== token) {
+      throw new ProtocolError(
+        `Invoice is for asset ${target.assetId}, not ${token}`,
+        'RGB_L1',
+        'INVALID_REQUEST',
+      )
+    }
     const transportEndpoints =
       Array.isArray(params.transportEndpoints) && params.transportEndpoints.length > 0
         ? params.transportEndpoints
-        : this.transportEndpoints
-    const assignment = toRgbLibAssignment(params.assignment, amount)
+        : target.transportEndpoints
     const recipient: Record<string, unknown> = {
-      // rgb-lib-wasm examples use camelCase, while the desktop rgb-lib client
-      // path sends snake_case. Keep both so this adapter survives either wasm
-      // serde casing without changing the host API.
-      recipientId,
-      recipient_id: recipientId,
-      assignment,
+      recipientId: target.recipientId,
+      assignment: toRgbLibAssignment(params.assignment, amount),
       transportEndpoints,
-      transport_endpoints: transportEndpoints,
+      publicKey: target.publicKey,
+      encryption: target.encryption ?? 'Required',
+      expirationTimestamp: target.expirationTimestamp,
     }
     const wd = params.witnessData ?? params.witness_data
     if (wd) {
-      const amountSat = wd.amountSat ?? wd.amount_sat
-      // rgb-lib-wasm deserializes witness amounts through serde_json::Number,
-      // which rejects integer-valued JS numbers. Decimal strings preserve the
-      // exact satoshi value and are accepted by both supported API casings.
-      const serializedAmountSat = String(Math.round(Number(amountSat ?? 0)))
-      const witnessData = {
-        amountSat: serializedAmountSat,
-        amount_sat: serializedAmountSat,
-        blinding: wd.blinding != null ? Math.round(Number(wd.blinding)) : null,
+      // Proxy protocol 1.0 derives a witness seal's blinding from both parties' keys.
+      if (wd.blinding != null) {
+        throw new ProtocolError('A witness send cannot choose its blinding', 'RGB_L1', 'INVALID_REQUEST')
       }
-      recipient.witnessData = witnessData
-      recipient.witness_data = witnessData
+      // rgb-lib-wasm deserializes witness amounts through serde_json::Number,
+      // which rejects integer-valued JS numbers; a decimal string is exact.
+      recipient.witnessData = {
+        amountSat: String(Math.round(Number(wd.amountSat ?? wd.amount_sat ?? 0))),
+        blinding: null,
+      }
     }
     return this.sendRecipients({ [token]: [recipient] }, {
       feeRate: params.feeRate,
@@ -892,29 +976,62 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     })
   }
 
+  private parseInvoiceRecipient(invoice: string): InvoiceRecipient {
+    let data: any
+    try {
+      data = new this.wasmModule.WasmInvoice(invoice).invoiceData()
+    } catch (e) {
+      throw new ProtocolError(`Invalid RGB invoice: ${errorMessage(e)}`, 'RGB_L1', 'INVALID_REQUEST')
+    }
+    const recipientId = data?.recipientId ?? data?.recipient_id
+    if (!recipientId) throw new ProtocolError('RGB invoice has no recipient id', 'RGB_L1', 'INVALID_REQUEST')
+    const expiration = data?.expirationTimestamp ?? data?.expiration_timestamp
+    return {
+      recipientId: String(recipientId),
+      assetId: data?.assetId ?? data?.asset_id ?? null,
+      transportEndpoints: data?.transportEndpoints ?? data?.transport_endpoints ?? [],
+      publicKey: data?.publicKey ?? data?.public_key ?? null,
+      encryption: data?.encryption ?? null,
+      expirationTimestamp: expiration == null ? null : toFiniteNumber(expiration),
+    }
+  }
+
   private async sendRecipients(
     recipientMap: Record<string, Record<string, unknown>[]>,
     opts: { feeRate?: number; minConfirmations?: number; donation?: boolean },
   ): Promise<any> {
+    // Recipients post their ACK to, and fetch the signed TX from, the sender's proxy.
+    const senderEndpoint = this.transportEndpoints[0]
+    if (!senderEndpoint) {
+      throw new ProtocolError('An RGB-L1 send needs a transport endpoint of its own', 'RGB_L1', 'CONFIG')
+    }
+    const expirationTimestamp = operationExpiration(recipientMap, opts.donation ?? false)
     // rgb-lib's `send` only spends *settled* allocations it knows locally, so
     // without a fresh sync+refresh sendBegin fails with "Insufficient total
     // assignments" despite a non-zero UI balance.
     await this.refreshBalances()
     const feeRate = BigInt(Math.round(opts.feeRate ?? defaultRgbFeeRate(this.network)))
-    const unsigned: string = await this.account.sendBegin(
+    const begin: any = await this.account.sendBegin(
       this.online,
       recipientMap,
       opts.donation ?? false,
       feeRate,
-      opts.minConfirmations ?? 1
+      opts.minConfirmations ?? 1,
+      expirationTimestamp,
+      senderEndpoint,
+      null,
+      false,
     )
-    const signed = await this.account.signPsbt(unsigned)
+    const signed = await this.account.signPsbt(begin?.psbt ?? begin)
     const result = await this.account.sendEnd(this.online, signed, false)
     // The spend is broadcast; persist the consumed-allocation state so a SW kill
     // can't leave the wallet thinking the inputs are still spendable (which would
     // later fail as "insufficient assignments" or attempt a double-spend).
     await this.flushState()
-    return result
+    return {
+      ...result,
+      batchTransferIdx: result?.batchTransferIdx != null ? Number(result.batchTransferIdx) : undefined,
+    }
   }
 
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
@@ -1104,7 +1221,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     return { serverVersion: raw != null ? toFiniteNumber(raw) : null }
   }
 
-  /** VSS backup status: { backup_exists, server_version, backup_required } → camelCase, no BigInt. */
+  /** VSS backup status, camelCase and without BigInt. */
   async vssBackupInfo(): Promise<{
     backupExists: boolean
     serverVersion: number | null
@@ -1113,9 +1230,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.assertConnected()
     const raw = (await this.account.vssBackupInfo()) as Record<string, unknown> | null
     return {
-      backupExists: Boolean(raw?.backup_exists),
-      serverVersion: raw?.server_version != null ? toFiniteNumber(raw.server_version) : null,
-      backupRequired: Boolean(raw?.backup_required),
+      backupExists: Boolean(raw?.backupExists ?? raw?.backup_exists),
+      serverVersion: (raw?.serverVersion ?? raw?.server_version) != null
+        ? toFiniteNumber(raw?.serverVersion ?? raw?.server_version)
+        : null,
+      backupRequired: Boolean(raw?.backupRequired ?? raw?.backup_required),
     }
   }
 
@@ -1130,6 +1249,34 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.online = null
     await super.disconnect()
   }
+}
+
+function isRgbInvoice(value: unknown): value is string {
+  return typeof value === 'string' && value.startsWith('rgb:')
+}
+
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+/**
+ * An hour, but never later than rgb-lib allows: the operation must expire
+ * INVOICE_EXPIRATION_MARGIN_SECS before the earliest invoice it pays.
+ */
+function operationExpiration(recipientMap: Record<string, Record<string, unknown>[]>, donation: boolean): number {
+  const now = nowSeconds()
+  let expiration = now + OPERATION_DURATION_SECS
+  if (donation) return expiration
+  for (const recipients of Object.values(recipientMap)) {
+    for (const r of recipients) {
+      if (r.expirationTimestamp == null) continue
+      expiration = Math.min(expiration, Number(r.expirationTimestamp) - INVOICE_EXPIRATION_MARGIN_SECS)
+    }
+  }
+  if (expiration <= now) {
+    throw new ProtocolError('The RGB invoice expires too soon to pay', 'RGB_L1', 'INVOICE_EXPIRED')
+  }
+  return expiration
 }
 
 function normalizeRgbLibTimestamp(confTime: unknown): number {
