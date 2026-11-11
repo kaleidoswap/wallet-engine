@@ -55,11 +55,11 @@ importers:
         specifier: ^1.0.0-beta.5
         version: 1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)
       '@secondts/bark':
-        specifier: ^0.24.0
-        version: 0.24.0
+        specifier: ^0.27.0
+        version: 0.27.0
       '@secondts/bark-react-native':
-        specifier: 0.25.0
-        version: 0.25.0(react-native@0.81.5(@babel/core@7.29.7)(react@19.1.4))(react@19.1.4)
+        specifier: 0.27.0
+        version: 0.27.0(react-native@0.81.5(@babel/core@7.29.7)(react@19.1.4))(react@19.1.4)
       '@tetherto/wdk-wallet':
         specifier: 1.0.0-beta.18
         version: 1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))
@@ -935,14 +935,14 @@ packages:
   '@scure/btc-signer@2.4.1':
     resolution: {integrity: sha512-ch6h66o9nPhEoe/KciMMUJeH2MBPB8UAJI1if35Fxl6885lKTsc9YoCRqTW0/RjI0Vv9GSg1tmKtHHODyAw81g==}
 
-  '@secondts/bark-react-native@0.25.0':
-    resolution: {integrity: sha512-G8k3Tb7tmjyZDFrrd6EUCox/p97vUzbwHmod65G9JqYhTmA5xaimuDduNhYrFxnhi/IcQrcdttgijIbMnughww==}
+  '@secondts/bark-react-native@0.27.0':
+    resolution: {integrity: sha512-aphiHNME4R83pslu/yDbAadVBbyZ9eebQ76HvDL5C4b0fGugkeIu4nui01mvJEwQ9RUCsVhMjvjhTdILj2Smxg==}
     peerDependencies:
       react: '*'
       react-native: '>=0.75'
 
-  '@secondts/bark@0.24.0':
-    resolution: {integrity: sha512-0cG2jaTAnz0u5hpTi3jbXUyKzRk9CIastgm44i+fHhA8wUjBh+H6NoWTSa6JDkidMqlpHwesLBuuNcH1tFajLA==}
+  '@secondts/bark@0.27.0':
+    resolution: {integrity: sha512-dKPPcjMHwvWFdiAT5e8M9wxJb4ID5vw69c1/EmrXIIlL4owX1DjlBgq+IpRMlJ1aiQ3C0Oe6gQp95GZTcT4Leg==}
 
   '@sinclair/typebox@0.27.12':
     resolution: {integrity: sha512-hhyNJ+nbR6ZR7pToHvllEFun9TL0sbL+tk/ON75lo+Xas054uez98qRbsuNt7MBCyZKK4+8Yli/OAGZhmfBZ/g==}
@@ -3551,14 +3551,14 @@ snapshots:
       '@scure/base': 2.4.0
       micro-packed: 0.11.1
 
-  '@secondts/bark-react-native@0.25.0(react-native@0.81.5(@babel/core@7.29.7)(react@19.1.4))(react@19.1.4)':
+  '@secondts/bark-react-native@0.27.0(react-native@0.81.5(@babel/core@7.29.7)(react@19.1.4))(react@19.1.4)':
     dependencies:
       '@ubjs/core': 0.31.0-5
       react: 19.1.4
       react-native: 0.81.5(@babel/core@7.29.7)(react@19.1.4)
       uniffi-bindgen-react-native: 0.31.0-5
 
-  '@secondts/bark@0.24.0': {}
+  '@secondts/bark@0.27.0': {}
 
   '@sinclair/typebox@0.27.12': {}
 

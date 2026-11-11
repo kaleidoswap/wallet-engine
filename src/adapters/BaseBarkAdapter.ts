@@ -343,7 +343,7 @@ export class BaseBarkAdapter implements IProtocolAdapter {
       if (!Number.isSafeInteger(request.amount) || request.amount! <= 0 || request.amount! > 2_100_000_000_000_000) {
         throw new ValidationError('An on-chain send requires positive integer satoshis', 'BARK')
       }
-      const txid = await this.wallet().sendOnchain(target, request.amount!)
+      const { txid } = await this.wallet().sendOnchain(target, request.amount!)
       return { paymentHash: txid, txid, amount: request.amount!, fee: 0, feeKnown: false, status: 'pending', timestamp: Date.now() }
     }
     if (isLightningInvoice(target)) return this.payLightning(target, request.amount)
@@ -427,7 +427,7 @@ export class BaseBarkAdapter implements IProtocolAdapter {
     if (!params.amount || params.amount <= 0) {
       throw new ValidationError('An on-chain send requires an amount in sats', 'BARK')
     }
-    const txid = await this.wallet().sendOnchain(params.address, params.amount)
+    const { txid } = await this.wallet().sendOnchain(params.address, params.amount)
     return { txid }
   }
 

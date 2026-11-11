@@ -36,13 +36,13 @@ function fixtures() {
       minBoardAmountSats: 1000n, requiredBoardConfirmations: 1 }),
     history: vi.fn().mockResolvedValue([movement]),
     newAddress: vi.fn().mockResolvedValue(ADDRESS), sync: vi.fn().mockResolvedValue(undefined),
-    validateArkoorAddress: vi.fn().mockResolvedValue(true), sendArkoorPayment: vi.fn().mockResolvedValue(undefined),
+    validateArkoorAddress: vi.fn().mockResolvedValue(true), sendArkoorPayment: vi.fn().mockResolvedValue(1),
     bolt11Invoice: vi.fn().mockResolvedValue({ invoice: INVOICE, paymentHash: TEST_PAYMENT_HASH, amountSats: 1000n }),
     payLightningInvoice: vi.fn().mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: TEST_PREIMAGE } }),
     payLightningOffer: vi.fn().mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: TEST_PREIMAGE } }),
     lightningSendState: vi.fn().mockResolvedValue({ tag: 'Unknown' }),
     lightningReceiveState: vi.fn().mockRejectedValue(new Error('unknown')),
-    sendOnchain: vi.fn().mockResolvedValue('txid'), broadcastTx: vi.fn().mockResolvedValue('claim-txid'),
+    sendOnchain: vi.fn().mockResolvedValue({ txid: 'txid' }), broadcastTx: vi.fn().mockResolvedValue('claim-txid'),
     boardFundingAddress: vi.fn().mockResolvedValue({ address: 'tb1pboard', expiryHeight: 1234, keypairIndex: 2 }),
     boardAmount: vi.fn().mockResolvedValue({ vtxoId: 'vtxo', amountSats: 1000n, txid: 'board' }),
     boardAll: vi.fn().mockResolvedValue({ vtxoId: 'vtxo', amountSats: 1000n, txid: 'board' }),
@@ -122,7 +122,7 @@ describe('native Bark adapter', () => {
 
   it('creates an amount-bound Lightning invoice and passes its description', async () => {
     expect(await adapter.createInvoice({ amount: 1000, description: 'test' })).toMatchObject({ paymentHash: TEST_PAYMENT_HASH, amount: 1000 })
-    expect(f.wallet.bolt11Invoice).toHaveBeenCalledWith(1000n, 'test', undefined)
+    expect(f.wallet.bolt11Invoice).toHaveBeenCalledWith(1000n, 'test', undefined, undefined)
   })
 
   it.each([{ amount: 0 }, { amount: 1.1 }, { amount: 1000, asset: 'USDT' },
@@ -134,7 +134,7 @@ describe('native Bark adapter', () => {
   it('verifies Lightning settlement and reports the actual persisted fee', async () => {
     expect(await adapter.sendPayment({ invoice: INVOICE })).toMatchObject({ paymentHash: TEST_PAYMENT_HASH,
       preimage: TEST_PREIMAGE, amount: 1000, fee: 2, feeKnown: true, status: 'confirmed' })
-    expect(f.wallet.payLightningInvoice).toHaveBeenCalledWith(INVOICE, undefined, false)
+    expect(f.wallet.payLightningInvoice).toHaveBeenCalledWith(INVOICE, undefined, false, undefined)
   })
 
   it('does not call a payment failed when post-payment history is unavailable', async () => {
@@ -152,13 +152,13 @@ describe('native Bark adapter', () => {
     const offer = 'lno1qcp4256ypq'
     expect(await adapter.sendPayment({ invoice: offer, amount: 1000 })).toMatchObject({ paymentHash: TEST_PAYMENT_HASH,
       preimage: TEST_PREIMAGE, amount: 1000, status: 'confirmed' })
-    expect(f.wallet.payLightningOffer).toHaveBeenCalledWith(offer, 1000n, true)
+    expect(f.wallet.payLightningOffer).toHaveBeenCalledWith(offer, 1000n, true, undefined)
     expect(f.wallet.payLightningInvoice).not.toHaveBeenCalled()
   })
 
   it('pays a fixed-amount offer at its own amount and keeps a bad proof unknown', async () => {
     expect(await adapter.sendPayment({ invoice: 'LNO1QCP4256YPQ' })).toMatchObject({ status: 'confirmed' })
-    expect(f.wallet.payLightningOffer).toHaveBeenCalledWith('LNO1QCP4256YPQ', undefined, true)
+    expect(f.wallet.payLightningOffer).toHaveBeenCalledWith('LNO1QCP4256YPQ', undefined, true, undefined)
     f.wallet.payLightningOffer.mockResolvedValue({ tag: 'Paid', inner: { paymentHash: TEST_PAYMENT_HASH, preimage: '00'.repeat(32) } })
     expect(await adapter.sendPayment({ invoice: 'lno1qcp4256ypq' })).toMatchObject({ status: 'unknown' })
   })
@@ -182,7 +182,7 @@ describe('native Bark adapter', () => {
     const invoice = bolt11Fixture({ hrp: 'lntbs', timestamp: NOW })
     await expect(adapter.sendPayment({ invoice })).rejects.toThrow()
     await adapter.sendPayment({ invoice, amount: 1000 })
-    expect(f.wallet.payLightningInvoice).toHaveBeenCalledWith(invoice, 1000n, false)
+    expect(f.wallet.payLightningInvoice).toHaveBeenCalledWith(invoice, 1000n, false, undefined)
   })
 
   it('never retries Lightning after an uncertain native error', async () => {

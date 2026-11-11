@@ -20,6 +20,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   APIs the engine uses are unchanged, and the bip39 wordlist import goes
   through the package's new `exports` map
   (`@scure/bip39/wordlists/english.js`).
+- Bark moves to 0.27 (`@secondts/bark` peer `^0.27.0`,
+  `@secondts/bark-react-native` peer `0.27.0`). `sendOnchain` returns the
+  offboard `{ txid }` (bark's `OffboardResult` narrowed at the port
+  boundary) and `sendArkoorPayment` resolves to bark's movement id. The
+  React Native backend passes bark 0.27's new positional arguments
+  (`bolt11Invoice` token/expirySecs, `payLightningInvoice` /
+  `payLightningOffer` retryForSecs) as undefined, so SDK defaults apply.
 
 ## [1.0.0-beta.85] - 2026-11-11
 
