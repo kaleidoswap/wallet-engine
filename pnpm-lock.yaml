@@ -19,7 +19,7 @@ importers:
         version: 2.4.0
       '@scure/base':
         specifier: ^2.2.0
-        version: 2.3.0
+        version: 2.4.0
       '@scure/bip32':
         specifier: ^1.5.0
         version: 1.7.0
@@ -28,7 +28,7 @@ importers:
         version: 1.6.0
       '@scure/btc-signer':
         specifier: ^2.2.0
-        version: 2.3.0
+        version: 2.4.1
       '@utexo/rgb-lib-wasm':
         specifier: ^1.0.0-beta.4
         version: 1.0.0-beta.4
@@ -70,11 +70,11 @@ importers:
         specifier: 5.0.1
         version: 5.0.1(typescript@5.9.3)
       fast-check:
-        specifier: ^4.9.0
-        version: 4.9.0
+        specifier: ^4.10.2
+        version: 4.10.2
       kaleido-sdk:
-        specifier: ^0.1.18
-        version: 0.1.18(typescript@5.9.3)
+        specifier: ^0.1.23
+        version: 0.1.23(typescript@5.9.3)
       react:
         specifier: 19.1.4
         version: 19.1.4
@@ -82,17 +82,17 @@ importers:
         specifier: 0.81.5
         version: 0.81.5(@babel/core@7.29.7)(react@19.1.4)
       tsx:
-        specifier: ^4.23.12
-        version: 4.23.12
+        specifier: ^4.23.15
+        version: 4.23.15
       typescript:
         specifier: ~5.9.3
         version: 5.9.3
       vite:
         specifier: ^7.3.1
-        version: 7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1)
+        version: 7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
       vitest:
         specifier: ^4.1.10
-        version: 4.1.11(@types/node@26.4.0)(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
+        version: 4.1.11(@types/node@26.4.0)(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
 
 packages:
 
@@ -916,6 +916,9 @@ packages:
   '@scure/base@2.3.0':
     resolution: {integrity: sha512-NsG6Y03tY6R5BUis4FdVtHVkur0U6FOzskgs9ZXNl78CUc9fkZ78HmENUle1nSOkCasDmbubmWD9qwB7mm4PZA==}
 
+  '@scure/base@2.4.0':
+    resolution: {integrity: sha512-thZ1TuJwFwBblOhgsjDKvvGirBxNp+wSvY/DR6tJBJOTDhdAAcHJ8Vbr2eFnqaxeca4+t0i9KBf+uHYGWwZORg==}
+
   '@scure/bip32@1.7.0':
     resolution: {integrity: sha512-E4FFX/N3f4B80AKWp5dP6ow+flD1LQZo/w8UnLGYZO674jS6YnYeepycOOksv+vLPSpgN35wgKgy+ybfTb2SMw==}
 
@@ -937,8 +940,8 @@ packages:
   '@scure/btc-signer@2.0.1':
     resolution: {integrity: sha512-vk5a/16BbSFZkhh1JIJ0+4H9nceZVo5WzKvJGGWiPp3sQOExeW+L53z3dI6u0adTPoE8ZbL+XEb6hEGzVZSvvQ==}
 
-  '@scure/btc-signer@2.3.0':
-    resolution: {integrity: sha512-05oEjx2l4VhT+CBGKqGqE+4R2n+XN7+z+vC5I0edzymHfmTZ8nrHvl0WGgPVaNPkOg/+elEhIB1gRROkunxCRg==}
+  '@scure/btc-signer@2.4.1':
+    resolution: {integrity: sha512-ch6h66o9nPhEoe/KciMMUJeH2MBPB8UAJI1if35Fxl6885lKTsc9YoCRqTW0/RjI0Vv9GSg1tmKtHHODyAw81g==}
 
   '@secondts/bark-react-native@0.25.0':
     resolution: {integrity: sha512-G8k3Tb7tmjyZDFrrd6EUCox/p97vUzbwHmod65G9JqYhTmA5xaimuDduNhYrFxnhi/IcQrcdttgijIbMnughww==}
@@ -1765,8 +1768,8 @@ packages:
   exponential-backoff@3.1.3:
     resolution: {integrity: sha512-ZgEeZXj30q+I0EN+CbSSpIyPaJ5HVQD18Z1m+u1FXbAeT94mr1zw50q4q6jiiC447Nl/YTcIYSAftiGqetwXCA==}
 
-  fast-check@4.9.0:
-    resolution: {integrity: sha512-7ms6T7SybUev/PQITciI0yLM2pOSFy5zpG8Ty7tQofcVaQUvrMXp6CBwqF6fThLCLOrfBtuHAtwq6Yu4XPCllg==}
+  fast-check@4.10.2:
+    resolution: {integrity: sha512-iK2f+YrcmoeGqk6fA0ea2bptcu/itMIm4NfEozq6N25+aG6h7s5HZbB/k1aV7b5w5sFLMCbbtRUsTVR+BgC3xw==}
     engines: {node: '>=12.17.0'}
 
   fast-fifo@1.3.2:
@@ -1979,8 +1982,8 @@ packages:
     engines: {node: '>=6'}
     hasBin: true
 
-  kaleido-sdk@0.1.18:
-    resolution: {integrity: sha512-+qnJMpFMZxqIS5ws0zJT8IvI5J1BzWw+MegSEO/VhVn8V1BVQsJBgsxQ+gHZkqRTvE3KEfypTJGToNB9K0uNNQ==}
+  kaleido-sdk@0.1.23:
+    resolution: {integrity: sha512-lOmqhAlatVKj+PT43As1zpRFPszd5yy93yKfhkq+tBEa+SVW4QPlJlfhQrOJTnDaSZEBI441asLXj8WRwnPTsA==}
     engines: {node: '>=18.0.0'}
 
   leven@3.1.0:
@@ -2092,8 +2095,8 @@ packages:
     engines: {node: '>=20.19.4'}
     hasBin: true
 
-  micro-packed@0.11.0:
-    resolution: {integrity: sha512-rq9RzPpmlgt3YaW2RrtCG9Q2iydX2+KZnL/Vhik8KKdsKwR5FvLXJzqp5IhXqD67XjYeZEMCrG6B28Mq9uC8Tw==}
+  micro-packed@0.11.1:
+    resolution: {integrity: sha512-agQGBnBCw8OoKQZMUxcaQPaOowdfxyEmBsq4CNAXAXCyB8KxlRG0lTl5GADJIsMEDaFb0trhXBHKYsjTWa5kuw==}
     engines: {node: '>= 20.19.0'}
 
   micro-packed@0.7.3:
@@ -2502,8 +2505,8 @@ packages:
   tslib@2.8.1:
     resolution: {integrity: sha512-oJFu94HQb+KVduSUQL7wnpmqnfmLsOA/nAh6b6EH0wCEoK0/mPeXU6c3wKDV83MkOuHPRHtSXKKU99IBazS/2w==}
 
-  tsx@4.23.12:
-    resolution: {integrity: sha512-FDf4L4sYzKtzWYhU/Xm0AQFdTjdIxNo9ElTf2mxXM6k8YMHXzYUe4yODVaXP4V9uMFbVg8c0qyBccK2OOxb45Q==}
+  tsx@4.23.15:
+    resolution: {integrity: sha512-Yiex1Ovn8z2xPpOWckIiysV1SSyRMY9BkLF++q0yKiDxCqRhosKfMg3janKkiLBwZ5c/YryloKwGZcrEmtwxKw==}
     engines: {node: '>=18.0.0'}
     hasBin: true
 
@@ -2956,7 +2959,7 @@ snapshots:
       '@babel/helper-string-parser': 7.29.7
       '@babel/helper-validator-identifier': 7.29.7
 
-  '@bitcoinerlab/descriptors-core@3.1.7(@noble/curves@2.4.0)(@noble/hashes@2.4.0)(@scure/base@2.3.0)(@scure/bip32@2.3.0)(@scure/btc-signer@2.3.0)(bip32@5.0.1(typescript@5.9.3))':
+  '@bitcoinerlab/descriptors-core@3.1.7(@noble/curves@2.4.0)(@noble/hashes@2.4.0)(@scure/base@2.4.0)(@scure/bip32@2.3.0)(@scure/btc-signer@2.4.1)(bip32@5.0.1(typescript@5.9.3))':
     dependencies:
       '@bitcoinerlab/miniscript': 2.0.0
       lodash.memoize: 4.1.2
@@ -2965,19 +2968,19 @@ snapshots:
     optionalDependencies:
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
-      '@scure/base': 2.3.0
+      '@scure/base': 2.4.0
       '@scure/bip32': 2.3.0
-      '@scure/btc-signer': 2.3.0
+      '@scure/btc-signer': 2.4.1
       bip32: 5.0.1(typescript@5.9.3)
 
   '@bitcoinerlab/descriptors-scure@3.1.7(bip32@5.0.1(typescript@5.9.3))':
     dependencies:
-      '@bitcoinerlab/descriptors-core': 3.1.7(@noble/curves@2.4.0)(@noble/hashes@2.4.0)(@scure/base@2.3.0)(@scure/bip32@2.3.0)(@scure/btc-signer@2.3.0)(bip32@5.0.1(typescript@5.9.3))
+      '@bitcoinerlab/descriptors-core': 3.1.7(@noble/curves@2.4.0)(@noble/hashes@2.4.0)(@scure/base@2.4.0)(@scure/bip32@2.3.0)(@scure/btc-signer@2.4.1)(bip32@5.0.1(typescript@5.9.3))
       '@noble/curves': 2.4.0
       '@noble/hashes': 2.4.0
-      '@scure/base': 2.3.0
+      '@scure/base': 2.4.0
       '@scure/bip32': 2.3.0
-      '@scure/btc-signer': 2.3.0
+      '@scure/btc-signer': 2.4.1
     transitivePeerDependencies:
       - bip32
       - bitcoinjs-lib
@@ -3284,7 +3287,7 @@ snapshots:
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))
-      kaleido-sdk: 0.1.18(typescript@5.9.3)
+      kaleido-sdk: 0.1.23(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
@@ -3296,7 +3299,7 @@ snapshots:
   '@kaleidorg/wdk-wallet-rln@1.0.0-beta.5(@tetherto/wdk-wallet@1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)':
     dependencies:
       '@tetherto/wdk-wallet': 1.0.0-beta.18(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)))
-      kaleido-sdk: 0.1.18(typescript@5.9.3)
+      kaleido-sdk: 0.1.23(typescript@5.9.3)
     transitivePeerDependencies:
       - typescript
 
@@ -3509,6 +3512,8 @@ snapshots:
 
   '@scure/base@2.3.0': {}
 
+  '@scure/base@2.4.0': {}
+
   '@scure/bip32@1.7.0':
     dependencies:
       '@noble/curves': 1.9.7
@@ -3551,12 +3556,12 @@ snapshots:
       '@scure/base': 2.0.0
       micro-packed: 0.8.0
 
-  '@scure/btc-signer@2.3.0':
+  '@scure/btc-signer@2.4.1':
     dependencies:
-      '@noble/curves': 2.3.0
-      '@noble/hashes': 2.3.0
-      '@scure/base': 2.3.0
-      micro-packed: 0.11.0
+      '@noble/curves': 2.4.0
+      '@noble/hashes': 2.4.0
+      '@scure/base': 2.4.0
+      micro-packed: 0.11.1
 
   '@secondts/bark-react-native@0.25.0(react-native@0.81.5(@babel/core@7.29.7)(react@19.1.4))(react@19.1.4)':
     dependencies:
@@ -3695,13 +3700,13 @@ snapshots:
       chai: 6.2.2
       tinyrainbow: 3.1.1
 
-  '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))':
+  '@vitest/mocker@4.1.11(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:
       '@vitest/spy': 4.1.11
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
 
   '@vitest/pretty-format@4.1.11':
     dependencies:
@@ -4667,7 +4672,7 @@ snapshots:
 
   exponential-backoff@3.1.3: {}
 
-  fast-check@4.9.0:
+  fast-check@4.10.2:
     dependencies:
       pure-rand: 8.4.2
 
@@ -4897,7 +4902,7 @@ snapshots:
 
   json5@2.2.3: {}
 
-  kaleido-sdk@0.1.18(typescript@5.9.3):
+  kaleido-sdk@0.1.23(typescript@5.9.3):
     dependencies:
       nostr-tools: 2.25.0(typescript@5.9.3)
       openapi-fetch: 0.15.2
@@ -5126,9 +5131,9 @@ snapshots:
       - supports-color
       - utf-8-validate
 
-  micro-packed@0.11.0:
+  micro-packed@0.11.1:
     dependencies:
-      '@scure/base': 2.3.0
+      '@scure/base': 2.4.0
 
   micro-packed@0.7.3:
     dependencies:
@@ -5602,7 +5607,7 @@ snapshots:
 
   tslib@2.8.1: {}
 
-  tsx@4.23.12:
+  tsx@4.23.15:
     dependencies:
       esbuild: 0.28.2
     optionalDependencies:
@@ -5663,7 +5668,7 @@ snapshots:
     dependencies:
       uint8array-tools: 0.0.10
 
-  vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1):
+  vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1):
     dependencies:
       esbuild: 0.28.2
       fdir: 6.5.0(picomatch@4.0.7)
@@ -5675,13 +5680,13 @@ snapshots:
       '@types/node': 26.4.0
       fsevents: 2.3.3
       terser: 5.51.2
-      tsx: 4.23.12
+      tsx: 4.23.15
       yaml: 2.9.1
 
-  vitest@4.1.11(@types/node@26.4.0)(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1)):
+  vitest@4.1.11(@types/node@26.4.0)(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)):
     dependencies:
       '@vitest/expect': 4.1.11
-      '@vitest/mocker': 4.1.11(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1))
+      '@vitest/mocker': 4.1.11(vite@7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))
       '@vitest/pretty-format': 4.1.11
       '@vitest/runner': 4.1.11
       '@vitest/snapshot': 4.1.11
@@ -5698,7 +5703,7 @@ snapshots:
       tinyexec: 1.3.0
       tinyglobby: 0.2.17
       tinyrainbow: 3.1.1
-      vite: 7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.12)(yaml@2.9.1)
+      vite: 7.3.6(@types/node@26.4.0)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 26.4.0

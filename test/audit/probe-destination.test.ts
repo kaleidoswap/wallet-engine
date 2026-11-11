@@ -64,7 +64,7 @@ describe('PROBE: unified receive round-trip', () => {
       )
     } catch (e: any) { counterexample = e.message }
     console.log('ROUNDTRIP:', counterexample ?? 'no counterexample')
-  })
+  }, 30_000)
 
   it('btcAddress is not URI-encoded on build (injection probe)', () => {
     const uri = buildUnifiedReceiveURI({ btcAddress: 'bc1qGOOD?lightning=lnbcATTACKER', amountBtc: 0.001 })

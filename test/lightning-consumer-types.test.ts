@@ -13,5 +13,6 @@ describe('Lightning adapter consumer types', () => {
       ['-p', join(workspace, 'test/fixtures/tsconfig.lightning-contract.json')],
       { cwd: workspace, stdio: 'pipe' },
     )
-  })
+    // Spawns a full tsc project over dist/ — seconds even unloaded.
+  }, 120_000)
 })
