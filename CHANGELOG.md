@@ -27,6 +27,11 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   React Native backend passes bark 0.27's new positional arguments
   (`bolt11Invoice` token/expirySecs, `payLightningInvoice` /
   `payLightningOffer` retryForSecs) as undefined, so SDK defaults apply.
+- The WDK stack develops against `@tetherto/wdk-wallet` 1.0.0-beta.26 and
+  `@tetherto/wdk-wallet-spark` 1.0.0-beta.31. The Spark WDK adapter's
+  account surface is unchanged; wdk-wallet-spark 0.31 keeps its own exact
+  nested `wdk-wallet` beta.17 / `spark-sdk` 0.10.0 pins, which the
+  adapter's dynamic-load seam already tolerates.
 
 ## [1.0.0-beta.85] - 2026-11-11
 
