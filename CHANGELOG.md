@@ -16,6 +16,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 - Dependency lockfile refresh within declared ranges (`@scure/base` 2.4.0,
   `@scure/btc-signer` 2.4.1, `fast-check` 4.10.2, `tsx` 4.23.15). Floors are
   unchanged.
+- `@scure/bip32` and `@scure/bip39` move to the 2.x line (`^2.4.0`): the
+  APIs the engine uses are unchanged, and the bip39 wordlist import goes
+  through the package's new `exports` map
+  (`@scure/bip39/wordlists/english.js`).
 
 ## [1.0.0-beta.85] - 2026-11-11
 

@@ -1,5 +1,5 @@
 import { validateMnemonic } from '@scure/bip39'
-import { wordlist } from '@scure/bip39/wordlists/english'
+import { wordlist } from '@scure/bip39/wordlists/english.js'
 import { BarkBackendError } from '../types/bark-native.js'
 import type {
   BarkReactNativeConfig, BarkBalance, BarkArkPaymentRequest, BarkArkPaymentResult, BarkWalletInfo, BarkMovement,

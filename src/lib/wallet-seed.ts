@@ -19,7 +19,7 @@
 
 import { bech32 } from '@scure/base'
 import { mnemonicToSeedSync, validateMnemonic } from '@scure/bip39'
-import { wordlist } from '@scure/bip39/wordlists/english'
+import { wordlist } from '@scure/bip39/wordlists/english.js'
 import { hexToBytes } from '@noble/hashes/utils.js'
 
 /** Decode an `nsec1…` bech32 secret into its 32 raw key bytes, or null. */
