@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.85] - 2026-11-11
+
 ### Fixed
 
 - `RgbLibWasmAdapter.sendAsset` returns `{ txid, batchTransferIdx, entropy }`
