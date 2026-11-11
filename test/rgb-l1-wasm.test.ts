@@ -202,11 +202,20 @@ describe('RgbLibWasmAdapter', () => {
     expect(sendBegin).not.toHaveBeenCalled()
   })
 
+  it('refuses an invoice that pays another recipient than the one named', async () => {
+    const sendBegin = vi.fn()
+    const adapter = connected({ sendBegin })
+    await expect(
+      adapter.sendAsset({ token: 'rgb:USDT', recipient: 'utxob:other', invoice: 'rgb:USDT/blinded', amount: 1 }),
+    ).rejects.toMatchObject({ code: 'INVALID_REQUEST' })
+    expect(sendBegin).not.toHaveBeenCalled()
+  })
+
   it('refuses an invoice for another asset', async () => {
     const sendBegin = vi.fn()
     const adapter = connected({ sendBegin })
     await expect(
-      adapter.sendAsset({ token: 'rgb:OTHER', recipient: 'x', invoice: 'rgb:USDT/blinded', amount: 1 }),
+      adapter.sendAsset({ token: 'rgb:OTHER', recipient: 'utxob:x', invoice: 'rgb:USDT/blinded', amount: 1 }),
     ).rejects.toThrow(/rgb:USDT/)
     expect(sendBegin).not.toHaveBeenCalled()
   })

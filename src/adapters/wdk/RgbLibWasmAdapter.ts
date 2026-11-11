@@ -961,6 +961,17 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       )
     }
     const target = this.parseInvoiceRecipient(invoice)
+    // A recipient id given next to the invoice is what the caller approved:
+    // it must be the one the invoice pays.
+    for (const named of [params.recipient, params.recipientId]) {
+      if (named && !isRgbInvoice(named) && named !== target.recipientId) {
+        throw new ProtocolError(
+          `Invoice pays ${target.recipientId}, not ${named}`,
+          'RGB_L1',
+          'INVALID_REQUEST',
+        )
+      }
+    }
     const token = params.token ?? params.assetId ?? target.assetId
     if (!token) throw new ProtocolError('RGB-L1 asset send requires an asset id', 'RGB_L1', 'INVALID_REQUEST')
     if (target.assetId && target.assetId !== token) {
