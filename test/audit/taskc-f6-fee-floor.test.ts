@@ -53,7 +53,7 @@ describe('AUDIT C-F6: mainnet fee floor bypass', () => {
       flush: async () => {},
       sendBegin: async (_online: any, _map: any, _donation: boolean, feeRate: bigint) => {
         seenFeeRate = feeRate
-        return 'unsigned-psbt'
+        return { psbt: 'unsigned-psbt' }
       },
       signPsbt: async () => 'signed-psbt',
       sendEnd: async () => ({ txid: 'tx' }),
@@ -67,6 +67,18 @@ describe('AUDIT C-F6: mainnet fee floor bypass', () => {
         accountXpubColored: 'xpub2',
       }),
       WasmWallet: { create: async () => fakeWallet },
+      WasmInvoice: class {
+        invoiceData() {
+          return {
+            recipientId: 'utxob:rcpt',
+            assetId: 'rgb:asset',
+            transportEndpoints: ['rpcs://proxy.example/json-rpc'],
+            publicKey: 'aa'.repeat(32),
+            encryption: 'Required',
+            expirationTimestamp: BigInt(Math.floor(Date.now() / 1000) + 86_400),
+          }
+        }
+      },
     }))
 
     const adapter = new RgbLibWasmAdapter()
@@ -75,8 +87,9 @@ describe('AUDIT C-F6: mainnet fee floor bypass', () => {
       network: 'mainnet',
       mnemonic: BIP39_TEST_VECTOR_MNEMONIC,
       indexerUrl: 'http://indexer',
+      transportEndpoints: ['rpcs://proxy.example/json-rpc'],
     } as any)
-    await adapter.sendAsset({ token: 'rgb:asset', recipient: 'utxob:rcpt', amount: 5 })
+    await adapter.sendAsset({ token: 'rgb:asset', recipient: 'rgb:asset-invoice', amount: 5 })
     expect(Number(seenFeeRate)).toBeGreaterThanOrEqual(MAINNET_FEE_FLOOR.normal)
   })
 

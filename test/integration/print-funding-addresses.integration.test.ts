@@ -111,7 +111,9 @@ describe.skipIf(!HAVE_WALLETS)('funding addresses (Alice & Bob)', () => {
         await safeDisconnect(a)
       }
     })
-  }, 180_000)
+    // Alice and Bob connect one after the other, and a mutinynet Arkade connect
+    // takes about two minutes (VTXO sync, contract rebuild).
+  }, 420_000)
 
   it('prints RGB-L1 mutinynet addresses', async () => {
     await collect('RGB_L1 · mutinynet', RGB_L1.enabled, async (w) => {

@@ -46,6 +46,22 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     expect(asRgbHtlcOperations(new RgbLibWasmAdapter())).not.toBeNull()
   })
 
+  it('refuses every HTLC step on a build without the PSBT-operation bindings', async () => {
+    const adapter = connected({})
+    const notSupported = { code: 'NOT_SUPPORTED' }
+    await expect(adapter.acceptRgbHtlcLock(LOCK)).rejects.toMatchObject(notSupported)
+    await expect(adapter.rgbHtlcPayoutAddress()).rejects.toMatchObject(notSupported)
+    await expect(
+      adapter.prepareRgbHtlcSpend({ psbt: '', assetId: ASSET, outputIndex: 1, amount: 1, inputOutpoints: [`${LOCK_TXID}:0`] }),
+    ).rejects.toMatchObject(notSupported)
+    await expect(adapter.getRgbHtlcOperation(LOCK_TXID)).rejects.toMatchObject(notSupported)
+    await expect(adapter.applyRgbHtlcOperation('op')).rejects.toMatchObject(notSupported)
+    await expect(adapter.abortRgbHtlcOperation('op')).rejects.toMatchObject(notSupported)
+    await expect(
+      adapter.fundRgbHtlcLock({ assetId: ASSET, amount: 1, recipientId: 'wvout:x', blinding: '1', htlcSat: 1000 }),
+    ).rejects.toMatchObject(notSupported)
+  })
+
   it('accepts a lock with the expected transfer, then registers the asset', async () => {
     const calls: any[] = []
     const adapter = connected({
@@ -107,7 +123,7 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
   })
 
   it('needs a transport endpoint for the payout receive', async () => {
-    const adapter = connected({}, { transportEndpoints: [] })
+    const adapter = connected({}, { transportEndpoints: [], wasmModule: { scriptBufFromRecipientId: () => '' } })
     await expect(adapter.rgbHtlcPayoutAddress()).rejects.toThrow(/transport endpoint/)
   })
 
@@ -226,9 +242,11 @@ describe('RgbLibWasmAdapter.fundRgbHtlcLock', () => {
     return connected({
       sync: async () => {},
       refresh: async () => ({}),
+      // a build that ships the PSBT-operation bindings
+      psbtOpPrepare: async () => ({}),
       sendBegin: async (_o: any, map: any, donation: any, feeRate: any, minConf: any) => {
         seen.push({ map, donation, feeRate, minConf })
-        return 'unsigned'
+        return { psbt: 'unsigned' }
       },
       signPsbt: (p: string) => `signed:${p}`,
       sendEnd: async () => ({ txid }),
@@ -267,5 +285,35 @@ describe('RgbLibWasmAdapter.fundRgbHtlcLock', () => {
 
   it('fails when the send returns no txid', async () => {
     await expect(sender([], null).fundRgbHtlcLock(FUND)).rejects.toMatchObject({ code: 'SEND_ERROR' })
+  })
+})
+
+describe('RgbLibWasmAdapter HTLC capability after connect', () => {
+  async function connectWith(wallet: Record<string, unknown>) {
+    const { registerWdkModule } = await import('../src/adapters/wdk/moduleLoader')
+    registerWdkModule('@utexo/rgb-lib-wasm', () => ({
+      init: () => {},
+      restoreKeys: () => ({ mnemonic: 'm', masterFingerprint: 'aa', accountXpubVanilla: 'x1', accountXpubColored: 'x2' }),
+      WasmWallet: { create: async () => ({ goOnline: async () => ({}), ...wallet }) },
+    }))
+    const adapter = new RgbLibWasmAdapter()
+    await adapter.connect({
+      protocol: 'RGB_L1',
+      network: 'regtest',
+      mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      indexerUrl: 'http://indexer',
+    } as any)
+    return adapter
+  }
+
+  it('is not reported on a build without the PSBT-operation bindings', async () => {
+    const adapter = await connectWith({})
+    expect(asRgbHtlcOperations(adapter)).toBeNull()
+    expect(typeof (adapter as any).fundRgbHtlcLock).toBe('undefined')
+  })
+
+  it('is reported on a build that ships them', async () => {
+    const adapter = await connectWith({ psbtOpPrepare: async () => ({}) })
+    expect(asRgbHtlcOperations(adapter)).not.toBeNull()
   })
 })

@@ -11,6 +11,23 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 - The engine develops and tests against `@kaleidorg/swap-sdk` 0.14.1, the
   current patch release. The peer range is unchanged.
+- **Breaking:** `RgbLibWasmAdapter` needs `@utexo/rgb-lib-wasm` 1.0.0-beta.4
+  (peer range `^1.0.0-beta.4`), which speaks the RGB proxy protocol 1.0 only
+  and cannot load wallets or backups saved by beta.3.
+  - `sendAsset` needs the recipient's invoice (`invoice`, or an invoice in
+    `recipient`/`recipientId`): the send copies the recipient's public key,
+    encryption and expiration from it. A bare recipient id is refused with
+    `INVALID_REQUEST`, and an invoice that expires within ten minutes with
+    `INVOICE_EXPIRED`.
+  - A send names the wallet's first transport endpoint as its own proxy, so
+    `transportEndpoints` is required to send.
+  - A witness send cannot choose its blinding.
+  - `connect` runs rgb-lib's consistency check, a full scan, unless the new
+    `skipConsistencyCheck` option is set. A store that disagrees with the chain
+    fails with `INCONSISTENT`.
+  - The HTLC methods need PSBT-operation bindings that no 1.0 build ships yet.
+    Without them they are absent after `connect`, so `asRgbHtlcOperations`
+    returns `null`.
 
 ## [1.0.0-beta.83] - 2026-11-09
 
