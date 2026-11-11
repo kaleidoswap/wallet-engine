@@ -287,3 +287,33 @@ describe('RgbLibWasmAdapter.fundRgbHtlcLock', () => {
     await expect(sender([], null).fundRgbHtlcLock(FUND)).rejects.toMatchObject({ code: 'SEND_ERROR' })
   })
 })
+
+describe('RgbLibWasmAdapter HTLC capability after connect', () => {
+  async function connectWith(wallet: Record<string, unknown>) {
+    const { registerWdkModule } = await import('../src/adapters/wdk/moduleLoader')
+    registerWdkModule('@utexo/rgb-lib-wasm', () => ({
+      init: () => {},
+      restoreKeys: () => ({ mnemonic: 'm', masterFingerprint: 'aa', accountXpubVanilla: 'x1', accountXpubColored: 'x2' }),
+      WasmWallet: { create: async () => ({ goOnline: async () => ({}), ...wallet }) },
+    }))
+    const adapter = new RgbLibWasmAdapter()
+    await adapter.connect({
+      protocol: 'RGB_L1',
+      network: 'regtest',
+      mnemonic: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
+      indexerUrl: 'http://indexer',
+    } as any)
+    return adapter
+  }
+
+  it('is not reported on a build without the PSBT-operation bindings', async () => {
+    const adapter = await connectWith({})
+    expect(asRgbHtlcOperations(adapter)).toBeNull()
+    expect(typeof (adapter as any).fundRgbHtlcLock).toBe('undefined')
+  })
+
+  it('is reported on a build that ships them', async () => {
+    const adapter = await connectWith({ psbtOpPrepare: async () => ({}) })
+    expect(asRgbHtlcOperations(adapter)).not.toBeNull()
+  })
+})

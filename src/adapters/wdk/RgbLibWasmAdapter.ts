@@ -139,6 +139,20 @@ function htlcUnsupported(): ProtocolError {
   )
 }
 
+/** The IRgbHtlcOperations methods that need the PSBT-operation bindings. */
+const HTLC_METHODS = [
+  'fundRgbHtlcLock',
+  'acceptRgbHtlcLock',
+  'rgbHtlcPayoutAddress',
+  'prepareRgbHtlcSpend',
+  'getRgbHtlcOperation',
+  'listRgbHtlcOperationsSpending',
+  'markRgbHtlcBroadcast',
+  'applyRgbHtlcOperation',
+  'provideRgbHtlcReceive',
+  'abortRgbHtlcOperation',
+] as const
+
 /** The recipient fields a proxy protocol 1.0 send copies from the invoice. */
 interface InvoiceRecipient {
   recipientId: string
@@ -249,6 +263,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // Not reentrant: an op starting mid-flight corrupts thread-locals and panics
     // ("Lazy instance poisoned"). Queue every wallet call so they never overlap.
     this.account = serializeWasmAccount(rawWallet)
+    this.exposeHtlcOperations(typeof rawWallet.psbtOpPrepare === 'function')
     const skipConsistencyCheck = cfg.skipConsistencyCheck ?? false
     try {
       this.online = await this.account.goOnline({
@@ -866,6 +881,17 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.requireHtlcBinding('psbtOpAbort')
     await this.account.psbtOpAbort(this.online, operationId)
     await this.flushState()
+  }
+
+  /**
+   * Hide the HTLC methods on a build without their bindings, so capability
+   * probes (`asRgbHtlcOperations`, a host's method check) report them missing.
+   */
+  private exposeHtlcOperations(available: boolean): void {
+    for (const name of HTLC_METHODS) {
+      if (available) delete (this as Record<string, unknown>)[name]
+      else Object.defineProperty(this, name, { value: undefined, configurable: true, writable: true })
+    }
   }
 
   private requireHtlcBinding(name: string): void {
