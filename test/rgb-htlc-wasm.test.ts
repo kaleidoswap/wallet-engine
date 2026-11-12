@@ -1,18 +1,29 @@
 import { describe, it, expect } from 'vitest'
 import { base64, hex } from '@scure/base'
-import { Transaction, OutScript, p2wpkh } from '@scure/btc-signer'
+import { Transaction, OutScript, p2wpkh, Address, TEST_NETWORK } from '@scure/btc-signer'
 import { RgbLibWasmAdapter } from '../src/adapters/wdk/RgbLibWasmAdapter'
 import { asRgbHtlcOperations } from '../src/adapters/IProtocolAdapter'
 
 const ASSET = 'rgb:2dkSTbr-jFhznbPmo-TQafzswCN-av4gTsJjX-ttx6CNou5-M98k8Zd'
 const LOCK_TXID = 'aa'.repeat(32)
+const BtcAddressOf = (address: string) => Address({ ...TEST_NETWORK, bech32: 'bcrt' }).decode(address)
 const PUBKEY = hex.decode('0279be667ef9dcbbac55a06295ce870b07029bfcdb2dce28d959f2815b16f81798')
+
+/** Like the adapter's serializing wrapper: every account call returns a promise. */
+function asyncAccount(account: Record<string, any>): Record<string, any> {
+  return Object.fromEntries(
+    Object.entries(account).map(([name, fn]) => [
+      name,
+      typeof fn === 'function' ? (...args: any[]) => Promise.resolve().then(() => fn(...args)) : fn,
+    ]),
+  )
+}
 
 function connected(account: Record<string, any>, extra: Record<string, any> = {}) {
   const adapter = new RgbLibWasmAdapter()
   Object.assign(adapter as any, {
     connected: true,
-    account,
+    account: asyncAccount(account),
     online: { _online: true },
     network: 'regtest',
     rgbNetwork: 'Regtest',
@@ -33,12 +44,13 @@ function coloredPsbt(): { psbt: string; txid: string } {
 
 const LOCK = {
   recipientId: 'wvout:abc',
-  consignmentEndpoint: 'rpcs://proxy.example/json-rpc',
+  consignment: 'Y29uc2lnbm1lbnQ=',
   blinding: '12345678901234567890',
   minConfirmations: 1,
   assetId: ASSET,
   amount: 5_000_000,
   lockTxid: LOCK_TXID,
+  lockVout: 1,
 }
 
 describe('RgbLibWasmAdapter HTLC operations', () => {
@@ -62,22 +74,23 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     ).rejects.toMatchObject(notSupported)
   })
 
-  it('accepts a lock with the expected transfer, then registers the asset', async () => {
+  it('accepts a handed-over lock with the expected transfer, then registers the asset', async () => {
     const calls: any[] = []
     const adapter = connected({
-      fetchAndAcceptTransferByRecipientId: async (...args: any[]) => {
-        calls.push(['fetch', ...args])
+      acceptHtlcConsignment: async (...args: any[]) => {
+        calls.push(['accept', ...args])
         return { consignment: 'c0ffee', assignments: [{ Fungible: 5_000_000 }] }
       },
       saveNewAsset: async (...args: any[]) => calls.push(['save', ...args]),
     })
     expect(await adapter.acceptRgbHtlcLock(LOCK)).toEqual({ status: 'accepted' })
     expect(calls[0]).toEqual([
-      'fetch',
+      'accept',
       { _online: true },
+      LOCK.consignment,
+      LOCK_TXID,
+      1,
       'wvout:abc',
-      'wvout:abc',
-      LOCK.consignmentEndpoint,
       LOCK.blinding,
       1,
       { assetId: ASSET, assetSchema: 'Nia', assignment: { Fungible: 5_000_000 } },
@@ -85,10 +98,23 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     expect(calls[1]).toEqual(['save', { _online: true }, 'c0ffee', LOCK_TXID])
   })
 
+  it.each([
+    ['no consignment', { consignment: '' }],
+    ['a negative vout', { lockVout: -1 }],
+    ['a fractional vout', { lockVout: 0.5 }],
+  ])('refuses a lock with %s before calling rgb-lib', async (_label, patch) => {
+    const adapter = connected({
+      acceptHtlcConsignment: async () => {
+        throw new Error('must not be called')
+      },
+    })
+    await expect(adapter.acceptRgbHtlcLock({ ...LOCK, ...patch })).rejects.toMatchObject({ code: 'INVALID_PARAMS' })
+  })
+
   it('reports a lock without enough confirmations as awaiting', async () => {
     let saved = false
     const adapter = connected({
-      fetchAndAcceptTransferByRecipientId: async () => {
+      acceptHtlcConsignment: async () => {
         throw 'Insufficient confirmations: needed 1, got 0'
       },
       saveNewAsset: async () => {
@@ -101,7 +127,7 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
 
   it('refuses a lock that assigns a different amount', async () => {
     const adapter = connected({
-      fetchAndAcceptTransferByRecipientId: async () => ({ consignment: 'c0', assignments: [{ Fungible: 1 }] }),
+      acceptHtlcConsignment: async () => ({ consignment: 'c0', assignments: [{ Fungible: 1 }] }),
       saveNewAsset: async () => {
         throw new Error('must not save')
       },
@@ -109,22 +135,29 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     await expect(adapter.acceptRgbHtlcLock(LOCK)).rejects.toThrow(/expected 5000000/)
   })
 
-  it('turns a witness receive into a payout address on the wallet network', async () => {
-    const script = p2wpkh(PUBKEY).script
+  it('pays the HTLC out to a fresh colored address, with no receive', async () => {
+    const address = 'bcrt1qw508d6qejxtdg4y5r3zarvary0c5xw7kygt080'
+    const seen: any[] = []
     const adapter = connected(
       {
-        witnessReceive: async () => ({ invoice: 'rgb:inv', recipientId: 'bcrt:utxob:x', batchTransferIdx: 3 }),
+        getColoredAddress: () => address,
+        witnessReceive: async () => {
+          throw new Error('must not open a receive')
+        },
       },
-      { wasmModule: { scriptBufFromRecipientId: () => hex.encode(script) } },
+      {
+        transportEndpoints: [],
+        wasmModule: {
+          recipientIdFromScriptBuf: (scriptHex: string, network: string) => {
+            seen.push([scriptHex, network])
+            return 'bcrt:wvout:payout'
+          },
+        },
+      },
     )
     const out = await adapter.rgbHtlcPayoutAddress({ assetId: ASSET })
-    expect(out.recipientId).toBe('bcrt:utxob:x')
-    expect(out.address.startsWith('bcrt1q')).toBe(true)
-  })
-
-  it('needs a transport endpoint for the payout receive', async () => {
-    const adapter = connected({}, { transportEndpoints: [], wasmModule: { scriptBufFromRecipientId: () => '' } })
-    await expect(adapter.rgbHtlcPayoutAddress()).rejects.toThrow(/transport endpoint/)
+    expect(out).toEqual({ address, recipientId: 'bcrt:wvout:payout' })
+    expect(seen).toEqual([[hex.encode(OutScript.encode(BtcAddressOf(address))), 'Regtest']])
   })
 
   it('colors the spend with the whole amount on the payout output and never expires it', async () => {
@@ -194,21 +227,6 @@ describe('RgbLibWasmAdapter HTLC operations', () => {
     expect(spending.map((o) => [o.operationId, o.broadcast])).toEqual([['op1', 'observed']])
   })
 
-  it('treats a repeated handover as done once the payout receive moved on', async () => {
-    const adapter = connected({
-      psbtOpProvideReceiveConsignment: async () => {
-        throw 'Cannot provide out-of-band consignment: already provided'
-      },
-      listTransfers: async () => [{ txid: 'dd'.repeat(32), kind: 'ReceiveWitness', status: 'WaitingConfirmations' }],
-    })
-    expect(
-      await adapter.provideRgbHtlcReceive({ operationId: 'op1', assetId: ASSET, txid: 'dd'.repeat(32) }),
-    ).toEqual({ status: 'alreadyProvided' })
-    await expect(
-      adapter.provideRgbHtlcReceive({ operationId: 'op1', assetId: ASSET, txid: 'ee'.repeat(32) }),
-    ).rejects.toMatch(/Cannot provide/)
-  })
-
   it('passes the online handle to apply and abort', async () => {
     const calls: any[] = []
     const adapter = connected({
@@ -234,41 +252,56 @@ describe('RgbLibWasmAdapter.fundRgbHtlcLock', () => {
     recipientId: 'wvout:maker',
     blinding: '18446744073709551557',
     htlcSat: 1_000,
-    transportEndpoints: ['rpcs://maker.example/json-rpc'],
     minConfirmations: 1,
   }
+  const HANDED = {
+    consignment: 'Y29uc2lnbm1lbnQ=',
+    txid: 'lock-txid',
+    recipients: [{ recipientId: 'wvout:maker', vout: 2 }],
+  }
 
-  function sender(seen: any[], txid: unknown = 'lock-txid') {
+  function sender(seen: any[], txid: unknown = 'lock-txid', handed: unknown = HANDED) {
     return connected({
       sync: async () => {},
       refresh: async () => ({}),
-      // a build that ships the PSBT-operation bindings
-      psbtOpPrepare: async () => ({}),
-      sendBegin: async (_o: any, map: any, donation: any, feeRate: any, minConf: any) => {
-        seen.push({ map, donation, feeRate, minConf })
+      sendBegin: async (_o: any, map: any, donation: any, feeRate: any, minConf: any, _exp: any, senderEndpoint: any) => {
+        seen.push({ map, donation, feeRate, minConf, senderEndpoint })
         return { psbt: 'unsigned' }
       },
       signPsbt: (p: string) => `signed:${p}`,
       sendEnd: async () => ({ txid }),
+      getOutOfBandTransfer: (t: string, asset: string) => (t === 'lock-txid' && asset === ASSET ? handed : null),
     })
   }
 
-  it('passes the u64 blinding to rgb-lib unrounded and returns the txid', async () => {
+  it('sends an out-of-band donation with the u64 blinding unrounded and hands its consignment back', async () => {
     const seen: any[] = []
-    expect(await sender(seen).fundRgbHtlcLock(FUND)).toEqual({ txid: 'lock-txid' })
+    expect(await sender(seen).fundRgbHtlcLock(FUND)).toEqual({
+      txid: 'lock-txid',
+      vout: 2,
+      consignment: 'Y29uc2lnbm1lbnQ=',
+    })
     const recipient = seen[0].map[ASSET][0]
     expect(recipient.recipientId).toBe('wvout:maker')
     expect(recipient.assignment).toEqual({ Fungible: 5_000_000 })
     expect(recipient.witnessData).toEqual({ amountSat: '1000', amount_sat: '1000', blinding: '18446744073709551557' })
-    expect(recipient.transportEndpoints).toEqual(['rpcs://maker.example/json-rpc'])
-    expect(seen[0].donation).toBe(false)
+    expect(recipient.transportEndpoints).toEqual([])
+    expect(seen[0].donation).toBe(true)
+    expect(seen[0].senderEndpoint).toBeNull()
     expect(seen[0].minConf).toBe(1)
   })
 
-  it('falls back to the wallet transport endpoints', async () => {
+  it('needs no transport endpoint of its own', async () => {
     const seen: any[] = []
-    await sender(seen).fundRgbHtlcLock({ ...FUND, transportEndpoints: [] })
-    expect(seen[0].map[ASSET][0].transportEndpoints).toEqual(['rpcs://proxy.example/json-rpc'])
+    const adapter = sender(seen)
+    ;(adapter as any).transportEndpoints = []
+    await expect(adapter.fundRgbHtlcLock(FUND)).resolves.toMatchObject({ vout: 2 })
+  })
+
+  it('names the broadcast lock when its consignment cannot be read back', async () => {
+    await expect(
+      sender([], 'lock-txid', { ...HANDED, recipients: [{ recipientId: 'wvout:other', vout: 1 }] }).fundRgbHtlcLock(FUND),
+    ).rejects.toMatchObject({ code: 'SEND_ERROR', message: expect.stringContaining('lock-txid') })
   })
 
   it.each([
@@ -312,8 +345,17 @@ describe('RgbLibWasmAdapter HTLC capability after connect', () => {
     expect(typeof (adapter as any).fundRgbHtlcLock).toBe('undefined')
   })
 
-  it('is reported on a build that ships them', async () => {
+  it('is not reported on a build without the out-of-band bindings', async () => {
     const adapter = await connectWith({ psbtOpPrepare: async () => ({}) })
+    expect(asRgbHtlcOperations(adapter)).toBeNull()
+  })
+
+  it('is reported on a build that ships them', async () => {
+    const adapter = await connectWith({
+      psbtOpPrepare: async () => ({}),
+      acceptHtlcConsignment: async () => ({}),
+      getOutOfBandTransfer: () => ({}),
+    })
     expect(asRgbHtlcOperations(adapter)).not.toBeNull()
   })
 })

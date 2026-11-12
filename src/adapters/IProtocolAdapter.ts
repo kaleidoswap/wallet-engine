@@ -253,7 +253,8 @@ export interface IRgbHtlcOperations {
    * Lock `amount` of `assetId` in a swap HTLC: a witness send to the
    * counterparty's `recipientId` on an output of `htlcSat`, sealed with its
    * `blinding` (a u64 as a decimal string, passed to rgb-lib unrounded).
-   * Transport endpoints default to the wallet's own.
+   * No proxy carries it: hand the returned `consignment` (base64), `txid` and
+   * `vout` to the counterparty.
    */
   fundRgbHtlcLock(params: {
     assetId: string
@@ -261,26 +262,30 @@ export interface IRgbHtlcOperations {
     recipientId: string
     blinding: string
     htlcSat: number
-    transportEndpoints?: string[]
     minConfirmations?: number
     feeRate?: number
-  }): Promise<{ txid: string }>
+  }): Promise<{ txid: string; vout: number; consignment: string }>
   /**
-   * Accept the counterparty's lock consignment for `recipientId` and register the
-   * asset. `awaitingConfirmations` while the lock has fewer than `minConfirmations`.
+   * Accept the counterparty's lock consignment (base64, received out of band)
+   * paying `recipientId` on `lockTxid:lockVout`, and register the asset.
+   * `awaitingConfirmations` while the lock has fewer than `minConfirmations`.
    * Fails if the lock assigns anything other than `amount` of `assetId`.
    */
   acceptRgbHtlcLock(params: {
     recipientId: string
-    consignmentEndpoint: string
+    consignment: string
     /** Lock blinding as a decimal string (u64). */
     blinding: string
     minConfirmations: number
     assetId: string
     amount: number
     lockTxid: string
+    lockVout: number
   }): Promise<{ status: 'accepted' | 'awaitingConfirmations' }>
-  /** A fresh witness receive of this wallet, as an address, for an HTLC payout. */
+  /**
+   * A fresh colored address of this wallet for an HTLC payout. The payout lands
+   * as the wallet's own allocation once the spend is applied: no receive to settle.
+   */
   rgbHtlcPayoutAddress(params?: { assetId?: string }): Promise<{ address: string; recipientId: string }>
   /**
    * Color `psbt` (base64): the transition moves every unit of `assetId` held on
@@ -303,13 +308,6 @@ export interface IRgbHtlcOperations {
   markRgbHtlcBroadcast(operationId: string): Promise<void>
   /** After the broadcast: move the spend into the wallet's RGB state. */
   applyRgbHtlcOperation(operationId: string): Promise<void>
-  /**
-   * Hand the applied spend's consignment to the wallet's own receive so the payout
-   * settles. `alreadyProvided` when an earlier call already did it.
-   */
-  provideRgbHtlcReceive(params: { operationId: string; assetId: string; txid: string }): Promise<{
-    status: 'provided' | 'alreadyProvided'
-  }>
   /** Drop an operation whose spend was never broadcast. */
   abortRgbHtlcOperation(operationId: string): Promise<void>
   /** Finalize the wallet's own signed inputs of a PSBT (base64). */

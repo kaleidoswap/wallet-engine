@@ -7,6 +7,20 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** RGB-L1 HTLC locks hand their consignment over out of band,
+  as makers on rgb-lib 0.11.2 (RGB proxy protocol 1.0) expect.
+  `fundRgbHtlcLock` sends an out-of-band donation and returns
+  `{ txid, vout, consignment }` for the host to hand to the counterparty;
+  it no longer takes `transportEndpoints`. `acceptRgbHtlcLock` takes the
+  received `consignment` (base64) and `lockVout` instead of a
+  `consignmentEndpoint`. `rgbHtlcPayoutAddress` returns a colored address of
+  the wallet, so the payout is the wallet's own once the spend is applied,
+  and `provideRgbHtlcReceive` is gone. The HTLC methods are exposed only on
+  an rgb-lib-wasm build with `acceptHtlcConsignment`, `getOutOfBandTransfer`,
+  `getColoredAddress` and `recipientIdFromScriptBuf`.
+
 ## [1.0.0-beta.88] - 2026-11-12
 
 ### Changed

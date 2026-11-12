@@ -128,8 +128,8 @@ function nowSeconds(): number {
 }
 
 /**
- * HTLC locks need the PSBT-operation bindings of our rgb-lib-wasm fork, which
- * the proxy protocol 1.0 builds do not ship yet.
+ * HTLC locks need the PSBT-operation and out-of-band bindings of our
+ * rgb-lib-wasm fork; upstream builds do not ship them.
  */
 function htlcUnsupported(): ProtocolError {
   return new ProtocolError(
@@ -149,7 +149,6 @@ const HTLC_METHODS = [
   'listRgbHtlcOperationsSpending',
   'markRgbHtlcBroadcast',
   'applyRgbHtlcOperation',
-  'provideRgbHtlcReceive',
   'abortRgbHtlcOperation',
 ] as const
 
@@ -263,7 +262,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // Not reentrant: an op starting mid-flight corrupts thread-locals and panics
     // ("Lazy instance poisoned"). Queue every wallet call so they never overlap.
     this.account = serializeWasmAccount(rawWallet)
-    this.exposeHtlcOperations(typeof rawWallet.psbtOpPrepare === 'function')
+    this.exposeHtlcOperations(
+      typeof rawWallet.psbtOpPrepare === 'function' &&
+        typeof rawWallet.acceptHtlcConsignment === 'function' &&
+        typeof rawWallet.getOutOfBandTransfer === 'function',
+    )
     const skipConsistencyCheck = cfg.skipConsistencyCheck ?? false
     try {
       this.online = await this.account.goOnline({
@@ -675,12 +678,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     recipientId: string
     blinding: string
     htlcSat: number
-    transportEndpoints?: string[]
     minConfirmations?: number
     feeRate?: number
-  }): Promise<{ txid: string }> {
+  }): Promise<{ txid: string; vout: number; consignment: string }> {
     this.assertConnected()
-    this.requireHtlcBinding('psbtOpPrepare')
+    this.requireHtlcBinding('getOutOfBandTransfer')
     if (!params.assetId || !params.recipientId) {
       throw new ProtocolError('HTLC lock needs an asset id and a recipient id', 'RGB_L1', 'INVALID_PARAMS')
     }
@@ -694,51 +696,70 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     if (!/^\d{1,20}$/.test(params.blinding) || BigInt(params.blinding) > U64_MAX) {
       throw new ProtocolError('HTLC lock blinding must be a u64 decimal string', 'RGB_L1', 'INVALID_PARAMS')
     }
-    const transportEndpoints =
-      params.transportEndpoints && params.transportEndpoints.length > 0
-        ? params.transportEndpoints
-        : this.transportEndpoints
     const sat = String(params.htlcSat)
     const witnessData = { amountSat: sat, amount_sat: sat, blinding: params.blinding }
+    // No transport endpoint: an out-of-band donation, whose consignment the
+    // counterparty gets from the caller (RGB proxy 1.0 has no lookup by recipient id).
     const recipient = {
       recipientId: params.recipientId,
       recipient_id: params.recipientId,
       assignment: { Fungible: params.amount },
       witnessData,
       witness_data: witnessData,
-      transportEndpoints,
-      transport_endpoints: transportEndpoints,
+      transportEndpoints: [],
+      transport_endpoints: [],
     }
     const result = await this.sendRecipients({ [params.assetId]: [recipient] }, {
       feeRate: params.feeRate,
       minConfirmations: params.minConfirmations,
+      donation: true,
+      outOfBand: true,
     })
     const txid = typeof result?.txid === 'string' ? result.txid : ''
     if (!txid) throw new ProtocolError('HTLC lock send returned no txid', 'RGB_L1', 'SEND_ERROR')
-    return { txid }
+    // The lock is broadcast from here on: an error must name it, so the host
+    // does not fund a second one.
+    const transfer: any = await this.account.getOutOfBandTransfer(txid, params.assetId).catch(() => null)
+    const paid = (transfer?.recipients ?? []).find((r: any) => r?.recipientId === params.recipientId)
+    if (typeof transfer?.consignment !== 'string' || !Number.isSafeInteger(paid?.vout)) {
+      throw new ProtocolError(
+        `HTLC lock ${txid} is broadcast but its out-of-band consignment is missing`,
+        'RGB_L1',
+        'SEND_ERROR',
+      )
+    }
+    return { txid, vout: paid.vout, consignment: transfer.consignment }
   }
 
   async acceptRgbHtlcLock(params: {
     recipientId: string
-    consignmentEndpoint: string
+    consignment: string
     blinding: string
     minConfirmations: number
     assetId: string
     amount: number
     lockTxid: string
+    lockVout: number
   }): Promise<{ status: 'accepted' | 'awaitingConfirmations' }> {
     this.assertConnected()
-    this.requireHtlcBinding('fetchAndAcceptTransferByRecipientId')
+    this.requireHtlcBinding('acceptHtlcConsignment')
     if (!Number.isSafeInteger(params.amount) || params.amount <= 0) {
       throw new ProtocolError('HTLC lock amount must be a positive integer', 'RGB_L1', 'INVALID_PARAMS')
     }
+    if (!params.consignment) {
+      throw new ProtocolError('HTLC lock consignment is missing', 'RGB_L1', 'INVALID_PARAMS')
+    }
+    if (!Number.isSafeInteger(params.lockVout) || params.lockVout < 0) {
+      throw new ProtocolError('HTLC lock vout must be a non-negative integer', 'RGB_L1', 'INVALID_PARAMS')
+    }
     let accepted: any
     try {
-      accepted = await this.account.fetchAndAcceptTransferByRecipientId(
+      accepted = await this.account.acceptHtlcConsignment(
         this.online,
+        params.consignment,
+        params.lockTxid,
+        params.lockVout,
         params.recipientId,
-        params.recipientId,
-        params.consignmentEndpoint,
         params.blinding,
         params.minConfirmations,
         { assetId: params.assetId, assetSchema: 'Nia', assignment: { Fungible: params.amount } },
@@ -760,18 +781,17 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     return { status: 'accepted' }
   }
 
-  async rgbHtlcPayoutAddress(params?: { assetId?: string }): Promise<{ address: string; recipientId: string }> {
+  async rgbHtlcPayoutAddress(_params?: { assetId?: string }): Promise<{ address: string; recipientId: string }> {
     this.assertConnected()
-    if (typeof this.wasmModule?.scriptBufFromRecipientId !== 'function') throw htlcUnsupported()
-    if (this.transportEndpoints.length === 0) {
-      // rgb-lib-wasm settles the payout receive through its transport endpoint.
-      throw new ProtocolError('An HTLC payout needs a transport endpoint', 'RGB_L1', 'CONFIG')
-    }
-    const receive = await this.receiveRgb({ assetId: params?.assetId ?? null, witness: true, minConfirmations: 1 })
-    const scriptHex: string | null = this.wasmModule.scriptBufFromRecipientId(receive.recipientId)
-    if (!scriptHex) throw new ProtocolError('Witness receive returned no script', 'RGB_L1', 'INTERNAL')
-    const address = BtcAddress(btcNetworkFor(this.rgbNetwork)).encode(OutScript.decode(hex.decode(scriptHex)))
-    return { address, recipientId: receive.recipientId }
+    this.requireHtlcBinding('getColoredAddress')
+    if (typeof this.wasmModule?.recipientIdFromScriptBuf !== 'function') throw htlcUnsupported()
+    // A colored address of the wallet, not a receive: the applied spend makes
+    // the payout the wallet's own allocation with no consignment hand-over.
+    const address: string = await this.account.getColoredAddress()
+    const script = OutScript.encode(BtcAddress(btcNetworkFor(this.rgbNetwork)).decode(address))
+    const recipientId: string = this.wasmModule.recipientIdFromScriptBuf(hex.encode(script), String(this.rgbNetwork))
+    await this.flushState()
+    return { address, recipientId }
   }
 
   async prepareRgbHtlcSpend(params: {
@@ -841,39 +861,6 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.requireHtlcBinding('psbtOpApply')
     await this.account.psbtOpApply(this.online, operationId)
     await this.flushState()
-  }
-
-  async provideRgbHtlcReceive(params: { operationId: string; assetId: string; txid: string }): Promise<{
-    status: 'provided' | 'alreadyProvided'
-  }> {
-    this.assertConnected()
-    this.requireHtlcBinding('psbtOpProvideReceiveConsignment')
-    try {
-      await this.account.psbtOpProvideReceiveConsignment(this.online, params.operationId, params.assetId)
-    } catch (e) {
-      // Repeating a handover that already happened is refused; the receive of
-      // that txid having moved past waiting-for-consignment is the proof.
-      if (wasmErrorStartsWith(e, 'Cannot provide out-of-band consignment') && (await this.receivedHtlcPayout(params))) {
-        return { status: 'alreadyProvided' }
-      }
-      throw e
-    }
-    await this.flushState()
-    return { status: 'provided' }
-  }
-
-  private async receivedHtlcPayout(params: { assetId: string; txid: string }): Promise<boolean> {
-    const raw: any = await this.account.listTransfers({ id: params.assetId })
-    const rows: any[] = Array.isArray(raw) ? raw : (raw?.transfers ?? [])
-    return rows.some((t) => {
-      const kind = String(t?.kind ?? '')
-      const status = String(t?.status ?? '')
-      return (
-        t?.txid === params.txid &&
-        kind.startsWith('Receive') &&
-        (status === 'WaitingConfirmations' || status === 'Settled')
-      )
-    })
   }
 
   async abortRgbHtlcOperation(operationId: string): Promise<void> {
@@ -1035,11 +1022,12 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   private async sendRecipients(
     recipientMap: Record<string, Record<string, unknown>[]>,
-    opts: { feeRate?: number; minConfirmations?: number; donation?: boolean },
+    opts: { feeRate?: number; minConfirmations?: number; donation?: boolean; outOfBand?: boolean },
   ): Promise<any> {
-    // Recipients post their ACK to, and fetch the signed TX from, the sender's proxy.
-    const senderEndpoint = this.transportEndpoints[0]
-    if (!senderEndpoint) {
+    // Recipients post their ACK to, and fetch the signed TX from, the sender's
+    // proxy; an out-of-band send involves no proxy.
+    const senderEndpoint = opts.outOfBand ? null : this.transportEndpoints[0]
+    if (!opts.outOfBand && !senderEndpoint) {
       throw new ProtocolError('An RGB-L1 send needs a transport endpoint of its own', 'RGB_L1', 'CONFIG')
     }
     const expirationTimestamp = operationExpiration(recipientMap, opts.donation ?? false)
