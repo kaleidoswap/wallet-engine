@@ -216,7 +216,7 @@ class SparkClientManager {
   }
 
   /** Return the active wallet instance. Throws if initialize() has not run. */
-  getWallet(): any {
+  getWallet(): SparkWallet {
     if (!this.wallet) {
       throw new Error('SparkWallet not initialized. Call initialize() first.')
     }

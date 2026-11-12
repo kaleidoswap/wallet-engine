@@ -3,7 +3,7 @@
  *
  * Both Spark adapters push `limit`/`offset` into a PER-LEG RPC — the BTC leg's
  * `getTransfers(limit, offset)` / `getTransfers({ limit, skip })` and the token
- * leg's `queryTokenTransactions({ pageSize: limit })` — then merge the two lists
+ * leg's `queryTokenTransactionsWithFilters({ pageSize: limit })` — then merge the two lists
  * and never slice the result. Two legs each returning up to `limit` rows merge to
  * up to twice that, and the recorded-send / synthesized-offline-record paths are
  * not paged at all.
@@ -77,7 +77,7 @@ function walletWith(n: number) {
     getSparkAddress: async () => 'spark1self',
     getBalance: async () => ({ balance: 0n, tokenBalances: new Map() }),
     // Token leg unavailable — its failure is swallowed, leaving the BTC leg only.
-    queryTokenTransactions: async () => {
+    queryTokenTransactionsWithFilters: async () => {
       throw new Error('token leg unavailable')
     },
   }
