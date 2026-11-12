@@ -12,7 +12,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: [20, 22]
+        node-version: [22, 24]
     steps:
       # Full history: `check:audit-index` resolves each audit test's fix commit
       # with `git log --diff-filter=A`, which sees nothing in a depth-1 clone
