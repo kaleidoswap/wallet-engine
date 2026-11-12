@@ -7,6 +7,18 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `@buildonspark/spark-sdk` moves to 0.15 (peer `^0.15.0`).
+  The evaluation recorded under beta.86 misread the node bundle's
+  minified exports as a service-object rewrite — the wallet's flat
+  method surface survives intact in 0.15. One API change reaches the
+  engine: the owner-keyed token query is now
+  `queryTokenTransactionsWithFilters`, keyed by the wallet's spark
+  address instead of `ownerPublicKeys`. The adapter's wallet seam is
+  typed against the SDK now, so future drift fails the build instead of
+  surfacing at runtime.
+
 ## [1.0.0-beta.87] - 2026-11-12
 
 ### Changed

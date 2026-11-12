@@ -106,7 +106,7 @@
   },
   "peerDependencies": {
     "@arkade-os/sdk": "^0.4.72",
-    "@buildonspark/spark-sdk": "^0.7.10",
+    "@buildonspark/spark-sdk": "^0.15.0",
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/swap-sdk": "^0.12.0 || ^0.14.0",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.3",
@@ -158,7 +158,7 @@
   },
   "devDependencies": {
     "@arkade-os/sdk": "^0.4.74",
-    "@buildonspark/spark-sdk": "^0.7.10",
+    "@buildonspark/spark-sdk": "^0.15.0",
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/swap-sdk": "^0.14.1",
     "@kaleidorg/wdk-protocol-swap-kaleidoswap": "^1.0.0-beta.3",
