@@ -7,6 +7,17 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- TypeScript moves to 7.0.2 (`~7.0.2`), the native-compiler line. The
+  emitted JavaScript is byte-identical; declaration differences are
+  cosmetic (literal quote style, member order, optional properties
+  canonicalized without `| undefined`). `check:bark-types` gains
+  `--ignoreConfig` (TS 7 refuses flag-mode compilation next to a
+  tsconfig unless told to ignore it) and `prepare.mjs` resolves the tsc
+  binary through `typescript/package.json`, because TS 7's `exports`
+  map no longer exposes `./bin/tsc`.
+
 ## [1.0.0-beta.87] - 2026-11-12
 
 ### Changed

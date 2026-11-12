@@ -40,5 +40,10 @@ const run = (cmd, args) => {
   }
 }
 
-run(process.execPath, [require.resolve('typescript/bin/tsc')])
+// TS7's `exports` map does not expose `./bin/tsc`, so resolve through the
+// one subpath it does export and join — require.resolve would throw here.
+const tscBin = require
+  .resolve('typescript/package.json')
+  .replace(/package\.json$/, 'bin/tsc')
+run(process.execPath, [tscBin])
 run(process.execPath, ['scripts/fix-esm-extensions.mjs'])
