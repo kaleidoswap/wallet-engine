@@ -7,6 +7,14 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- Test tooling moves to vitest 5 / vite 8. The suite passes unchanged
+  (1439 tests); the CI drops its Node 20 lane (EOL, and vitest 5 needs
+  Node >= 22.12) for Node 22 and 24. The React dev pin (bark-native
+  type-check only) moves to 19.3.1, still within react-native 0.81's
+  `^19.1.0` peer.
+
 ## [1.0.0-beta.86] - 2026-11-11
 
 ### Changed
