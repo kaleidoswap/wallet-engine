@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.88] - 2026-11-12
+
 ### Changed
 
 - **Breaking:** `@buildonspark/spark-sdk` moves to 0.15 (peer `^0.15.0`).
