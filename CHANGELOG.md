@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.87] - 2026-11-12
+
 ### Changed
 
 - Test tooling moves to vitest 5 / vite 8. The suite passes unchanged
