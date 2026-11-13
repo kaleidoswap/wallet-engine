@@ -49,17 +49,21 @@ concurrency:
   group: integration-alice-bob
   cancel-in-progress: false
 
+permissions:
+  # Least privilege everywhere: npm publishes via NPM_TOKEN, not GITHUB_TOKEN.
+  contents: read
+
 jobs:
   integration:
     name: Live integration (Node 22)
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Node 22, NOT 24: @utexo/rgb-lib's SWIG bindings use v8 APIs removed in
       # Node 24 (FunctionCallbackInfo::Holder) and fail to compile there.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: 22
 
