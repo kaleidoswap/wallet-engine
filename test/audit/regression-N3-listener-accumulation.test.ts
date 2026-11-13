@@ -61,7 +61,8 @@ vi.mock('@arkade-os/sdk', () => {
     IndexedDBWalletRepository: FakeRepo,
     IndexedDBContractRepository: FakeRepo,
     VtxoManager: class {},
-    RestDelegatorProvider: class {
+    EsploraProvider: class {},
+    RestDelegateProvider: class {
       constructor(_url: string) {}
     },
   }

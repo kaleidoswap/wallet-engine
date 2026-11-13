@@ -79,13 +79,13 @@ describe('resolveArkadeLifecycleSettings', () => {
 
 describe('delegateSpendableVtxos', () => {
   it('returns {0,0} when no delegator manager is configured', async () => {
-    const wallet = { getDelegatorManager: async () => null } as any
+    const wallet = { getDelegateManager: async () => null } as any
     expect(await delegateSpendableVtxos(wallet)).toEqual({ delegated: 0, failed: 0 })
   })
 
   it('returns {0,0} when there is nothing spendable', async () => {
     const wallet = {
-      getDelegatorManager: async () => ({ delegate: async () => ({ delegated: [], failed: [] }) }),
+      getDelegateManager: async () => ({ delegate: async () => ({ delegated: [], failed: [] }) }),
       getVtxos: async () => [{ virtualStatus: { state: 'swept' } }],
       getAddress: async () => 'ark1own',
     } as any
@@ -95,7 +95,7 @@ describe('delegateSpendableVtxos', () => {
   it('delegates settled/preconfirmed vtxos to own address', async () => {
     const seen: any = {}
     const wallet = {
-      getDelegatorManager: async () => ({
+      getDelegateManager: async () => ({
         delegate: async (vtxos: any[], addr: string) => {
           seen.count = vtxos.length
           seen.addr = addr
@@ -103,9 +103,9 @@ describe('delegateSpendableVtxos', () => {
         },
       }),
       getVtxos: async () => [
-        { virtualStatus: { state: 'settled' } },
-        { virtualStatus: { state: 'preconfirmed' } },
-        { virtualStatus: { state: 'swept' } },
+        { isSpent: false },
+        { isSpent: false },
+        { isSpent: false, isSwept: true },
       ],
       getAddress: async () => 'ark1own',
     } as any
@@ -118,13 +118,13 @@ describe('delegateSpendableVtxos', () => {
 
 describe('getArkadeDelegateInfo', () => {
   it('reports not configured without a delegator manager', async () => {
-    const wallet = { getDelegatorManager: async () => null } as any
+    const wallet = { getDelegateManager: async () => null } as any
     expect(await getArkadeDelegateInfo(wallet)).toEqual({ configured: false })
   })
 
   it('merges delegate info when configured', async () => {
     const wallet = {
-      getDelegatorManager: async () => ({
+      getDelegateManager: async () => ({
         getDelegateInfo: async () => ({ pubkey: 'pk', fee: 10 }),
       }),
     } as any
@@ -187,7 +187,7 @@ describe('runArkadeVtxoLifecycle', () => {
 
   it('delegates when enabled + configured', async () => {
     const wallet = {
-      getDelegatorManager: async () => ({
+      getDelegateManager: async () => ({
         delegate: async () => ({ delegated: [1], failed: [] }),
       }),
       getVtxos: async () => [{ virtualStatus: { state: 'settled' } }],

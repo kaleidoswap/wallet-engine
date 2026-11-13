@@ -29,7 +29,7 @@ import {
 } from "../lib/arkade-intents-lightning";
 import {
   Ramps,
-  isSpendable,
+  canSpendOffchain,
   isValidArkAddress,
   type ExtendedVirtualCoin,
   type Wallet,
@@ -251,7 +251,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
         layer: "BTC_ARKADE",
         balance: {
           total: totalSats,
-          // preconfirmed VTXOs are spendable (isSpendable = !vtxo.isSpent in the SDK),
+          // preconfirmed VTXOs are spendable (canSpendOffchain excludes the
+        // spent/swept/exiting states),
           // so they count as available just like settled ones.
           available: balance.available,
           pending: 0,
@@ -488,10 +489,11 @@ export class ArkadeAdapter implements IProtocolAdapter {
     try {
       const wallet = this.wallet();
       const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, request.amount);
-      const txid: string = await wallet.sendBitcoin({
-        address: request.invoice, // Ark or on-chain address
-        amount: request.amount, // satoshis
-        ...(selectedVtxos ? { selectedVtxos } : {}),
+      const txid: string = await wallet.sendOnchain({
+        outputs: [{ address: request.invoice, amount: request.amount }],
+        ...(selectedVtxos
+          ? { inputs: selectedVtxos.map((v) => ({ txid: v.txid, vout: v.vout })) }
+          : {}),
       });
       invalidateArkadeSnapshotCache();
       return {
@@ -671,7 +673,8 @@ export class ArkadeAdapter implements IProtocolAdapter {
     try {
       const wallet = this.wallet();
       const balance = await this.getWalletBalanceSummary(wallet);
-      // preconfirmed VTXOs are spendable (isSpendable = !vtxo.isSpent in the SDK),
+      // preconfirmed VTXOs are spendable (canSpendOffchain excludes the
+      // spent/swept/exiting states),
       // so include them in `confirmed` so the Withdraw UI sees the full spendable balance.
       const confirmed = balance.available; // settled + preconfirmed
       const total = balance.total;
@@ -848,10 +851,11 @@ export class ArkadeAdapter implements IProtocolAdapter {
     try {
       const wallet = this.wallet();
       const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, params.amount);
-      const txid: string = await wallet.sendBitcoin({
-        address: params.address,
-        amount: params.amount,
-        ...(selectedVtxos ? { selectedVtxos } : {}),
+      const txid: string = await wallet.sendOnchain({
+        outputs: [{ address: params.address, amount: params.amount }],
+        ...(selectedVtxos
+          ? { inputs: selectedVtxos.map((v) => ({ txid: v.txid, vout: v.vout })) }
+          : {}),
       });
       invalidateArkadeSnapshotCache();
       return { txid };
@@ -932,7 +936,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
           ? (raw as { vtxos: ExtendedVirtualCoin[] }).vtxos
           : [];
       const spendableBtc = list.filter((vtxo) => {
-        if (!isSpendable(vtxo)) return false;
+        if (!canSpendOffchain(vtxo, { timestamp: new Date() })) return false;
         // Exclude VTXOs carrying assets — sendBitcoin would either reject
         // them or accidentally burn the asset side. Pure BTC only.
         const assets = (vtxo as unknown as { assets?: unknown[] }).assets;
