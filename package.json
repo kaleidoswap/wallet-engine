@@ -157,7 +157,7 @@
     }
   },
   "devDependencies": {
-    "@arkade-os/sdk": "^0.4.74",
+    "@arkade-os/sdk": "0.4.79",
     "@buildonspark/spark-sdk": "^0.15.0",
     "@flashnet/sdk": "^0.5.7",
     "@kaleidorg/swap-sdk": "^0.14.1",

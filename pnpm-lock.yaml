@@ -36,8 +36,8 @@ importers:
         version: 1.0.0-beta.4
     devDependencies:
       '@arkade-os/sdk':
-        specifier: ^0.4.74
-        version: 0.4.78(bip32@5.0.1(typescript@5.9.3))
+        specifier: 0.4.79
+        version: 0.4.79(bip32@5.0.1(typescript@5.9.3))
       '@buildonspark/spark-sdk':
         specifier: ^0.15.0
         version: 0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(react-native@0.81.5(@babel/core@7.29.7)(react@19.3.1))(react@19.3.1)(ws@8.21.3)
@@ -46,7 +46,7 @@ importers:
         version: 0.5.10(@buildonspark/spark-sdk@0.15.0(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-events@2.9.2(bare-abort-controller@1.1.2))(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(react-native@0.81.5(@babel/core@7.29.7)(react@19.3.1))(react@19.3.1)(ws@8.21.3))(typescript@5.9.3)
       '@kaleidorg/swap-sdk':
         specifier: ^0.14.1
-        version: 0.14.1(@arkade-os/sdk@0.4.78(bip32@5.0.1(typescript@5.9.3)))
+        version: 0.14.1(@arkade-os/sdk@0.4.79(bip32@5.0.1(typescript@5.9.3)))
       '@kaleidorg/wdk-protocol-swap-kaleidoswap':
         specifier: ^1.0.0-beta.3
         version: 1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.26(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)
@@ -98,8 +98,8 @@ importers:
 
 packages:
 
-  '@arkade-os/sdk@0.4.78':
-    resolution: {integrity: sha512-y3qrs4yP53ujULPcI/OrzGPeG4WX+vxKdU6xhcumReoOAUgJQc4D5K+OlzX9Ro1K1y6+HzjD/1eCQYTPml5GwQ==}
+  '@arkade-os/sdk@0.4.79':
+    resolution: {integrity: sha512-AGvTLGtmdSG+VX5BCt7D1JXDc2KFl3QQSwXGMxAw1MqUjQ2kJHzZyuw6AiLamZ797R6jvQKZI3VSVkbbmDKFZg==}
     engines: {node: '>=22.12.0 <27'}
     peerDependencies:
       '@react-native-async-storage/async-storage': '>=1.0.0'
@@ -908,9 +908,6 @@ packages:
 
   '@scure/btc-signer@1.8.1':
     resolution: {integrity: sha512-8nX9T++dFyKpvqksNHfSi9CgRsGnHAQtCdIQ1y1GmbCGLpV97v4MUyemUUT6uDumKL3oo3m4niyY6A32nmdLuQ==}
-
-  '@scure/btc-signer@2.0.1':
-    resolution: {integrity: sha512-vk5a/16BbSFZkhh1JIJ0+4H9nceZVo5WzKvJGGWiPp3sQOExeW+L53z3dI6u0adTPoE8ZbL+XEb6hEGzVZSvvQ==}
 
   '@scure/btc-signer@2.4.1':
     resolution: {integrity: sha512-ch6h66o9nPhEoe/KciMMUJeH2MBPB8UAJI1if35Fxl6885lKTsc9YoCRqTW0/RjI0Vv9GSg1tmKtHHODyAw81g==}
@@ -2156,10 +2153,6 @@ packages:
   micro-packed@0.7.3:
     resolution: {integrity: sha512-2Milxs+WNC00TRlem41oRswvw31146GiSaoCT7s3Xi2gMUglW5QBeqlQaZeHr5tJx9nm3i57LNXPqxOOaWtTYg==}
 
-  micro-packed@0.8.0:
-    resolution: {integrity: sha512-AKb8znIvg9sooythbXzyFeChEY0SkW0C6iXECpy/ls0e5BtwXO45J9wD9SLzBztnS4XmF/5kwZknsq+jyynd/A==}
-    engines: {node: '>= 20.19.0'}
-
   micromatch@4.0.8:
     resolution: {integrity: sha512-PXwfBhYu0hBCPw8Dn0E+WDYb7af3dSLVWKi3HGv84IdF4TyFoC0ysxFd0Goxw7nSv4T/PzEJQxsYsEiFCKo2BA==}
     engines: {node: '>=8.6'}
@@ -2799,16 +2792,17 @@ packages:
 
 snapshots:
 
-  '@arkade-os/sdk@0.4.78(bip32@5.0.1(typescript@5.9.3))':
+  '@arkade-os/sdk@0.4.79(bip32@5.0.1(typescript@5.9.3))':
     dependencies:
       '@bitcoinerlab/descriptors-scure': 3.1.7(bip32@5.0.1(typescript@5.9.3))
       '@marcbachmann/cel-js': 8.0.0
-      '@noble/curves': 2.0.1
+      '@noble/curves': 2.4.0
       '@noble/secp256k1': 3.0.0
-      '@scure/base': 2.0.0
-      '@scure/bip39': 2.0.1
-      '@scure/btc-signer': 2.0.1
+      '@scure/base': 2.4.0
+      '@scure/bip39': 2.4.0
+      '@scure/btc-signer': 2.4.1
       bip68: 1.0.4
+      micro-packed: 0.11.1
       ws-electrumx-client: 1.0.5
     transitivePeerDependencies:
       - '@ledgerhq/ledger-bitcoin'
@@ -3333,9 +3327,9 @@ snapshots:
 
   '@js-sdsl/ordered-map@4.4.2': {}
 
-  '@kaleidorg/swap-sdk@0.14.1(@arkade-os/sdk@0.4.78(bip32@5.0.1(typescript@5.9.3)))':
+  '@kaleidorg/swap-sdk@0.14.1(@arkade-os/sdk@0.4.79(bip32@5.0.1(typescript@5.9.3)))':
     optionalDependencies:
-      '@arkade-os/sdk': 0.4.78(bip32@5.0.1(typescript@5.9.3))
+      '@arkade-os/sdk': 0.4.79(bip32@5.0.1(typescript@5.9.3))
 
   '@kaleidorg/wdk-protocol-swap-kaleidoswap@1.0.0-beta.3(@tetherto/wdk-wallet@1.0.0-beta.26(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))(bare-tcp@2.5.4(bare-abort-controller@1.1.2)(bare-buffer@3.7.0)(bare-pipe@4.2.3(bare-abort-controller@1.1.2)(bare-buffer@3.7.0))))(typescript@5.9.3)':
     dependencies:
@@ -3582,13 +3576,6 @@ snapshots:
       '@noble/hashes': 1.8.0
       '@scure/base': 1.2.6
       micro-packed: 0.7.3
-
-  '@scure/btc-signer@2.0.1':
-    dependencies:
-      '@noble/curves': 2.0.1
-      '@noble/hashes': 2.0.1
-      '@scure/base': 2.0.0
-      micro-packed: 0.8.0
 
   '@scure/btc-signer@2.4.1':
     dependencies:
@@ -5232,10 +5219,6 @@ snapshots:
   micro-packed@0.7.3:
     dependencies:
       '@scure/base': 1.2.6
-
-  micro-packed@0.8.0:
-    dependencies:
-      '@scure/base': 2.0.0
 
   micromatch@4.0.8:
     dependencies:
