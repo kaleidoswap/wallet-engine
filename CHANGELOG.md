@@ -9,6 +9,20 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ### Changed
 
+- **Breaking:** `@arkade-os/sdk` moves to the 0.5 line (peer `^0.5.0`)
+  and `@kaleidorg/swap-sdk` to 0.15 (peer `^0.15.0`) — the two move
+  together because swap 0.0.x, which 0.14 pins, cannot run against
+  arkade 0.5. The adapter deltas: `sendBitcoin` is `sendOnchain`
+  (outputs array, inputs as outpoints), the coin filter is
+  `canSpendOffchain`, the wallet config takes the operator via
+  `service: { operatorUrl }` and the chain read via an explicit
+  `EsploraProvider`, and the delegator surface is renamed delegate
+  (`getDelegateManager`, `RestDelegateProvider`). The swap venue's
+  public surface is unchanged (swap-sdk#182), so the intents seam moves
+  on peer ranges alone.
+
+### Changed
+
 - The engine develops against `@arkade-os/sdk` 0.4.79, the 0.4-line tip
   (the same build `@arkade-os/swap` 0.0.25 pins). The peer range is
   unchanged — `^0.4.72` already admits it. The 0.5 move stays gated on

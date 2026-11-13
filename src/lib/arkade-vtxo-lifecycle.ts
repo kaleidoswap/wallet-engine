@@ -10,6 +10,7 @@
  */
 
 import type { VtxoManager, Wallet, ContractVtxo } from "@arkade-os/sdk";
+import { canSpendOffchain } from "@arkade-os/sdk";
 
 // ---------------------------------------------------------------------------
 // Settings — normalized shape + sanitizers + defaults
@@ -111,15 +112,16 @@ export interface ArkadeDelegateInfo {
  * delegator. `{ delegated: 0, failed: 0 }` when unconfigured or nothing to do.
  */
 export async function delegateSpendableVtxos(wallet: Wallet): Promise<ArkadeDelegateResult> {
-  const delegatorManager = await wallet.getDelegatorManager();
+  const delegatorManager = await wallet.getDelegateManager();
   if (!delegatorManager) {
     return { delegated: 0, failed: 0 };
   }
 
   const vtxos = await wallet.getVtxos();
-  const spendable = vtxos.filter(
-    (v) => v.virtualStatus?.state === "settled" || v.virtualStatus?.state === "preconfirmed",
-  );
+  // 0.5 drops `virtualStatus.state`: canSpendOffchain is the sanctioned
+  // send/coin-selection test and excludes the spent/swept/exiting states.
+  const now = { timestamp: new Date() };
+  const spendable = vtxos.filter((v) => canSpendOffchain(v, now));
   if (spendable.length === 0) {
     return { delegated: 0, failed: 0 };
   }
@@ -137,7 +139,7 @@ export async function delegateSpendableVtxos(wallet: Wallet): Promise<ArkadeDele
  * `{ configured: false }` when delegation is not configured.
  */
 export async function getArkadeDelegateInfo(wallet: Wallet): Promise<ArkadeDelegateInfo> {
-  const delegatorManager = await wallet.getDelegatorManager();
+  const delegatorManager = await wallet.getDelegateManager();
   if (!delegatorManager) {
     return { configured: false };
   }
