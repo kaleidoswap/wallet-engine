@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- The engine develops against `@arkade-os/sdk` 0.4.79, the 0.4-line tip
+  (the same build `@arkade-os/swap` 0.0.25 pins). The peer range is
+  unchanged — `^0.4.72` already admits it. The 0.5 move stays gated on
+  the swap platform (swap-sdk#181).
+
 ## [1.0.0-beta.88] - 2026-11-12
 
 ### Changed

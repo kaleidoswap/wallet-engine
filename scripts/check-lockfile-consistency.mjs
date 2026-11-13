@@ -274,11 +274,20 @@ if (!equal(declaredNpm, declaredPnpm)) {
 
 const unapplied = Object.entries(declaredNpm).flatMap(([name, version]) => {
   const problems = [];
-  for (const [label, resolved] of [
+  const trees = [
     ["pnpm-lock.yaml", pnpm.get(name)],
     ["package-lock.json", npm.get(name)],
-  ]) {
-    if (!resolved) continue; // not in that tree at all
+  ];
+  // A declared override must be present wherever the package is: npm's
+  // lock-only resolver drops platform-skipped subtrees (rolldown's wasi
+  // binding), so "absent from one tree" is exactly the drift this must
+  // catch — `if (!resolved) continue` used to wave it through.
+  const anywhere = trees.some(([, resolved]) => resolved);
+  for (const [label, resolved] of trees) {
+    if (!resolved) {
+      if (anywhere) problems.push(`${name}: ${label} does not carry it at all`);
+      continue;
+    }
     const versions = [...resolved].sort();
     if (versions.length !== 1 || versions[0] !== version) {
       problems.push(`${name}: ${label} has ${versions.join(", ")}, override pins ${version}`);
