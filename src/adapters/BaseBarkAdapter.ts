@@ -10,7 +10,7 @@ import { classifyDestination } from '../router/destination.js'
 import { IProtocolAdapter, type ProtocolConfig } from './IProtocolAdapter'
 import type { BarkClient, BarkWalletPort } from '../lib/bark-client.js'
 import { sessionSupersededError, type WalletSessionToken } from '../lib/wallet-session.js'
-import { decodeBolt11Invoice } from '../lib/bolt11'
+import { decodeBolt11Invoice, validateBolt11Invoice } from '../lib/bolt11'
 import { applyTransactionFilter } from '../lib/transaction-filter'
 import { PROTOCOL_OPERATIONS } from '../capabilities/operations'
 import { log } from '../lib/log'
@@ -356,19 +356,48 @@ export class BaseBarkAdapter implements IProtocolAdapter {
 
   private async payLightning(invoice: string, amount?: number): Promise<PaymentResult> {
     const stripped = invoice.replace(/^lightning:/i, '')
+    const properties = await this.wallet().properties()
+    // The wasm bindings name networks with capitalized literals.
+    const barkNetwork = String(properties.network).toLowerCase()
+    const expectedNetworkId =
+      barkNetwork === 'mutinynet'
+        ? 'signet'
+        : barkNetwork === 'regtest'
+          ? 'regtest'
+          : barkNetwork === 'testnet'
+            ? 'testnet'
+            : barkNetwork === 'signet'
+              ? 'signet'
+              : 'bitcoin'
+    const decoded = validateBolt11Invoice(stripped, {
+      expectedNetworkId,
+      nowUnixSeconds: Math.floor(Date.now() / 1000),
+    })
+    if (decoded.amountMsat !== undefined && decoded.amountSat === undefined) {
+      throw new ValidationError('Bark requires whole-satoshi Lightning amounts', 'BARK')
+    }
+    const fixedAmount = decoded.amountSat === undefined ? undefined : Number(decoded.amountSat)
+    if (fixedAmount !== undefined && amount !== undefined && amount !== fixedAmount) {
+      throw new ValidationError('Amount override does not match the invoice', 'BARK')
+    }
+    const payAmount = fixedAmount ?? amount
+    if (payAmount === undefined || payAmount <= 0) {
+      throw new ValidationError('A Lightning payment requires an amount in sats', 'BARK')
+    }
     const status = await this.wallet().payLightningInvoice({
       invoice: stripped,
-      amountSats: amount,
+      // An amount-bearing invoice is paid on its own terms; only an
+      // amountless one carries the caller's amount.
+      amountSats: fixedAmount === undefined ? payAmount : undefined,
       wait: true,
     })
-    const decoded = decodeBolt11Invoice(stripped)
     const paid = status.type === 'paid'
     return {
       // wasm-bindgen leaks the Rust field name on this variant: `payment_hash`,
       // not `paymentHash`.
       paymentHash: paid ? status.payment_hash : decoded.paymentHash,
       preimage: paid ? status.preimage : undefined,
-      amount: amount ?? (decoded.amountSat ? Number(decoded.amountSat) : 0),
+      amount: payAmount,
       fee: 0,
       status: paid ? 'confirmed' : status.type === 'inProgress' ? 'pending' : 'unknown',
       timestamp: Date.now(),
