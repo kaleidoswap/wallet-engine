@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { BarkAdapter } from '../src/adapters/BarkAdapter'
 import { barkClientManager, setBarkModuleLoader } from '../src/lib/bark-client-manager'
+import { bolt11Fixture, TEST_PAYMENT_HASH } from './fixtures/bolt11'
 import type { BarkConfig } from '../src/types/bark'
 
 /**
@@ -18,10 +19,10 @@ const BALANCE = {
   pendingBoardSats: 5_000,
 }
 
-// A real invoice from ark.signet.2nd.dev, so decoding is exercised for real.
-const INVOICE =
-  'lntbs10u1p4tplctsp56ctf30jgccvj0xlm8egpw4h4jjakdusmvaxsguunx237dfsp6vlqpp5gda3p6a96u5wvj0klg3ddnuzf65r249ygjk7arfh3su8ykhr8kxsdqqxqy9gcqcqzpc9qyysgqtr8rql6jgxz2e0kcyztaxux46038xw0y2gfgmsxrkvkc6yscdw655suwjzl04zhn02v2w9t0ncv0jlr80cyqzdamsddjqx35mtrvx5qq77snxn'
-const PAYMENT_HASH = '437b10eba5d728e649f6fa22d6cf824ea83554a444adee8d378c38725ae33d8d'
+// A fresh signet invoice at the current timestamp, so expiry validation
+// does not reject it during the test run.
+const INVOICE = bolt11Fixture({ hrp: 'lntbs10u', timestamp: Math.floor(Date.now() / 1000) })
+const PAYMENT_HASH = TEST_PAYMENT_HASH
 
 // Real addresses: the first from a bark wallet on ark.signet.2nd.dev, the
 // second minted by @arkade-os/sdk. Same `tark1` HRP, different payloads.
@@ -281,5 +282,70 @@ describe('barkClientManager.runMaintenance', () => {
     const report = await barkClientManager.runMaintenance()
     expect(wallet.refreshVtxosDelegated).not.toHaveBeenCalled()
     expect(report.refreshed).toEqual([])
+  })
+})
+
+describe('BarkAdapter Lightning payment validation', () => {
+  const freshInvoice = (hrp: string = 'lntbs10u') =>
+    bolt11Fixture({ hrp, timestamp: Math.floor(Date.now() / 1000) })
+
+  it('rejects a caller amount that conflicts with the invoice fixed amount', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    // lntbs10u = 1000 sats
+    await expect(
+      adapter.sendPayment({ invoice: freshInvoice(), amount: 500 }),
+    ).rejects.toThrow(/does not match/)
+    expect(wallet.payLightningInvoice).not.toHaveBeenCalled()
+  })
+
+  it('rejects an amountless payment (no fixed amount, no caller amount)', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    await expect(
+      adapter.sendPayment({ invoice: bolt11Fixture({ hrp: 'lntbs', timestamp: Math.floor(Date.now() / 1000) }) }),
+    ).rejects.toThrow(/amount/)
+    expect(wallet.payLightningInvoice).not.toHaveBeenCalled()
+  })
+
+  it('pays an amountless invoice with the caller amount', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    const result = await adapter.sendPayment({ invoice: bolt11Fixture({ hrp: 'lntbs', timestamp: Math.floor(Date.now() / 1000) }), amount: 500 })
+    expect(wallet.payLightningInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({ amountSats: 500, wait: true }),
+    )
+    expect(result.amount).toBe(500)
+  })
+
+  it('pays a fixed-amount invoice on its own terms without amountSats', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    // lntbs10u = 1000 sats
+    const result = await adapter.sendPayment({ invoice: freshInvoice(), amount: 1000 })
+    expect(wallet.payLightningInvoice).toHaveBeenCalledWith(
+      expect.objectContaining({ amountSats: undefined, wait: true }),
+    )
+    expect(result.amount).toBe(1000)
+  })
+
+  it('rejects a network-mismatched invoice (mainnet invoice on a signet wallet)', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    const mainnetInvoice = bolt11Fixture({ hrp: 'lnbc10u', timestamp: Math.floor(Date.now() / 1000) })
+    await expect(
+      adapter.sendPayment({ invoice: mainnetInvoice }),
+    ).rejects.toThrow(/network/i)
+    expect(wallet.payLightningInvoice).not.toHaveBeenCalled()
+  })
+
+  it('rejects an expired invoice', async () => {
+    const adapter = new BarkAdapter()
+    await adapter.connect(CONFIG as never)
+    const expired = bolt11Fixture({ hrp: 'lntbs10u', timestamp: Math.floor(Date.now() / 1000) - 7200, expirySeconds: 3600 })
+    await expect(
+      adapter.sendPayment({ invoice: expired }),
+    ).rejects.toThrow(/expired/i)
+    expect(wallet.payLightningInvoice).not.toHaveBeenCalled()
   })
 })
