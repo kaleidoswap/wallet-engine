@@ -11,6 +11,17 @@ import { ProtocolError } from '../types/base'
 /** Fee ceiling applied when a caller gives none. */
 export const DEFAULT_SPARK_MAX_FEE_SATS = 1000
 
+/**
+ * Hard ceiling for an on-chain withdrawal fee: the protocol never
+ * authorises more than 10% of the withdrawal amount plus 5000 sats
+ * for the L1 broadcast component, regardless of what the gateway quotes.
+ * A compromised or unit-confused source must not flow into an
+ * authorised withdrawal.
+ */
+export function sparkOnchainFeeCap(amountSats: number): number {
+  return Math.ceil(amountSats * 0.1) + 5000
+}
+
 /** `PaymentRequest.maxFeeSats`, plus the legacy `maxFee` alias some hosts still send. */
 export interface SparkFeeBudgetRequest {
   maxFeeSats?: unknown
