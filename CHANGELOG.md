@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+
+- RGB on-chain (`RgbLibWasmAdapter`) supports the BFA (bridged fungible
+  asset) schema on the test networks: BFA assets are listed, received and
+  sent like NIA and IFA. The new `evmChains` connect option names the EVM
+  chains whose mint locks the wallet checks for received BFA mints; it is
+  ignored on mainnet, and an unusable endpoint makes the wallet go online
+  without EVM chains instead of failing to connect.
+
+### Fixed
+
+- A go-online consistency failure of RGB on-chain is reported as
+  `ProtocolError` code `INCONSISTENT` again; rgb-lib-wasm 1.0 words the
+  error differently, so it surfaced as a generic error.
+
 ### Changed
 
 - The engine develops against `@arkade-os/sdk` 0.4.79, the 0.4-line tip
