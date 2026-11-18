@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.89] - 2026-11-18
+
 ### Added
 
 - RGB on-chain (`RgbLibWasmAdapter`) supports the BFA (bridged fungible
