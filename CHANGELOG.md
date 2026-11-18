@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.91] - 2026-11-18
+
 ### Added
 
 - RGB on-chain: `getReceivedMint(recipientId)` on the new `IRgbMintOperations`
