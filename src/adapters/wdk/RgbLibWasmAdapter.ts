@@ -298,7 +298,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       } catch (e) {
         if (!Object.keys(evmChains).length || !isEvmChainError(e)) throw e
         // BFA mints wait for the chain; the rest of the wallet must not
-        console.warn('[RGB-L1] EVM chains unusable, going online without them:', errorMessage(e))
+        // the error can carry the RPC URL, which may hold an API key
+        console.warn('[RGB-L1] EVM chains unusable, going online without them:', Object.keys(evmChains).join(', '))
         this.online = await goOnline({})
       }
     } catch (e) {
