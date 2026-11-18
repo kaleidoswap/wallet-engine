@@ -7,6 +7,8 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.90] - 2026-11-18
+
 ### Fixed
 
 - RGB on-chain: the `evmChains` connect option reaches rgb-lib-wasm in the
