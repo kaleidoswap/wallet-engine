@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { RgbLibWasmAdapter } from '../src/adapters/wdk/RgbLibWasmAdapter'
+import { asRgbMintOperations } from '../src/adapters/IProtocolAdapter'
 import { registerWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { BIP39_TEST_VECTOR_MNEMONIC } from './fixtures/mnemonics'
 
@@ -97,5 +98,35 @@ describe('RGB on-chain: BFA', () => {
     const assets = await adapter.listAssets()
     expect(assets.map((a) => a.id)).toEqual(['BTC', 'rgb:NIA', 'rgb:BFA'])
     expect(assets.find((a) => a.id === 'rgb:BFA')).toMatchObject({ protocol: 'RGB_L1', precision: 6 })
+  })
+})
+
+describe('RGB on-chain: received BFA mints', () => {
+  const adapter = (getReceivedMint?: (id: string) => unknown) => {
+    const a = new RgbLibWasmAdapter()
+    Object.assign(a as any, { connected: true, online: {}, account: getReceivedMint ? { getReceivedMint } : {} })
+    return a
+  }
+
+  it('reads a checked mint in the engine shape', async () => {
+    const seen: string[] = []
+    const a = adapter((id) => {
+      seen.push(id)
+      return { lockId: 'ab', amount: 100n, beforeBlock: 1500n, evmChainId: 31337n, bridgeContract: '0xb1fa' }
+    })
+    expect(asRgbMintOperations(a)).toBe(a)
+    expect(await a.getReceivedMint('utxob:x')).toEqual({
+      lockId: 'ab',
+      amount: '100',
+      beforeBlock: '1500',
+      evmChainId: '31337',
+      bridgeContract: '0xb1fa',
+    })
+    expect(seen).toEqual(['utxob:x'])
+  })
+
+  it('is null without a checked mint or without the binding', async () => {
+    expect(await adapter(() => null).getReceivedMint('utxob:x')).toBeNull()
+    expect(await adapter().getReceivedMint('utxob:x')).toBeNull()
   })
 })

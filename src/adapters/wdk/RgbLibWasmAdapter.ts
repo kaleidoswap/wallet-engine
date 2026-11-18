@@ -15,7 +15,12 @@
 import { Address as BtcAddress, OutScript, NETWORK, TEST_NETWORK } from '@scure/btc-signer'
 import { hex } from '@scure/base'
 import { IProtocolAdapter, BaseProtocolConfig } from '../IProtocolAdapter'
-import type { IRgbHtlcOperations, RgbHtlcOperation, RgbHtlcAllocation } from '../IProtocolAdapter'
+import type {
+  IRgbHtlcOperations,
+  RgbHtlcOperation,
+  RgbHtlcAllocation,
+  RgbReceivedMint,
+} from '../IProtocolAdapter'
 import {
   ProtocolType,
   Layer,
@@ -915,6 +920,27 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
    * Hide the HTLC methods on a build without their bindings, so capability
    * probes (`asRgbHtlcOperations`, a host's method check) report them missing.
    */
+  /**
+   * The BFA mint received on `recipientId` once rgb-lib has checked it: its
+   * transfer waits for the lock on the bridge's EVM chain until it settles.
+   * Null when no checked mint pays it, or the binding lacks the call.
+   */
+  async getReceivedMint(recipientId: string): Promise<RgbReceivedMint | null> {
+    this.assertConnected()
+    const get = (this.account as { getReceivedMint?: (id: string) => unknown } | null)?.getReceivedMint
+    if (typeof get !== 'function') return null
+    const raw: any = await get.call(this.account, recipientId)
+    if (!raw) return null
+    const text = (v: unknown) => (v == null ? '' : String(v))
+    return {
+      lockId: text(raw.lockId ?? raw.lock_id),
+      amount: text(raw.amount),
+      beforeBlock: text(raw.beforeBlock ?? raw.before_block),
+      evmChainId: text(raw.evmChainId ?? raw.evm_chain_id),
+      bridgeContract: text(raw.bridgeContract ?? raw.bridge_contract),
+    }
+  }
+
   private exposeHtlcOperations(available: boolean): void {
     for (const name of HTLC_METHODS) {
       if (available) delete (this as Record<string, unknown>)[name]

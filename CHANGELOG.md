@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+
+- RGB on-chain: `getReceivedMint(recipientId)` on the new `IRgbMintOperations`
+  group (narrowed with `asRgbMintOperations`) returns the BFA mint a wallet
+  received and checked, while its transfer waits for the lock on the
+  bridge's EVM chain, so a host can show that wait.
+
 ## [1.0.0-beta.90] - 2026-11-18
 
 ### Fixed
