@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Added
+
+- RGB on-chain: the `allowBfaOnMainnet` connect option holds, receives and
+  sends BFA assets on mainnet, with the `evmChains` it needs. It requires an
+  rgb-lib-wasm build that supports `allowRecklessSchemas`; IFA stays off
+  mainnet. Off by default.
+
 ## [1.0.0-beta.90] - 2026-11-18
 
 ### Fixed

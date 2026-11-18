@@ -5,14 +5,20 @@ import { BIP39_TEST_VECTOR_MNEMONIC } from './fixtures/mnemonics'
 
 const ANVIL = { '31337': { rpcUrl: 'http://127.0.0.1:8545', minMintLockBlocks: 2, maxMintLockBlocks: 100 } }
 
-async function connect(network: string, evmChains: unknown, goOnline: (opts: any) => Promise<unknown>) {
-  const seen: { schemas?: string[]; calls: any[] } = { calls: [] }
+async function connect(
+  network: string,
+  evmChains: unknown,
+  goOnline: (opts: any) => Promise<unknown>,
+  extra: Record<string, unknown> = {},
+) {
+  const seen: { schemas?: string[]; reckless?: boolean; calls: any[] } = { calls: [] }
   registerWdkModule('@utexo/rgb-lib-wasm', () => ({
     init: () => {},
     restoreKeys: () => ({ mnemonic: 'm', masterFingerprint: 'fp', accountXpubVanilla: 'x1', accountXpubColored: 'x2' }),
     WasmWallet: {
       create: async (json: string) => {
         seen.schemas = JSON.parse(json).supportedSchemas
+        seen.reckless = JSON.parse(json).allowRecklessSchemas
         return {
           goOnline: async (opts: any) => {
             seen.calls.push(opts.evmChains)
@@ -32,6 +38,7 @@ async function connect(network: string, evmChains: unknown, goOnline: (opts: any
       mnemonic: BIP39_TEST_VECTOR_MNEMONIC,
       indexerUrl: 'http://indexer',
       evmChains,
+      ...extra,
     } as any)
     .then(() => undefined, (e: unknown) => e)
   return { seen, error }
@@ -47,6 +54,15 @@ describe('RGB on-chain: BFA', () => {
     const { seen } = await connect('regtest', ANVIL, async () => 'online')
     expect(seen.calls).toEqual([ANVIL])
     expect((await connect('mainnet', ANVIL, async () => 'online')).seen.calls).toEqual([{}])
+  })
+
+  it('enables BFA and its EVM chains on mainnet only when asked, never IFA', async () => {
+    const off = await connect('mainnet', ANVIL, async () => 'online')
+    expect([off.seen.schemas, off.seen.reckless, off.seen.calls]).toEqual([['Nia'], false, [{}]])
+    const on = await connect('mainnet', ANVIL, async () => 'online', { allowBfaOnMainnet: true })
+    expect([on.seen.schemas, on.seen.reckless, on.seen.calls]).toEqual([['Nia', 'Bfa'], true, [ANVIL]])
+    const test = await connect('regtest', undefined, async () => 'online', { allowBfaOnMainnet: true })
+    expect([test.seen.schemas, test.seen.reckless]).toEqual([['Nia', 'Ifa', 'Bfa'], false])
   })
 
   it('drops EVM chains with an invalid id or lock window', async () => {
