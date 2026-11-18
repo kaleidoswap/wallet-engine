@@ -43,11 +43,9 @@ describe('RGB on-chain: BFA', () => {
     expect((await connect('mainnet', undefined, async () => 'online')).seen.schemas).toEqual(['Nia'])
   })
 
-  it('passes the EVM chains in rgb-lib shape, never on mainnet', async () => {
+  it('passes the EVM chains in the bindings shape, never on mainnet', async () => {
     const { seen } = await connect('regtest', ANVIL, async () => 'online')
-    expect(seen.calls).toEqual([
-      { '31337': { rpc_url: 'http://127.0.0.1:8545', min_mint_lock_blocks: 2, max_mint_lock_blocks: 100 } },
-    ])
+    expect(seen.calls).toEqual([ANVIL])
     expect((await connect('mainnet', ANVIL, async () => 'online')).seen.calls).toEqual([{}])
   })
 

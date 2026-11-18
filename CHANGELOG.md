@@ -7,6 +7,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+
+- RGB on-chain: the `evmChains` connect option reaches rgb-lib-wasm in the
+  bindings' camel-case shape. In 1.0.0-beta.89 any configured chain made
+  going online fail with "missing field `rpcUrl`".
+
 ## [1.0.0-beta.89] - 2026-11-18
 
 ### Added

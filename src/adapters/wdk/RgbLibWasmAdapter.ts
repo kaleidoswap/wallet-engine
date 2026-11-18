@@ -1482,7 +1482,7 @@ function normalizeIssuanceMetadata(a: Record<string, unknown>): Record<string, u
  * Normalize an rgb-lib-wasm asset record for `RgbCore.rgbNiaAsset` (it may use
  * camelCase `assetId` or snake_case `asset_id`).
  */
-/** rgb-lib's EvmChain options (snake case), with a valid lock window only. */
+/** The EvmChain options of rgb-lib-wasm's bindings (camel case), with a valid lock window only. */
 function toRgbLibEvmChains(chains: Record<string, RgbEvmChain> | undefined): Record<string, unknown> {
   const out: Record<string, unknown> = {}
   for (const [chainId, c] of Object.entries(chains ?? {})) {
@@ -1490,9 +1490,9 @@ function toRgbLibEvmChains(chains: Record<string, RgbEvmChain> | undefined): Rec
     if (!Number.isSafeInteger(c.minMintLockBlocks) || !Number.isSafeInteger(c.maxMintLockBlocks)) continue
     if (c.minMintLockBlocks < 0 || c.minMintLockBlocks > c.maxMintLockBlocks) continue
     out[chainId] = {
-      rpc_url: c.rpcUrl,
-      min_mint_lock_blocks: c.minMintLockBlocks,
-      max_mint_lock_blocks: c.maxMintLockBlocks,
+      rpcUrl: c.rpcUrl,
+      minMintLockBlocks: c.minMintLockBlocks,
+      maxMintLockBlocks: c.maxMintLockBlocks,
     }
   }
   return out
