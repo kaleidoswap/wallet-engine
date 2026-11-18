@@ -64,6 +64,25 @@ export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
    * on every connect. Defaults to false.
    */
   skipConsistencyCheck?: boolean
+  /**
+   * EVM chains of the bridges of BFA assets, by EIP-155 chain ID. A received
+   * BFA mint stays pending until its lock is checked on its chain. Ignored on
+   * mainnet, where rgb-lib refuses the BFA schema. An unreachable endpoint does
+   * not keep the wallet offline: it goes online without EVM chains.
+   */
+  evmChains?: Record<string, RgbEvmChain>
+}
+
+/** An EVM chain rgb-lib checks BFA mint locks on. */
+export interface RgbEvmChain {
+  rpcUrl: string
+  minMintLockBlocks: number
+  maxMintLockBlocks: number
+}
+
+/** The fungible asset lists of rgb-lib's `listAssets`, or its array form. */
+function fungibleAssets(res: any): any[] {
+  return Array.isArray(res) ? res : [...(res?.nia ?? []), ...(res?.ifa ?? []), ...(res?.bfa ?? [])]
 }
 
 /** Map the engine network string → rgb-lib's network enum casing. */
@@ -251,9 +270,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       accountXpubVanilla: keys.accountXpubVanilla ?? keys.account_xpub_vanilla,
       accountXpubColored: keys.accountXpubColored ?? keys.account_xpub_colored,
       vanillaKeychain: null,
-      // rgb-lib rejects the IFA schema on mainnet (Error::CannotUseIfaOnMainnet),
-      // which makes WasmWallet.create throw. Gate IFA to the test networks.
-      supportedSchemas: rgbNetwork === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa'],
+      // rgb-lib rejects the IFA and BFA schemas on mainnet (CannotUseIfaOnMainnet,
+      // CannotUseBfaOnMainnet), which makes WasmWallet.create throw.
+      supportedSchemas: rgbNetwork === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', 'Bfa'],
     }
 
     const WasmWallet = mod.WasmWallet
@@ -265,16 +284,26 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     this.account = serializeWasmAccount(rawWallet)
     this.exposeHtlcOperations(typeof rawWallet.psbtOpPrepare === 'function')
     const skipConsistencyCheck = cfg.skipConsistencyCheck ?? false
-    try {
-      this.online = await this.account.goOnline({
+    const goOnline = (evmChains: Record<string, unknown>) =>
+      this.account.goOnline({
         indexerConfig: { Esplora: { url: cfg.indexerUrl } },
         skipConsistencyCheck,
         proxyAuthKeys: {},
-        evmChains: {},
+        evmChains,
       })
+    const evmChains = rgbNetwork === 'Mainnet' ? {} : toRgbLibEvmChains(cfg.evmChains)
+    try {
+      try {
+        this.online = await goOnline(evmChains)
+      } catch (e) {
+        if (!Object.keys(evmChains).length || !isEvmChainError(e)) throw e
+        // BFA mints wait for the chain; the rest of the wallet must not
+        console.warn('[RGB-L1] EVM chains unusable, going online without them:', errorMessage(e))
+        this.online = await goOnline({})
+      }
     } catch (e) {
       // The store disagrees with the chain: surface it instead of trading on it.
-      if (wasmErrorStartsWith(e, 'Inconsistency')) {
+      if (wasmErrorStartsWith(e, 'Data is inconsistent')) {
         throw new ProtocolError(`RGB wallet state is inconsistent: ${errorMessage(e)}`, 'RGB_L1', 'INCONSISTENT')
       }
       throw e
@@ -380,11 +409,9 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const { total } = await this.getBtcBalance()
     const out: UnifiedAsset[] = [rgbBtcAsset(total, RGB_L1_PROFILE)]
     const res: any = await this.account.listAssets([])
-    // Fungible schemas rgb-lib-wasm supports: NIA + IFA (no CFA). rgbNiaAsset
-    // maps either fungible shape.
-    const assets: any[] = Array.isArray(res)
-      ? res
-      : [...(res?.nia ?? []), ...(res?.ifa ?? [])]
+    // Fungible schemas rgb-lib-wasm supports: NIA, IFA and BFA (no CFA).
+    // rgbNiaAsset maps each fungible shape.
+    const assets = fungibleAssets(res)
     for (const a of assets) out.push(rgbNiaAsset(normalizeAsset(a), RGB_L1_PROFILE))
     return out
   }
@@ -578,7 +605,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   private async listAllTransfers(): Promise<any[]> {
     const rows = (raw: any): any[] => (Array.isArray(raw) ? raw : raw?.transfers ?? [])
     const res: any = await this.account.listAssets([])
-    const assets: any[] = Array.isArray(res) ? res : [...(res?.nia ?? []), ...(res?.ifa ?? [])]
+    const assets = fungibleAssets(res)
     const out: any[] = []
     for (const a of assets) {
       const assetId = normalizeAsset(a).asset_id
@@ -1454,6 +1481,27 @@ function normalizeIssuanceMetadata(a: Record<string, unknown>): Record<string, u
  * Normalize an rgb-lib-wasm asset record for `RgbCore.rgbNiaAsset` (it may use
  * camelCase `assetId` or snake_case `asset_id`).
  */
+/** rgb-lib's EvmChain options (snake case), with a valid lock window only. */
+function toRgbLibEvmChains(chains: Record<string, RgbEvmChain> | undefined): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [chainId, c] of Object.entries(chains ?? {})) {
+    if (!/^[0-9]+$/.test(chainId) || !c?.rpcUrl) continue
+    if (!Number.isSafeInteger(c.minMintLockBlocks) || !Number.isSafeInteger(c.maxMintLockBlocks)) continue
+    if (c.minMintLockBlocks < 0 || c.minMintLockBlocks > c.maxMintLockBlocks) continue
+    out[chainId] = {
+      rpc_url: c.rpcUrl,
+      min_mint_lock_blocks: c.minMintLockBlocks,
+      max_mint_lock_blocks: c.maxMintLockBlocks,
+    }
+  }
+  return out
+}
+
+/** A go-online failure caused by a configured EVM chain. */
+function isEvmChainError(e: unknown): boolean {
+  return ['Invalid EVM RPC URL', 'EVM chain ID mismatch', 'Invalid EVM chain'].some((p) => wasmErrorStartsWith(e, p))
+}
+
 function normalizeAsset(a: any): {
   asset_id: string
   name?: string
