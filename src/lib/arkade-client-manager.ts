@@ -17,11 +17,12 @@ import { bytesToHex } from "@noble/hashes/utils.js";
 import {
   Wallet,
   SingleKey,
+  EsploraProvider,
   MnemonicIdentity,
   IndexedDBWalletRepository,
   IndexedDBContractRepository,
   VtxoManager,
-  RestDelegatorProvider,
+  RestDelegateProvider,
 } from "@arkade-os/sdk";
 import type { IncomingFunds, WalletConfig } from "@arkade-os/sdk";
 
@@ -32,7 +33,7 @@ import type { IncomingFunds, WalletConfig } from "@arkade-os/sdk";
 /**
  * Platform providers injected by consumers. Absent a factory the manager falls
  * back to the SDK's browser-native implementation (IndexedDB,
- * `RestDelegatorProvider`); non-browser hosts must inject what they rely on.
+ * `RestDelegateProvider`); non-browser hosts must inject what they rely on.
  */
 export interface ArkadePlatformProviders {
   createWalletRepository?: (dbName: string) => unknown;
@@ -204,8 +205,10 @@ class ArkadeClientManager {
 
       const walletConfig: WalletConfig = {
         identity,
-        arkServerUrl: config.arkServerUrl,
-        esploraUrl: config.esploraUrl,
+        // 0.5 collapses the server/esplora URL fields into providers: the
+        // operator rides `service`, the chain read rides `onchainProvider`.
+        service: { operatorUrl: config.arkServerUrl },
+        onchainProvider: new EsploraProvider(config.esploraUrl),
         storage: {
           walletRepository: (this.platformProviders.createWalletRepository?.(dbName) ??
             new IndexedDBWalletRepository(
@@ -224,9 +227,9 @@ class ArkadeClientManager {
 
       // Wire delegation provider if configured.
       if (config.delegatorUrl && config.delegationEnabled) {
-        walletConfig.delegatorProvider = (this.platformProviders.createDelegatorProvider?.(
+        walletConfig.delegateProvider = (this.platformProviders.createDelegatorProvider?.(
           config.delegatorUrl,
-        ) ?? new RestDelegatorProvider(config.delegatorUrl)) as WalletConfig["delegatorProvider"];
+        ) ?? new RestDelegateProvider(config.delegatorUrl)) as WalletConfig["delegateProvider"];
         log.info("[ArkadeClientManager] Delegation provider configured:", config.delegatorUrl);
       }
 
