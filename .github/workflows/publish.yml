@@ -84,4 +84,5 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           DIST_TAG: ${{ steps.disttag.outputs.tag }}
-        run: npm publish --access public --tag "$DIST_TAG"
+        # The build and its checks ran above; publish only uploads, with no lifecycle scripts.
+        run: npm publish --ignore-scripts --access public --tag "$DIST_TAG"
