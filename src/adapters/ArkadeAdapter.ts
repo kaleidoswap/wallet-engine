@@ -47,6 +47,7 @@ import {
   getAssetPrecision,
   getAssetTicker,
   normalizeVtxos,
+  summarizeBtcVtxos,
   selectVtxosByExpiry,
   sortVtxosByExpiry,
   toNumber,
@@ -993,24 +994,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
       };
     }
 
-    const vtxoSummary = normalizedVtxos.reduce(
-      (summary, vtxo) => {
-        if (vtxo.state === "swept") {
-          summary.recoverable += vtxo.value;
-        } else if (vtxo.state === "preconfirmed") {
-          summary.preconfirmed += vtxo.value;
-        } else {
-          summary.settled += vtxo.value;
-        }
-
-        return summary;
-      },
-      {
-        settled: 0,
-        preconfirmed: 0,
-        recoverable: 0,
-      },
-    );
+    const vtxoSummary = summarizeBtcVtxos(normalizedVtxos);
 
     const available = vtxoSummary.settled + vtxoSummary.preconfirmed;
     const total = normalized.boardingTotal + available + vtxoSummary.recoverable;
