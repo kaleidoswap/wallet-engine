@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest'
+import { registerWdkModule, sealWdkModuleRegistry, unsealWdkModuleRegistryForTests, loadWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { BaseWdkAdapter } from '../src/adapters/wdk/BaseWdkAdapter'
 import type { ProtocolType } from '../src/types/base'
 import { TOO_SHORT_MNEMONIC } from './fixtures/mnemonics'
@@ -77,5 +78,24 @@ describe('BaseWdkAdapter', () => {
     expect(await a.run('allowedOp', { x: 1 })).toEqual(['ok', { x: 1 }])
     await expect(a.run('changePassword', {})).rejects.toThrow(/not allowed/i)
     await expect(a.run('constructor', {})).rejects.toThrow(/not allowed/i)
+  })
+})
+
+describe('WDK module registry sealing', () => {
+  it('refuses a registration after the registry is sealed', () => {
+    unsealWdkModuleRegistryForTests()
+    registerWdkModule('test-pkg', () => ({ version: '1' }))
+    sealWdkModuleRegistry()
+    expect(() => registerWdkModule('malicious', () => ({}))).toThrow(/sealed/)
+    unsealWdkModuleRegistryForTests()
+  })
+
+  it('a sealed registration still loads', async () => {
+    unsealWdkModuleRegistryForTests()
+    registerWdkModule('test-pkg', () => ({ version: '2' }))
+    sealWdkModuleRegistry()
+    const mod = await loadWdkModule('test-pkg', async () => ({ version: 'fallback' }))
+    expect(mod.version).toBe('2')
+    unsealWdkModuleRegistryForTests()
   })
 })
