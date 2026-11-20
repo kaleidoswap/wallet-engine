@@ -7,6 +7,19 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.92] - 2026-11-20
+
+### Security
+
+- Bark (browser): `payLightning` validates the invoice the way the React
+  Native adapter does: network, expiry, sub-satoshi amounts, and a caller
+  amount that conflicts with the invoice's fixed amount are rejected before
+  anything is sent.
+- Spark: on-chain withdrawals refuse a fee quote above the amount × 10% +
+  5000 sats.
+- WDK: the module registry is sealed once the host has booted; later
+  registrations throw instead of replacing a loaded SDK module.
+
 ## [1.0.0-beta.91] - 2026-11-18
 
 ### Added
