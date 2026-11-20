@@ -10,6 +10,12 @@ name: Integration
 #
 # Send tests move real (test-network) funds and run by DEFAULT here (nothing is
 # skipped); the manual dispatch can turn them off for a quick read-only check.
+#
+# The wallet mnemonics live in the `integration` environment, not in repository
+# secrets, and that environment requires a reviewer's approval. A PR run waits
+# for approval before any code from the PR head sees them, and a PR that edits
+# this file cannot skip the gate: environment secrets are only released to an
+# approved job.
 on:
   push:
     branches: [main]
@@ -57,6 +63,7 @@ jobs:
   integration:
     name: Live integration (Node 22)
     runs-on: ubuntu-latest
+    environment: integration
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
