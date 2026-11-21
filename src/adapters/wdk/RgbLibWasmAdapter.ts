@@ -210,7 +210,7 @@ function toHtlcOperation(raw: any): RgbHtlcOperation {
  * Serialize every WasmWallet call: rgb-lib-wasm is single-threaded and corrupts
  * or panics on interleaved-async access. All methods become async.
  */
-function serializeWasmAccount<T extends object>(account: T): T {
+export function serializeWasmAccount<T extends object>(account: T): T {
   let chain: Promise<unknown> = Promise.resolve()
   return new Proxy(account, {
     get(target, prop, receiver) {
@@ -1340,8 +1340,19 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   override async disconnect(): Promise<void> {
+    const wallet = this.account as { free?: () => unknown } | null
     this.online = null
-    await super.disconnect()
+    try {
+      await super.disconnect()
+    } finally {
+      // rgb-lib keeps its IndexedDB connection until the wasm wallet is dropped,
+      // which blocks a host deleting the store. Queued after pending calls.
+      try {
+        await wallet?.free?.()
+      } catch {
+        /* already freed */
+      }
+    }
   }
 }
 
