@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { RgbLibWasmAdapter } from '../src/adapters/wdk/RgbLibWasmAdapter'
+import { RgbLibWasmAdapter, serializeWasmAccount } from '../src/adapters/wdk/RgbLibWasmAdapter'
 import { createWdkRegistry } from '../src/registry/createWdkRegistry'
 
 /**
@@ -402,6 +402,41 @@ describe('RgbLibWasmAdapter', () => {
     const adapter = connected({ dispose: async () => {} })
     await adapter.disconnect()
     expect((adapter as any).online).toBeNull()
+    expect(adapter.isConnected()).toBe(false)
+  })
+
+  it('frees the wasm wallet on disconnect, after calls already queued', async () => {
+    const order: string[] = []
+    let finishSync!: () => void
+    const adapter = connected({
+      sync: () =>
+        new Promise<void>((resolve) => {
+          finishSync = () => {
+            order.push('sync')
+            resolve()
+          }
+        }),
+      free: () => {
+        order.push('free')
+      },
+    })
+    ;(adapter as any).account = serializeWasmAccount((adapter as any).account)
+    const pending = (adapter as any).account.sync()
+    const done = adapter.disconnect()
+    await vi.waitFor(() => expect(finishSync).toBeTypeOf('function'))
+    expect(order).toEqual([])
+    finishSync()
+    await Promise.all([pending, done])
+    expect(order).toEqual(['sync', 'free'])
+  })
+
+  it('still disconnects when the wasm wallet was already freed', async () => {
+    const adapter = connected({
+      free: () => {
+        throw new Error('null pointer passed to rust')
+      },
+    })
+    await expect(adapter.disconnect()).resolves.toBeUndefined()
     expect(adapter.isConnected()).toBe(false)
   })
 

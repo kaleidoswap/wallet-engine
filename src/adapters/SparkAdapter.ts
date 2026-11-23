@@ -17,7 +17,7 @@ import {
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
 import { decodeBolt11 } from "../lib/bolt11";
-import { resolveSparkMaxFeeSats } from "../lib/spark-fee-budget";
+import { resolveSparkMaxFeeSats, sparkOnchainFeeCap } from "../lib/spark-fee-budget";
 import {
   type SentTokenTxRecord,
   loadSentTokenRecords,
@@ -839,6 +839,12 @@ export class SparkAdapter implements IProtocolAdapter {
       const feeAmountSats =
         (feeQuote.l1BroadcastFeeMedium?.originalValue ?? 0) +
         (feeQuote.userFeeMedium?.originalValue ?? 0);
+      const feeCap = sparkOnchainFeeCap(request.amount ?? 0);
+      if (feeAmountSats > feeCap) {
+        throw new Error(
+          `On-chain withdrawal fee ${feeAmountSats} sats exceeds the sanity cap of ${feeCap} sats`,
+        );
+      }
       const result = await wallet.withdraw({
         onchainAddress: destination,
         amountSats: request.amount ?? 0,
@@ -1184,6 +1190,12 @@ export class SparkAdapter implements IProtocolAdapter {
       const feeAmountSats =
         (feeQuote.l1BroadcastFeeMedium?.originalValue ?? 0) +
         (feeQuote.userFeeMedium?.originalValue ?? 0);
+      const feeCap = sparkOnchainFeeCap(params.amount);
+      if (feeAmountSats > feeCap) {
+        throw new Error(
+          `On-chain withdrawal fee ${feeAmountSats} sats exceeds the sanity cap of ${feeCap} sats`,
+        );
+      }
       const result = await wallet.withdraw({
         onchainAddress: params.address,
         amountSats: params.amount,

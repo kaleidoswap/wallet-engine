@@ -13,10 +13,34 @@
 export type WdkModuleLoader = () => any | Promise<any>
 
 const registry = new Map<string, WdkModuleLoader>()
+/** Set once every host registration is done; later writes are refused. */
+let sealed = false
 
 /** Host registers how to load a WDK package (e.g. `() => require('@tetherto/wdk-wallet-spark')`). */
 export function registerWdkModule(pkgName: string, loader: WdkModuleLoader): void {
+  if (sealed) {
+    throw new Error(
+      `WDK module registry is sealed: cannot register '${pkgName}' after sealWdkModuleRegistry() was called. ` +
+        'Hosts must register every module before the wallet connects.',
+    )
+  }
   registry.set(pkgName, loader)
+}
+
+/**
+ * Seal the registry so no later code can substitute a WDK module.
+ * Call after the host's boot-time registrations; adapters refuse to
+ * connect before it, so the load path a seed flows into is fixed
+ * by the time any key material is passed to a module.
+ */
+export function sealWdkModuleRegistry(): void {
+  sealed = true
+}
+
+/** Testing only: unseal. Not exported through the package barrel. */
+export function unsealWdkModuleRegistryForTests(): void {
+  sealed = false
+  registry.clear()
 }
 
 /** True if the host injected a loader for this package. */

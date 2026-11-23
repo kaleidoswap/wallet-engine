@@ -225,3 +225,25 @@ export function normalizeVtxos(raw: unknown): NormalizedVtxo[] {
     })
     .filter((entry) => entry.txid !== "" && entry.value > 0 && entry.state !== "spent");
 }
+
+/**
+ * Sum unspent VTXOs into the BTC balance buckets. A VTXO that carries assets is
+ * left out: coin selection never spends it as BTC, so counting its sats would
+ * show more BTC than a send can use.
+ */
+export function summarizeBtcVtxos(vtxos: NormalizedVtxo[]): {
+  settled: number;
+  preconfirmed: number;
+  recoverable: number;
+} {
+  return vtxos.reduce(
+    (summary, vtxo) => {
+      if (vtxo.assets?.length) return summary;
+      if (vtxo.state === "swept") summary.recoverable += vtxo.value;
+      else if (vtxo.state === "preconfirmed") summary.preconfirmed += vtxo.value;
+      else summary.settled += vtxo.value;
+      return summary;
+    },
+    { settled: 0, preconfirmed: 0, recoverable: 0 },
+  );
+}

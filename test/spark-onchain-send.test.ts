@@ -54,3 +54,39 @@ describe('SparkAdapter.sendPayment on-chain destination', () => {
     expect(result).toMatchObject({ paymentHash: 'exit-1', status: 'pending' })
   })
 })
+
+describe('on-chain withdrawal fee cap', () => {
+  it('rejects a fee quote that exceeds the sanity cap for the withdrawal amount', async () => {
+    sparkState.wallet = {
+      getWithdrawalFeeQuote: async () => ({
+        id: 'quote-id',
+        l1BroadcastFeeMedium: { originalValue: 500_000_000 },
+        userFeeMedium: { originalValue: 100 },
+      }),
+      withdraw: vi.fn(),
+    }
+    const adapter = new SparkAdapter()
+    Object.assign(adapter as any, { connected: true, network: 'regtest', session: Symbol('s') })
+    await expect(
+      adapter.sendBtcOnchain({ address: BTC_ADDRESS, amount: 10_000 }),
+    ).rejects.toThrow(/exceeds the sanity cap/)
+    expect(sparkState.wallet.withdraw).not.toHaveBeenCalled()
+  })
+
+  it('pays a withdrawal whose fee is within the sanity cap', async () => {
+    sparkState.wallet = {
+      getWithdrawalFeeQuote: async () => ({
+        id: 'quote-ok',
+        l1BroadcastFeeMedium: { originalValue: 200 },
+        userFeeMedium: { originalValue: 50 },
+      }),
+      withdraw: vi.fn(async () => ({ id: 'txid' })),
+    }
+    const adapter = new SparkAdapter()
+    Object.assign(adapter as any, { connected: true, network: 'regtest', session: Symbol('s') })
+    await adapter.sendBtcOnchain({ address: BTC_ADDRESS, amount: 10_000 })
+    expect(sparkState.wallet.withdraw).toHaveBeenCalledWith(
+      expect.objectContaining({ feeAmountSats: 250 }),
+    )
+  })
+})
