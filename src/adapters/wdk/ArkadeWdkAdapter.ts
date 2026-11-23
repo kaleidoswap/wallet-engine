@@ -255,7 +255,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       getWallet: () => wallet,
       getNetwork: async () => String(this.arkInfo?.network ?? ''),
       arkServerUrl: String(arkServerUrl ?? ''),
-      fund: async (address, amount) => String(await this.rawWallet.sendBitcoin({ address, amount })),
+      fund: async (address, amount) => String(await this.rawWallet.send({ address, amount })),
     })
 
     this.connected = true
@@ -513,7 +513,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
     this.assertConnected()
     const dest = stripLightningScheme(request.invoice)
 
-    // Checked before the amount so a bolt11 never falls through to sendBitcoin.
+    // Checked before the amount so a bolt11 never falls through to send().
     if (isLightningInvoice(dest)) {
       // Calling sendPayment is the approval; the fee ceiling is checked before funding.
       const intents = this.requireIntents()
@@ -539,7 +539,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       return this.sendBtcOnchain({ address: dest, amount: request.amount })
     }
     // Off-chain Ark transfer to an Ark address (settles immediately, zero-conf UX).
-    const hash: string = await this.rawWallet.sendBitcoin({ address: dest, amount: request.amount })
+    const hash: string = await this.rawWallet.send({ address: dest, amount: request.amount })
     // A successful send must be traceable and reconcilable.
     if (!hash) {
       throw new ProtocolError('Arkade send did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
@@ -557,7 +557,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
   /** Arkade BTC send/offboard. Bitcoin destinations settle on-chain asynchronously. */
   async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<PaymentResult> {
     this.assertConnected()
-    const hash: string = await this.rawWallet.sendBitcoin({ address: params.address.trim(), amount: params.amount })
+    const hash: string = await this.rawWallet.send({ address: params.address.trim(), amount: params.amount })
     if (!hash) {
       throw new ProtocolError('Arkade offboard did not return a transaction ID', 'ARKADE', 'SEND_ERROR')
     }

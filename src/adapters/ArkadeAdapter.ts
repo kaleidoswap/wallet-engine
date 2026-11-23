@@ -253,7 +253,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
         balance: {
           total: totalSats,
           // preconfirmed VTXOs are spendable (canSpendOffchain excludes the
-        // spent/swept/exiting states),
+          // spent/swept/exiting states),
           // so they count as available just like settled ones.
           available: balance.available,
           pending: 0,
@@ -465,7 +465,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   async sendPayment(request: PaymentRequest): Promise<PaymentResult> {
     this.assertConnected();
 
-    // Checked before the amount so a bolt11 never falls through to sendBitcoin.
+    // Checked before the amount so a bolt11 never falls through to send().
     if (isLightningInvoice(request.invoice)) {
       // Calling sendPayment is the approval to pay this invoice; the fee is
       // bounded by `maxFeeSats` (or the configured ceiling) before funding.
@@ -488,20 +488,12 @@ export class ArkadeAdapter implements IProtocolAdapter {
       throw new ProtocolError("Amount is required for Arkade payments", "ARKADE", "INVALID_AMOUNT");
     }
     try {
-      const wallet = this.wallet();
-      const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, request.amount);
-      const txid: string = await wallet.sendOnchain({
-        outputs: [{ address: request.invoice, amount: request.amount }],
-        ...(selectedVtxos
-          ? { inputs: selectedVtxos.map((v) => ({ txid: v.txid, vout: v.vout })) }
-          : {}),
-      });
-      invalidateArkadeSnapshotCache();
+      const txid = await this.sendBtcOffchain(request.invoice, request.amount);
       return {
         paymentHash: txid,
         amount: request.amount,
         fee: 0,
-        // Ark VTXO sends are immediately valid once sendBitcoin resolves.
+        // Ark VTXO sends are immediately valid once send() resolves.
         // On-chain destinations still need confirmation, so callers should
         // keep polling via getPaymentStatus.
         status: (isArkadeAddress(request.invoice) ? "confirmed" : "pending") as TransactionStatus,
@@ -850,15 +842,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
   }): Promise<Record<string, unknown>> {
     this.assertConnected();
     try {
-      const wallet = this.wallet();
-      const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, params.amount);
-      const txid: string = await wallet.sendOnchain({
-        outputs: [{ address: params.address, amount: params.amount }],
-        ...(selectedVtxos
-          ? { inputs: selectedVtxos.map((v) => ({ txid: v.txid, vout: v.vout })) }
-          : {}),
-      });
-      invalidateArkadeSnapshotCache();
+      const txid = await this.sendBtcOffchain(params.address, params.amount);
       return { txid };
     } catch (error: unknown) {
       const msg = error instanceof Error ? error.message : String(error);
@@ -918,7 +902,22 @@ export class ArkadeAdapter implements IProtocolAdapter {
   // =========================================================================
 
   /**
-   * Pre-select spendable BTC VTXOs for sendBitcoin using the expiry-first policy.
+   * Off-chain BTC transfer to an Arkade address. `send` rejects any other
+   * address; `sendOnchain` spends on-chain contract coins, not VTXOs.
+   */
+  private async sendBtcOffchain(address: string, amount: number): Promise<string> {
+    const wallet = this.wallet();
+    const selectedVtxos = await this.selectSpendableBtcVtxos(wallet, amount);
+    const txid = await wallet.send({
+      recipients: [{ address, amount }],
+      ...(selectedVtxos ? { selectedVtxos } : {}),
+    });
+    invalidateArkadeSnapshotCache();
+    return txid;
+  }
+
+  /**
+   * Pre-select spendable BTC VTXOs for `send` using the expiry-first policy.
    * Returns `undefined` (not `[]`) when no override applies, letting the SDK fall
    * back to its own selection. Mixed-asset VTXOs are filtered out.
    */
@@ -938,7 +937,7 @@ export class ArkadeAdapter implements IProtocolAdapter {
           : [];
       const spendableBtc = list.filter((vtxo) => {
         if (!canSpendOffchain(vtxo, { timestamp: new Date() })) return false;
-        // Exclude VTXOs carrying assets — sendBitcoin would either reject
+        // Exclude VTXOs carrying assets — send() would either reject
         // them or accidentally burn the asset side. Pure BTC only.
         const assets = (vtxo as unknown as { assets?: unknown[] }).assets;
         if (Array.isArray(assets) && assets.length > 0) return false;

@@ -14,7 +14,7 @@
  *   SPARK (WDK)           — the `isBolt11` gate excludes it, so it degrades to
  *     the ON-CHAIN withdrawal path.
  *   ARKADE (both)         — the invoice matcher excludes `lno1…`, so the offer
- *     string falls through to `sendBitcoin({ address: <the offer> })`.
+ *     string falls through to `send({ address: <the offer> })`.
  *
  * So `best` — the route lite mode auto-pays — was a route guaranteed to fail or,
  * on three of those six paths, to send funds on the WRONG RAIL to a string that
