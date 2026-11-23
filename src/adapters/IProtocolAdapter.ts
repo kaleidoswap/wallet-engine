@@ -220,6 +220,24 @@ export interface IRgbOperations {
   sendAsset(params: Record<string, unknown>): Promise<unknown>
 }
 
+/**
+ * A BFA mint this wallet received and checked, waiting for (or past) its lock
+ * on the bridge's EVM chain. Amounts and block numbers are decimal strings.
+ */
+export interface RgbReceivedMint {
+  lockId: string
+  amount: string
+  beforeBlock: string
+  evmChainId: string
+  bridgeContract: string
+}
+
+/** RGB on-chain wallets that receive BFA mints. */
+export interface IRgbMintOperations {
+  /** The checked mint received on `recipientId`, or null when there is none. */
+  getReceivedMint(recipientId: string): Promise<RgbReceivedMint | null>
+}
+
 /** One assignment an RGB HTLC operation's transition makes. */
 export interface RgbHtlcAllocation {
   assetId: string
@@ -458,6 +476,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<ISimplicityOperations> &
   Partial<IRgbOperations> &
   Partial<IRgbHtlcOperations> &
+  Partial<IRgbMintOperations> &
   Partial<IBackupOperations> &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &
@@ -512,6 +531,9 @@ export function asSimplicityOperations(a: IProtocolAdapter): ISimplicityOperatio
 }
 export function asRgbHtlcOperations(a: IProtocolAdapter): IRgbHtlcOperations | null {
   return isFn(a.acceptRgbHtlcLock) && isFn(a.prepareRgbHtlcSpend) ? (a as IRgbHtlcOperations) : null
+}
+export function asRgbMintOperations(a: IProtocolAdapter): IRgbMintOperations | null {
+  return isFn(a.getReceivedMint) ? (a as IRgbMintOperations) : null
 }
 export function asBackupOperations(a: IProtocolAdapter): IBackupOperations | null {
   return isFn(a.backup) && isFn(a.restoreBackup) ? (a as IBackupOperations) : null

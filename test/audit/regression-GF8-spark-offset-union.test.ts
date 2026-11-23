@@ -39,7 +39,7 @@ describe('G-F8 offset residual: page the merged Spark union', () => {
       getSparkAddress: async () => 'spark1self',
       getIdentityPublicKey: async () => ME,
       getBalance: async () => ({ balance: 0n, tokenBalances: new Map() }),
-      queryTokenTransactions: async () => { throw new Error('unavailable') },
+      queryTokenTransactionsWithFilters: async () => { throw new Error('unavailable') },
     }
     const page = await new SparkAdapter().listTransactions({ offset: 3, limit: 2 })
     expect(request).toEqual({ limit: 5, offset: 0 })

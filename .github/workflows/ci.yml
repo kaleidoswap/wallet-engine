@@ -5,6 +5,10 @@ on:
     branches: [main, master]
   pull_request:
 
+permissions:
+  # Least privilege everywhere: npm publishes via NPM_TOKEN, not GITHUB_TOKEN.
+  contents: read
+
 jobs:
   build:
     name: Build (Node ${{ matrix.node-version }})
@@ -18,13 +22,13 @@ jobs:
       # with `git log --diff-filter=A`, which sees nothing in a depth-1 clone
       # and would report every commit as unknown — failing the check for a
       # reason that has nothing to do with the index. 453 commits is cheap.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm

@@ -12,3 +12,5 @@ packages:
 
 overrides:
   postcss: 8.5.25
+  '@emnapi/core': 2.0.0-beta.2
+  '@emnapi/runtime': 2.0.0-beta.2

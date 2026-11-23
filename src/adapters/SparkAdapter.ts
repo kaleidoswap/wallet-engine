@@ -17,7 +17,7 @@ import {
 import { IProtocolAdapter, type ProtocolConfig } from "./IProtocolAdapter";
 import { log } from "../lib/log";
 import { decodeBolt11 } from "../lib/bolt11";
-import { resolveSparkMaxFeeSats } from "../lib/spark-fee-budget";
+import { resolveSparkMaxFeeSats, sparkOnchainFeeCap } from "../lib/spark-fee-budget";
 import {
   type SentTokenTxRecord,
   loadSentTokenRecords,
@@ -167,7 +167,7 @@ export class SparkAdapter implements IProtocolAdapter {
   }
 
   /** The shared wallet, only while this instance's session still owns it. */
-  private wallet(): any {
+  private wallet(): ReturnType<typeof sparkClientManager.getWallet> {
     this.assertConnected();
     return sparkClientManager.getWallet();
   }
@@ -321,6 +321,9 @@ export class SparkAdapter implements IProtocolAdapter {
         requestedAsset && requestedAsset !== "BTC"
           ? rawTokenIdFromBech32mTokenId(requestedAsset)
           : "";
+      // Fetched once for both legs: the readonly BTC paging filter and the
+      // 0.15 token query key on owner (address, not identity pubkey).
+      const sparkAddress = (await wallet.getSparkAddress()) as string;
 
       // Best effort: a gateway/auth failure must not hide token activity, nor the
       // offline send-record fallback below. Runs CONCURRENTLY with the token block
@@ -332,7 +335,6 @@ export class SparkAdapter implements IProtocolAdapter {
           if (createdAfter || createdBefore) {
             this.assertConnected();
             const readonlyClient = await sparkClientManager.getReadonlyClient();
-            const sparkAddress = (await wallet.getSparkAddress()) as string;
             const readonlyResult = await readonlyClient.getTransfers({
               sparkAddress,
               limit: fetchLimit,
@@ -430,9 +432,10 @@ export class SparkAdapter implements IProtocolAdapter {
             sentRecords.map((r) => [normalizeTxHash(r.hash), BigInt(Math.round(r.amount || 0))]),
           );
 
-          // Owner-keyed `queryTokenTransactions` returns complete output owners and
-          // amounts, letting the converter derive direction from output ownership —
-          // the protocol exposes no direction field for token transactions.
+          // The 0.15 owner query keys on the wallet's spark address and returns
+          // complete output owners and amounts, letting the converter derive
+          // direction from output ownership — the protocol exposes no direction
+          // field for token transactions.
           const txsWithStatus: Array<{
             tokenTransaction?: unknown;
             status: number;
@@ -443,8 +446,8 @@ export class SparkAdapter implements IProtocolAdapter {
           // server calls — fetch concurrently, dedup afterwards.
           const [ownerResult, sentResult] = await Promise.all([
             wallet
-              .queryTokenTransactions({
-                ownerPublicKeys: [identityPubKey],
+              .queryTokenTransactionsWithFilters({
+                sparkAddresses: [sparkAddress],
                 tokenIdentifiers:
                   requestedAsset && requestedAsset !== "BTC" ? [requestedAsset] : undefined,
                 pageSize: fetchLimit,
@@ -836,6 +839,12 @@ export class SparkAdapter implements IProtocolAdapter {
       const feeAmountSats =
         (feeQuote.l1BroadcastFeeMedium?.originalValue ?? 0) +
         (feeQuote.userFeeMedium?.originalValue ?? 0);
+      const feeCap = sparkOnchainFeeCap(request.amount ?? 0);
+      if (feeAmountSats > feeCap) {
+        throw new Error(
+          `On-chain withdrawal fee ${feeAmountSats} sats exceeds the sanity cap of ${feeCap} sats`,
+        );
+      }
       const result = await wallet.withdraw({
         onchainAddress: destination,
         amountSats: request.amount ?? 0,
@@ -1181,6 +1190,12 @@ export class SparkAdapter implements IProtocolAdapter {
       const feeAmountSats =
         (feeQuote.l1BroadcastFeeMedium?.originalValue ?? 0) +
         (feeQuote.userFeeMedium?.originalValue ?? 0);
+      const feeCap = sparkOnchainFeeCap(params.amount);
+      if (feeAmountSats > feeCap) {
+        throw new Error(
+          `On-chain withdrawal fee ${feeAmountSats} sats exceeds the sanity cap of ${feeCap} sats`,
+        );
+      }
       const result = await wallet.withdraw({
         onchainAddress: params.address,
         amountSats: params.amount,
