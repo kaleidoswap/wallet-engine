@@ -7,6 +7,53 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.92] - 2026-11-20
+
+### Security
+
+- Bark (browser): `payLightning` validates the invoice the way the React
+  Native adapter does: network, expiry, sub-satoshi amounts, and a caller
+  amount that conflicts with the invoice's fixed amount are rejected before
+  anything is sent.
+- Spark: on-chain withdrawals refuse a fee quote above the amount × 10% +
+  5000 sats.
+- WDK: the module registry is sealed once the host has booted; later
+  registrations throw instead of replacing a loaded SDK module.
+
+## [1.0.0-beta.91] - 2026-11-18
+
+### Added
+
+- RGB on-chain: `getReceivedMint(recipientId)` on the new `IRgbMintOperations`
+  group (narrowed with `asRgbMintOperations`) returns the BFA mint a wallet
+  received and checked, while its transfer waits for the lock on the
+  bridge's EVM chain, so a host can show that wait.
+
+## [1.0.0-beta.90] - 2026-11-18
+
+### Fixed
+
+- RGB on-chain: the `evmChains` connect option reaches rgb-lib-wasm in the
+  bindings' camel-case shape. In 1.0.0-beta.89 any configured chain made
+  going online fail with "missing field `rpcUrl`".
+
+## [1.0.0-beta.89] - 2026-11-18
+
+### Added
+
+- RGB on-chain (`RgbLibWasmAdapter`) supports the BFA (bridged fungible
+  asset) schema on the test networks: BFA assets are listed, received and
+  sent like NIA and IFA. The new `evmChains` connect option names the EVM
+  chains whose mint locks the wallet checks for received BFA mints; it is
+  ignored on mainnet, and an unusable endpoint makes the wallet go online
+  without EVM chains instead of failing to connect.
+
+### Fixed
+
+- A go-online consistency failure of RGB on-chain is reported as
+  `ProtocolError` code `INCONSISTENT` again; rgb-lib-wasm 1.0 words the
+  error differently, so it surfaced as a generic error.
+
 ### Changed
 
 - **Breaking:** `@arkade-os/sdk` moves to the 0.5 line (peer `^0.5.0`)

@@ -51,7 +51,7 @@ import { createArkadeSdkWallet, flattenArkadeConfig } from '../../lib/arkade-sdk
 import { NON_PERSISTENT_STORAGE_REASON } from '../../lib/arkade-storage'
 import { runArkadeVtxoLifecycle } from '../../lib/arkade-vtxo-lifecycle'
 import { decodeBolt11, isBolt11 } from '../../lib/bolt11'
-import { normalizeVtxos, sortVtxosByExpiry, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
+import { normalizeVtxos, sortVtxosByExpiry, summarizeBtcVtxos, toNumber, formatSats, formatUnits } from '../../lib/arkade-helpers'
 import { signLnMessage, verifyLnMessage } from '../../lib/ln-message-sign'
 import { resolveWalletSeed } from '../../lib/wallet-seed'
 import { applyTransactionFilter } from '../../lib/transaction-filter'
@@ -806,15 +806,7 @@ export class ArkadeWdkAdapter extends BaseWdkAdapter implements IProtocolAdapter
       return { ...normalized, available, total: normalized.boardingTotal + available + normalized.recoverable }
     }
 
-    const vtxoSummary = normalizedVtxos.reduce(
-      (summary, vtxo) => {
-        if (vtxo.state === 'swept') summary.recoverable += vtxo.value
-        else if (vtxo.state === 'preconfirmed') summary.preconfirmed += vtxo.value
-        else summary.settled += vtxo.value
-        return summary
-      },
-      { settled: 0, preconfirmed: 0, recoverable: 0 },
-    )
+    const vtxoSummary = summarizeBtcVtxos(normalizedVtxos)
     const available = vtxoSummary.settled + vtxoSummary.preconfirmed
     return {
       ...normalized,
