@@ -91,7 +91,7 @@
     "clean": "rm -rf dist",
     "prepare": "node scripts/prepare.mjs",
     "prepublishOnly": "npm run build",
-    "check:bark-types": "tsc --noEmit --strict --skipLibCheck --target ES2020 --module ES2020 --moduleResolution bundler test/bark-native.types.ts"
+    "check:bark-types": "tsc --noEmit --ignoreConfig --strict --skipLibCheck --target ES2020 --module ES2020 --moduleResolution bundler test/bark-native.types.ts"
   },
   "files": [
     "dist"
@@ -174,7 +174,7 @@
     "react": "19.3.1",
     "react-native": "0.81.5",
     "tsx": "^4.23.15",
-    "typescript": "~5.9.3",
+    "typescript": "~7.0.2",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"
   },
