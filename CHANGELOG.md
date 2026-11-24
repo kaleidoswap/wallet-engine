@@ -7,6 +7,20 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.94] - 2026-11-24
+
+### Added
+
+- RGB-L1: `IRgbPreviewOperations` (part of `IProtocolAdapter`). `previewSendAsset`,
+  `previewSendBtc` and `previewCreateRgbUtxos` run the begin call as a dry run and
+  return the exact fee, inputs and outputs; nothing is saved, reserved, signed or
+  broadcast. `inspectRgbPsbt` summarizes a PSBT with the wallet's own inputs and
+  outputs marked, and fails on a missing or invalid amount. `importRgbAsset`
+  imports an asset from a transfer consignment.
+- RGB-L1: `sendAsset`, `sendBtcOnchain`, `createRgbUtxos` and `refreshBalances`
+  accept an `AbortSignal` that stops the sync and the begin call. A broadcast
+  cannot be aborted.
+
 ## [1.0.0-beta.93] - 2026-11-24
 
 ### Changed
