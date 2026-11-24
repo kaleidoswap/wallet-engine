@@ -509,6 +509,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<IRgbOperations> &
   Partial<IRgbHtlcOperations> &
   Partial<IRgbMintOperations> &
+  Partial<IRgbPreviewOperations> &
   Partial<IBackupOperations> &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &
