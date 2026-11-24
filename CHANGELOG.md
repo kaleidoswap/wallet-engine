@@ -7,6 +7,20 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.93] - 2026-11-24
+
+### Changed
+
+- RGB-L1: the adapter targets `@utexo/rgb-lib-wasm` 1.0.0-beta.5 (peer range
+  `^1.0.0-beta.5`). Wallets and backups written by beta.4 do not open in
+  beta.5; the host resets the local store when `WasmWallet.create` fails with a
+  persistence error.
+
+### Fixed
+
+- Arkade: asset-carrying VTXOs are kept out of the BTC balance.
+- RGB-L1: the rgb-lib wallet is freed on disconnect.
+
 ## [1.0.0-beta.92] - 2026-11-20
 
 ### Security
