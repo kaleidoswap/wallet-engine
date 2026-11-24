@@ -232,6 +232,38 @@ export interface RgbReceivedMint {
   bridgeContract: string
 }
 
+/** A PSBT read without signing it; amounts are satoshis. */
+export interface RgbPsbtSummary {
+  txid: string
+  inputs: Array<{ outpoint: string; amountSat: number; isMine: boolean }>
+  outputs: Array<{ address: string | null; amountSat: number; isOpReturn: boolean; isMine: boolean }>
+  totalInputSat: number
+  totalOutputSat: number
+  feeSat: number
+  sizeVbytes: number
+  signatureCount: number
+}
+
+/** RGB on-chain wallets that can show what an operation does before it is signed. */
+export interface IRgbPreviewOperations {
+  /** Inputs, outputs and fee of a PSBT, with the wallet's own ones marked. */
+  inspectRgbPsbt(psbt: string): Promise<RgbPsbtSummary>
+  /** The PSBT an asset send would sign. Saves, signs and broadcasts nothing. */
+  previewSendAsset(params: Record<string, unknown>): Promise<RgbPsbtSummary>
+  /** The PSBT a BTC send would sign. Reserves nothing. */
+  previewSendBtc(params: { address: string; amount: number; feeRate?: number; signal?: AbortSignal }): Promise<RgbPsbtSummary>
+  /** The PSBT creating colorable UTXOs would sign. Reserves nothing. */
+  previewCreateRgbUtxos(params: {
+    num?: number
+    size?: number
+    feeRate?: number
+    upTo?: boolean
+    signal?: AbortSignal
+  }): Promise<RgbPsbtSummary>
+  /** Imports an asset from a transfer consignment so invoices can be made for it. */
+  importRgbAsset(params: { consignment: Uint8Array | string; txid: string }): Promise<void>
+}
+
 /** RGB on-chain wallets that receive BFA mints. */
 export interface IRgbMintOperations {
   /** The checked mint received on `recipientId`, or null when there is none. */
@@ -477,6 +509,7 @@ export type IProtocolAdapter = ICoreProtocolAdapter &
   Partial<IRgbOperations> &
   Partial<IRgbHtlcOperations> &
   Partial<IRgbMintOperations> &
+  Partial<IRgbPreviewOperations> &
   Partial<IBackupOperations> &
   Partial<ISparkOperations> &
   Partial<IArkadeOperations> &

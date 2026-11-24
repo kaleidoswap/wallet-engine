@@ -20,6 +20,8 @@ import type {
   RgbHtlcOperation,
   RgbHtlcAllocation,
   RgbReceivedMint,
+  RgbPsbtSummary,
+  IRgbPreviewOperations,
 } from '../IProtocolAdapter'
 import {
   ProtocolType,
@@ -231,7 +233,86 @@ export function serializeWasmAccount<T extends object>(account: T): T {
   }) as T
 }
 
-export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapter, IRgbHtlcOperations {
+export interface CreateRgbUtxosParams {
+  num?: number
+  size?: number
+  feeRate?: number
+  upTo?: boolean
+  /** Aborts the preparation (sync and begin); a broadcast cannot be aborted. */
+  signal?: AbortSignal
+}
+
+export interface SendBtcParams {
+  address: string
+  amount: number
+  feeRate?: number
+  signal?: AbortSignal
+}
+
+/** A required amount: a non-negative safe integer, never a silent zero. */
+const sats = (v: unknown, field: string): number => {
+  const n = typeof v === 'bigint' || typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new ProtocolError(`PSBT inspection has an invalid ${field}`, 'RGB_L1', 'INVALID_RESPONSE')
+  }
+  return n
+}
+
+/** rgb-lib's PSBT inspection as plain numbers: its amounts reach JS as BigInt. */
+export function toRgbPsbtSummary(raw: any): RgbPsbtSummary {
+  if (!raw || !Array.isArray(raw.inputs) || !Array.isArray(raw.outputs)) {
+    throw new ProtocolError('PSBT inspection has no inputs or outputs', 'RGB_L1', 'INVALID_RESPONSE')
+  }
+  return {
+    txid: String(raw.txid ?? ''),
+    inputs: raw.inputs.map((i: any) => ({
+      outpoint: formatOutpoint(i?.outpoint),
+      amountSat: sats(i?.amountSat, 'input amount'),
+      isMine: Boolean(i?.isMine),
+    })),
+    outputs: raw.outputs.map((o: any) => ({
+      address: o?.address ?? null,
+      amountSat: sats(o?.amountSat, 'output amount'),
+      isOpReturn: Boolean(o?.isOpReturn),
+      isMine: Boolean(o?.isMine),
+    })),
+    totalInputSat: sats(raw.totalInputSat, 'input total'),
+    totalOutputSat: sats(raw.totalOutputSat, 'output total'),
+    feeSat: sats(raw.feeSat, 'fee'),
+    sizeVbytes: sats(raw.sizeVbytes, 'size'),
+    signatureCount: sats(raw.signatureCount, 'signature count'),
+  }
+}
+
+export type SendAssetParams = {
+  assetId?: string
+  token: string
+  recipientId?: string
+  recipient: string
+  /**
+   * The recipient's RGB invoice. Proxy protocol 1.0 sends need its public key,
+   * encryption preference and expiration, so a bare recipient id is refused.
+   * `recipient`/`recipientId` may carry the invoice instead.
+   */
+  invoice?: string
+  amount: number
+  assignment?: { type?: string; value?: number } | null
+  feeRate?: number
+  minConfirmations?: number
+  donation?: boolean
+  /** Overrides the invoice's transport endpoints. */
+  transportEndpoints?: string[]
+  /** Set only for witness invoices (blinded otherwise). */
+  witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number | null } | null
+  witness_data?: { amountSat?: number; amount_sat?: number; blinding?: number | null } | null
+  /** Aborts the preparation (sync and begin); a broadcast send cannot be aborted. */
+  signal?: AbortSignal
+}
+
+export class RgbLibWasmAdapter
+  extends BaseWdkAdapter
+  implements IProtocolAdapter, IRgbHtlcOperations, IRgbPreviewOperations
+{
   readonly protocolName: ProtocolType = 'RGB_L1'
   readonly capabilities = PROTOCOL_OPERATIONS.RGB_L1
   readonly supportedLayers: Layer[] = getCapabilities('RGB_L1').layers
@@ -345,9 +426,16 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   /** Sync both keychains; rgb-lib-wasm syncs one keychain per call. */
-  private async syncWallet(strategy: 'FastSync' | 'FullSync' | 'FullScan' = 'FastSync'): Promise<void> {
-    await this.account.sync(this.online, { keychain: 'Colored', strategy })
-    await this.account.sync(this.online, { keychain: { Vanilla: { lookback: VANILLA_SYNC_LOOKBACK } }, strategy })
+  private async syncWallet(
+    strategy: 'FastSync' | 'FullSync' | 'FullScan' = 'FastSync',
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.account.sync(this.online, { keychain: 'Colored', strategy }, signal ?? null)
+    await this.account.sync(
+      this.online,
+      { keychain: { Vanilla: { lookback: VANILLA_SYNC_LOOKBACK } }, strategy },
+      signal ?? null,
+    )
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -401,13 +489,13 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     return this.detailedBtcBalance()
   }
 
-  async refreshBalances(): Promise<void> {
+  async refreshBalances(opts: { signal?: AbortSignal } = {}): Promise<void> {
     this.assertConnected()
     // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
     // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
     // synced again — two full indexer round-trips, ~2× the cold-sync wait.
-    await this.syncWallet()
-    const result = await this.account.refresh?.(this.online, null, [], true)
+    await this.syncWallet('FastSync', opts.signal)
+    const result = await this.account.refresh?.(this.online, null, [], true, opts.signal ?? null)
     // rgb-lib reports a transfer it cannot advance as a per-transfer `failure`,
     // not a throw; unlogged, a receive that never settles leaves no trace (#108).
     for (const [idx, t] of refreshEntries(result)) {
@@ -967,22 +1055,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     return this.account.finalizePsbt(psbt)
   }
 
-  async createRgbUtxos(params: { num?: number; size?: number; feeRate?: number; upTo?: boolean }): Promise<{ success: boolean }> {
-    this.assertConnected()
-    // Same rationale as sendAsset: createUtxosBegin selects from vanilla UTXOs
-    // tracked in the local DB; sync first so the indexer's current view is used.
-    await this.refreshBalances()
-    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
-    const unsigned: string = await this.account.createUtxosBegin(
-      this.online,
-      params.upTo ?? false,
-      false,
-      params.num ?? null,
-      params.size ?? null,
-      feeRate,
-      false,
-      false
-    )
+  async createRgbUtxos(params: CreateRgbUtxosParams): Promise<{ success: boolean }> {
+    const unsigned = await this.beginCreateUtxos(params, false)
     const signed = await this.account.signPsbt(unsigned)
     await this.account.createUtxosEnd(this.online, signed)
     // Commit the new UTXO set before the caller relies on it (e.g. immediately
@@ -991,28 +1065,34 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     return { success: true }
   }
 
-  async sendAsset(params: {
-    assetId?: string
-    token: string
-    recipientId?: string
-    recipient: string
-    /**
-     * The recipient's RGB invoice. Proxy protocol 1.0 sends need its public key,
-     * encryption preference and expiration, so a bare recipient id is refused.
-     * `recipient`/`recipientId` may carry the invoice instead.
-     */
-    invoice?: string
-    amount: number
-    assignment?: { type?: string; value?: number } | null
-    feeRate?: number
-    minConfirmations?: number
-    donation?: boolean
-    /** Overrides the invoice's transport endpoints. */
-    transportEndpoints?: string[]
-    /** Set only for witness invoices (blinded otherwise). */
-    witnessData?: { amountSat?: number; amount_sat?: number; blinding?: number | null } | null
-    witness_data?: { amountSat?: number; amount_sat?: number; blinding?: number | null } | null
-  }): Promise<any> {
+  /** The PSBT creating the UTXOs would sign, with its exact fee; nothing is reserved. */
+  async previewCreateRgbUtxos(params: CreateRgbUtxosParams): Promise<RgbPsbtSummary> {
+    return this.inspectRgbPsbt(await this.beginCreateUtxos(params, true))
+  }
+
+  private async beginCreateUtxos(params: CreateRgbUtxosParams, dryRun: boolean): Promise<string> {
+    this.assertConnected()
+    // createUtxosBegin selects from vanilla UTXOs tracked in the local DB; sync
+    // first so the indexer's current view is used.
+    await this.refreshBalances({ signal: params.signal })
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
+    return this.account.createUtxosBegin(
+      this.online,
+      params.upTo ?? false,
+      false,
+      params.num ?? null,
+      params.size ?? null,
+      feeRate,
+      false,
+      dryRun,
+      params.signal ?? null,
+    )
+  }
+
+  private prepareSendAsset(params: SendAssetParams): {
+    recipientMap: Record<string, Record<string, unknown>[]>
+    opts: { feeRate?: number; minConfirmations?: number; donation?: boolean }
+  } {
     this.assertConnected()
     const amount = Number(params.amount ?? params.assignment?.value ?? 0)
     if (!Number.isFinite(amount) || amount <= 0) {
@@ -1072,11 +1152,21 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
         blinding: null,
       }
     }
-    return this.sendRecipients({ [token]: [recipient] }, {
-      feeRate: params.feeRate,
-      minConfirmations: params.minConfirmations,
-      donation: params.donation,
-    })
+    return {
+      recipientMap: { [token]: [recipient] },
+      opts: { feeRate: params.feeRate, minConfirmations: params.minConfirmations, donation: params.donation },
+    }
+  }
+
+  async sendAsset(params: SendAssetParams): Promise<any> {
+    const { recipientMap, opts } = this.prepareSendAsset(params)
+    return this.sendRecipients(recipientMap, { ...opts, signal: params.signal })
+  }
+
+  /** The PSBT a send would sign, with its exact fee; nothing is saved or broadcast. */
+  async previewSendAsset(params: SendAssetParams): Promise<RgbPsbtSummary> {
+    const { recipientMap, opts } = this.prepareSendAsset(params)
+    return this.sendRecipients(recipientMap, { ...opts, signal: params.signal, dryRun: true })
   }
 
   private parseInvoiceRecipient(invoice: string): InvoiceRecipient {
@@ -1101,7 +1191,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   private async sendRecipients(
     recipientMap: Record<string, Record<string, unknown>[]>,
-    opts: { feeRate?: number; minConfirmations?: number; donation?: boolean },
+    opts: { feeRate?: number; minConfirmations?: number; donation?: boolean; signal?: AbortSignal; dryRun?: boolean },
   ): Promise<any> {
     // Recipients post their ACK to, and fetch the signed TX from, the sender's proxy.
     const senderEndpoint = this.transportEndpoints[0]
@@ -1112,7 +1202,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // rgb-lib's `send` only spends *settled* allocations it knows locally, so
     // without a fresh sync+refresh sendBegin fails with "Insufficient total
     // assignments" despite a non-zero UI balance.
-    await this.refreshBalances()
+    await this.refreshBalances({ signal: opts.signal })
     const feeRate = BigInt(Math.round(opts.feeRate ?? defaultRgbFeeRate(this.network)))
     const begin: any = await this.account.sendBegin(
       this.online,
@@ -1123,8 +1213,10 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       expirationTimestamp,
       senderEndpoint,
       null,
-      false,
+      opts.dryRun ?? false,
+      opts.signal ?? null,
     )
+    if (opts.dryRun) return this.inspectRgbPsbt(begin?.psbt ?? begin)
     const signed = await this.account.signPsbt(begin?.psbt ?? begin)
     const result = await this.account.sendEnd(this.online, signed)
     // The spend is broadcast; persist the consumed-allocation state so a SW kill
@@ -1140,17 +1232,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     }
   }
 
-  async sendBtcOnchain(params: { address: string; amount: number; feeRate?: number }): Promise<any> {
-    this.assertConnected()
-    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
-    const unsigned: string = await this.account.sendBtcBegin(
-      this.online,
-      params.address,
-      BigInt(params.amount),
-      feeRate,
-      false,
-      false
-    )
+  async sendBtcOnchain(params: SendBtcParams): Promise<any> {
+    const unsigned = await this.beginSendBtc(params, false)
     const signed = await this.account.signPsbt(unsigned)
     const txid: string = await this.account.sendBtcEnd(this.online, signed)
     await this.flushState()
@@ -1159,6 +1242,42 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       throw new ProtocolError('BTC send did not return a transaction ID', 'RGB_L1', 'SEND_ERROR')
     }
     return { ok: true, txid }
+  }
+
+  /** The PSBT a BTC send would sign, with its exact fee; nothing is reserved. */
+  async previewSendBtc(params: SendBtcParams): Promise<RgbPsbtSummary> {
+    return this.inspectRgbPsbt(await this.beginSendBtc(params, true))
+  }
+
+  private async beginSendBtc(params: SendBtcParams, dryRun: boolean): Promise<string> {
+    this.assertConnected()
+    const feeRate = BigInt(Math.round(params.feeRate ?? defaultRgbFeeRate(this.network)))
+    return this.account.sendBtcBegin(
+      this.online,
+      params.address,
+      BigInt(params.amount),
+      feeRate,
+      false,
+      dryRun,
+      params.signal ?? null,
+    )
+  }
+
+  /** Read-only summary of a PSBT: inputs, outputs, fee and which of them are the wallet's own. */
+  async inspectRgbPsbt(psbt: string): Promise<RgbPsbtSummary> {
+    this.assertConnected()
+    return toRgbPsbtSummary(await this.account.inspectPsbt(psbt))
+  }
+
+  /** Imports an asset from a transfer consignment (bytes or base64) so invoices can be made for it. */
+  async importRgbAsset(params: { consignment: Uint8Array | string; txid: string }): Promise<void> {
+    this.assertConnected()
+    const bytes =
+      typeof params.consignment === 'string'
+        ? Uint8Array.from(atob(params.consignment), (c) => c.charCodeAt(0))
+        : params.consignment
+    await this.account.saveNewAsset(this.online, bytes, params.txid)
+    await this.flushState()
   }
 
   // --- UTXOs / fees / metadata / transfer maintenance ---------------------
