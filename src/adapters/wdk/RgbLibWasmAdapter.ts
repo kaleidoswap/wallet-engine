@@ -146,6 +146,9 @@ const U64_MAX = (1n << 64n) - 1n
 const INVOICE_EXPIRATION_MARGIN_SECS = 600
 const OPERATION_DURATION_SECS = 3600
 const DEFAULT_RECEIVE_DURATION_SECS = 86_400
+/** How long the script of a failed witness receive stays watched (7 days). */
+const FAILED_WITNESS_RECEIVE_GRACE_SECS = 604_800
+const VANILLA_SYNC_LOOKBACK = 20
 
 function nowSeconds(): number {
   return Math.floor(Date.now() / 1000)
@@ -262,7 +265,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     }
 
     this.wasmModule = mod
-    const keys = mod.restoreKeys(rgbNetwork, cfg.mnemonic)
+    // Taproot keeps the account keys, and so the addresses, of existing wallets.
+    const keys = mod.restoreKeys(rgbNetwork, cfg.mnemonic, 'Taproot')
     const walletData = {
       // Scope the store by rgb-lib network, not the host label: rgb-lib panics
       // ("unreachable") if a store is reopened under a different BitcoinNetwork.
@@ -270,20 +274,21 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       bitcoinNetwork: rgbNetwork,
       databaseType: 'Sqlite', // the enum value the wasm build accepts; IndexedDB is the actual backing
       maxAllocationsPerUtxo: cfg.maxAllocationsPerUtxo ?? 5,
-      mnemonic: keys.mnemonic ?? cfg.mnemonic,
-      masterFingerprint: keys.masterFingerprint ?? keys.master_fingerprint,
-      accountXpubVanilla: keys.accountXpubVanilla ?? keys.account_xpub_vanilla,
-      accountXpubColored: keys.accountXpubColored ?? keys.account_xpub_colored,
-      vanillaKeychain: null,
-      // rgb-lib rejects the IFA and BFA schemas on mainnet (CannotUseIfaOnMainnet,
-      // CannotUseBfaOnMainnet), which makes WasmWallet.create throw.
+      // rgb-lib rejects the IFA and BFA schemas on mainnet (CannotUseSchemaOnMainnet),
+      // which makes WasmWallet.create throw.
       supportedSchemas: rgbNetwork === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', 'Bfa'],
+    }
+    const walletKeys = {
+      accountXpubVanilla: keys.accountXpubVanilla,
+      accountXpubColored: keys.accountXpubColored,
+      masterFingerprint: keys.masterFingerprint,
+      witnessVersion: keys.witnessVersion,
+      mnemonic: keys.mnemonic ?? cfg.mnemonic,
+      vanillaKeychain: null,
     }
 
     const WasmWallet = mod.WasmWallet
-    const rawWallet = WasmWallet.create
-      ? await WasmWallet.create(JSON.stringify(walletData))
-      : new WasmWallet(JSON.stringify(walletData))
+    const rawWallet = await WasmWallet.create(JSON.stringify(walletData), JSON.stringify(walletKeys))
     // Not reentrant: an op starting mid-flight corrupts thread-locals and panics
     // ("Lazy instance poisoned"). Queue every wallet call so they never overlap.
     this.account = serializeWasmAccount(rawWallet)
@@ -293,6 +298,8 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       this.account.goOnline({
         indexerConfig: { Esplora: { url: cfg.indexerUrl } },
         skipConsistencyCheck,
+        failedWitnessReceiveGraceSecs: FAILED_WITNESS_RECEIVE_GRACE_SECS,
+        vanillaSyncLookback: VANILLA_SYNC_LOOKBACK,
         proxyAuthKeys: {},
         evmChains,
       })
@@ -323,21 +330,24 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
    * One-time recovery for a wallet restored from a thin BDK snapshot (no revealed
    * SPKs), left behind when an MV3 teardown interrupts rgb-lib-wasm's async save.
    * Incremental sync can't rediscover the on-chain BTC there, so balance reads 0:
-   * if BTC is still 0 after a sync, `fullScan` then `flush`. Version-guarded
-   * (`fullScan` is absent on ≤ beta.2) and best-effort.
+   * if BTC is still 0 after a sync, a full scan then `flush`. Best-effort.
    */
   private async recoverBtcStateIfThin(): Promise<void> {
-    const fullScan = (this.account as { fullScan?: unknown } | null)?.fullScan
-    if (typeof fullScan !== 'function') return
     try {
-      await this.account.sync(this.online)
+      await this.syncWallet()
       const { total } = await this.getBtcBalance()
       if (total > 0) return // state already healthy — skip the costlier full scan
-      await (this.account as { fullScan: (online: unknown) => Promise<void> }).fullScan(this.online)
+      await this.syncWallet('FullScan')
       await this.flushState()
     } catch (e) {
       console.error('[RGB-L1] BTC state recovery scan failed:', e)
     }
+  }
+
+  /** Sync both keychains; rgb-lib-wasm syncs one keychain per call. */
+  private async syncWallet(strategy: 'FastSync' | 'FullSync' | 'FullScan' = 'FastSync'): Promise<void> {
+    await this.account.sync(this.online, { keychain: 'Colored', strategy })
+    await this.account.sync(this.online, { keychain: { Vanilla: { lookback: VANILLA_SYNC_LOOKBACK } }, strategy })
   }
 
   async getConnectionInfo(): Promise<ConnectionInfo> {
@@ -366,7 +376,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     colored: { settled: number; future: number; spendable: number }
   }> {
     this.assertConnected()
-    const v: any = (await this.account.getBtcBalance()) ?? {}
+    const v: any = (await this.account.getBtcBalance(this.online, true)) ?? {}
     return {
       vanilla: readRgbLibBtcBalanceBucket(v.vanilla ?? v),
       colored: v.colored ? readRgbLibBtcBalanceBucket(v.colored) : { settled: 0, spendable: 0, future: 0 },
@@ -396,7 +406,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     // Sync the wallet ONCE, then refresh transfer statuses reusing that sync
     // (skip_sync=true). Previously refresh(skip_sync=false) synced and then we
     // synced again — two full indexer round-trips, ~2× the cold-sync wait.
-    await this.account.sync?.(this.online)
+    await this.syncWallet()
     const result = await this.account.refresh?.(this.online, null, [], true)
     // rgb-lib reports a transfer it cannot advance as a per-transfer `failure`,
     // not a throw; unlogged, a receive that never settles leaves no trace (#108).
@@ -552,7 +562,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   // --- Transactions -------------------------------------------------------
   async listTransactions(filter?: TransactionFilter): Promise<UnifiedTransaction[]> {
     this.assertConnected()
-    const raw: any = await this.account.listTransactions()
+    const raw: any = await this.account.listTransactions(this.online, true)
     const txs: any[] = Array.isArray(raw) ? raw : raw?.transactions ?? []
     const mapped = txs.map((t) => {
       const { received, sent, type } = normalizeRgbLibTransactionAmounts(t)
@@ -600,7 +610,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
 
   async listTransfers(options?: { asset_id?: string }): Promise<unknown> {
     this.assertConnected()
-    if (options?.asset_id) return this.account.listTransfers({ id: options.asset_id })
+    if (options?.asset_id) return this.account.listTransfers({ Id: options.asset_id }, 'All')
     return this.listAllTransfers()
   }
 
@@ -616,11 +626,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     for (const a of assets) {
       const assetId = normalizeAsset(a).asset_id
       if (!assetId) continue
-      for (const t of rows(await this.account.listTransfers({ id: assetId }))) {
+      for (const t of rows(await this.account.listTransfers({ Id: assetId }, 'All'))) {
         out.push({ ...t, assetId: t?.assetId ?? t?.asset_id ?? assetId })
       }
     }
-    out.push(...rows(await this.account.listTransfers('noAsset')))
+    out.push(...rows(await this.account.listTransfers('None', 'All')))
     return out
   }
 
@@ -896,7 +906,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
   }
 
   private async receivedHtlcPayout(params: { assetId: string; txid: string }): Promise<boolean> {
-    const raw: any = await this.account.listTransfers({ id: params.assetId })
+    const raw: any = await this.account.listTransfers({ Id: params.assetId }, 'All')
     const rows: any[] = Array.isArray(raw) ? raw : (raw?.transfers ?? [])
     return rows.some((t) => {
       const kind = String(t?.kind ?? '')
@@ -966,13 +976,15 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     const unsigned: string = await this.account.createUtxosBegin(
       this.online,
       params.upTo ?? false,
+      false,
       params.num ?? null,
       params.size ?? null,
       feeRate,
+      false,
       false
     )
     const signed = await this.account.signPsbt(unsigned)
-    await this.account.createUtxosEnd(this.online, signed, false)
+    await this.account.createUtxosEnd(this.online, signed)
     // Commit the new UTXO set before the caller relies on it (e.g. immediately
     // issuing/receiving against the freshly-created colorable UTXOs).
     await this.flushState()
@@ -1114,7 +1126,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       false,
     )
     const signed = await this.account.signPsbt(begin?.psbt ?? begin)
-    const result = await this.account.sendEnd(this.online, signed, false)
+    const result = await this.account.sendEnd(this.online, signed)
     // The spend is broadcast; persist the consumed-allocation state so a SW kill
     // can't leave the wallet thinking the inputs are still spendable (which would
     // later fail as "insufficient assignments" or attempt a double-spend).
@@ -1136,10 +1148,11 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
       params.address,
       BigInt(params.amount),
       feeRate,
+      false,
       false
     )
     const signed = await this.account.signPsbt(unsigned)
-    const txid: string = await this.account.sendBtcEnd(this.online, signed, false)
+    const txid: string = await this.account.sendBtcEnd(this.online, signed)
     await this.flushState()
     // A successful send must be traceable and reconcilable.
     if (!txid) {
@@ -1160,7 +1173,7 @@ export class RgbLibWasmAdapter extends BaseWdkAdapter implements IProtocolAdapte
     }>
   }> {
     this.assertConnected()
-    const raw: any = await this.account.listUnspents(false)
+    const raw: any = await this.account.listUnspents(this.online, false, true)
     const list: any[] = Array.isArray(raw) ? raw : raw?.unspents ?? []
     return {
       unspents: list.map((u) => {
