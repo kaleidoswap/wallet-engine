@@ -70,6 +70,18 @@ describe('RGB-L1 previews and inspection', () => {
     expect(JSON.stringify(toRgbPsbtSummary(INSPECTION))).toContain('"feeSat":1000')
   })
 
+  it('refuses an inspection with a missing or invalid amount instead of showing zero', () => {
+    for (const bad of [
+      { ...INSPECTION, feeSat: undefined },
+      { ...INSPECTION, feeSat: -1n },
+      { ...INSPECTION, totalOutputSat: 1.5 },
+      { ...INSPECTION, inputs: [{ ...INSPECTION.inputs[0], amountSat: null }] },
+      { ...INSPECTION, outputs: undefined },
+    ]) {
+      expect(() => toRgbPsbtSummary(bad)).toThrow(/PSBT inspection/)
+    }
+  })
+
   it('previews an asset send as a dry run that signs and broadcasts nothing', async () => {
     const sendBegin = vi.fn(async () => ({ psbt: 'psbt-b64', batchTransferIdx: null }))
     const signPsbt = vi.fn()

@@ -249,31 +249,38 @@ export interface SendBtcParams {
   signal?: AbortSignal
 }
 
-const sats = (v: unknown): number => {
-  const n = Number(v ?? 0)
-  return Number.isSafeInteger(n) ? n : 0
+/** A required amount: a non-negative safe integer, never a silent zero. */
+const sats = (v: unknown, field: string): number => {
+  const n = typeof v === 'bigint' || typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN
+  if (!Number.isSafeInteger(n) || n < 0) {
+    throw new ProtocolError(`PSBT inspection has an invalid ${field}`, 'RGB_L1', 'INVALID_RESPONSE')
+  }
+  return n
 }
 
 /** rgb-lib's PSBT inspection as plain numbers: its amounts reach JS as BigInt. */
 export function toRgbPsbtSummary(raw: any): RgbPsbtSummary {
+  if (!raw || !Array.isArray(raw.inputs) || !Array.isArray(raw.outputs)) {
+    throw new ProtocolError('PSBT inspection has no inputs or outputs', 'RGB_L1', 'INVALID_RESPONSE')
+  }
   return {
-    txid: String(raw?.txid ?? ''),
-    inputs: (raw?.inputs ?? []).map((i: any) => ({
+    txid: String(raw.txid ?? ''),
+    inputs: raw.inputs.map((i: any) => ({
       outpoint: formatOutpoint(i?.outpoint),
-      amountSat: sats(i?.amountSat),
+      amountSat: sats(i?.amountSat, 'input amount'),
       isMine: Boolean(i?.isMine),
     })),
-    outputs: (raw?.outputs ?? []).map((o: any) => ({
+    outputs: raw.outputs.map((o: any) => ({
       address: o?.address ?? null,
-      amountSat: sats(o?.amountSat),
+      amountSat: sats(o?.amountSat, 'output amount'),
       isOpReturn: Boolean(o?.isOpReturn),
       isMine: Boolean(o?.isMine),
     })),
-    totalInputSat: sats(raw?.totalInputSat),
-    totalOutputSat: sats(raw?.totalOutputSat),
-    feeSat: sats(raw?.feeSat),
-    sizeVbytes: sats(raw?.sizeVbytes),
-    signatureCount: sats(raw?.signatureCount),
+    totalInputSat: sats(raw.totalInputSat, 'input total'),
+    totalOutputSat: sats(raw.totalOutputSat, 'output total'),
+    feeSat: sats(raw.feeSat, 'fee'),
+    sizeVbytes: sats(raw.sizeVbytes, 'size'),
+    signatureCount: sats(raw.signatureCount, 'signature count'),
   }
 }
 
