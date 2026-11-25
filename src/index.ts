@@ -37,6 +37,8 @@ export {
   type IRgbOperations,
   type IRgbHtlcOperations,
   type IRgbMintOperations,
+  type IRgbPreviewOperations,
+  type RgbPsbtSummary,
   type RgbReceivedMint,
   type RgbHtlcOperation,
   type RgbHtlcOperationStatus,
