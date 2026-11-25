@@ -74,10 +74,16 @@ export interface RgbLibWasmAdapterConfig extends BaseProtocolConfig {
   /**
    * EVM chains of the bridges of BFA assets, by EIP-155 chain ID. A received
    * BFA mint stays pending until its lock is checked on its chain. Ignored on
-   * mainnet, where rgb-lib refuses the BFA schema. An unreachable endpoint does
-   * not keep the wallet offline: it goes online without EVM chains.
+   * mainnet unless `allowBfaOnMainnet` is set. An unreachable endpoint does not
+   * keep the wallet offline: it goes online without EVM chains.
    */
   evmChains?: Record<string, RgbEvmChain>
+  /**
+   * Hold, receive and send BFA assets on mainnet. Needs an rgb-lib-wasm build
+   * with `allowRecklessSchemas` (rgb-lib refuses BFA on mainnet otherwise and
+   * the wallet would not open). IFA stays off mainnet. Defaults to false.
+   */
+  allowBfaOnMainnet?: boolean
 }
 
 /** An EVM chain rgb-lib checks BFA mint locks on. */
@@ -334,6 +340,7 @@ export class RgbLibWasmAdapter
     this.transportEndpoints = cfg.transportEndpoints ?? []
     const rgbNetwork = toRgbNetwork(this.network)
     this.rgbNetwork = rgbNetwork
+    const mainnetBfa = rgbNetwork === 'Mainnet' && cfg.allowBfaOnMainnet === true
 
     // The host injects an already-wasm-initialized module; the inline import is
     // the Node/Vite fallback. `init()` is rgb-lib's panic/log hook (idempotent).
@@ -355,9 +362,10 @@ export class RgbLibWasmAdapter
       bitcoinNetwork: rgbNetwork,
       databaseType: 'Sqlite', // the enum value the wasm build accepts; IndexedDB is the actual backing
       maxAllocationsPerUtxo: cfg.maxAllocationsPerUtxo ?? 5,
-      // rgb-lib rejects the IFA and BFA schemas on mainnet (CannotUseSchemaOnMainnet),
-      // which makes WasmWallet.create throw.
-      supportedSchemas: rgbNetwork === 'Mainnet' ? ['Nia'] : ['Nia', 'Ifa', 'Bfa'],
+      // rgb-lib refuses IFA and BFA on mainnet unless allowRecklessSchemas is set,
+      // and WasmWallet.create then throws.
+      supportedSchemas: rgbNetwork !== 'Mainnet' ? ['Nia', 'Ifa', 'Bfa'] : mainnetBfa ? ['Nia', 'Bfa'] : ['Nia'],
+      allowRecklessSchemas: mainnetBfa,
     }
     const walletKeys = {
       accountXpubVanilla: keys.accountXpubVanilla,
@@ -384,7 +392,7 @@ export class RgbLibWasmAdapter
         proxyAuthKeys: {},
         evmChains,
       })
-    const evmChains = rgbNetwork === 'Mainnet' ? {} : toRgbLibEvmChains(cfg.evmChains)
+    const evmChains = rgbNetwork === 'Mainnet' && !mainnetBfa ? {} : toRgbLibEvmChains(cfg.evmChains)
     try {
       try {
         this.online = await goOnline(evmChains)
