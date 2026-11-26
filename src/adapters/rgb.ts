@@ -1,6 +1,6 @@
 /**
  * RGB-only native adapter entry — sub-path export
- * `@kaleidorg/wallet-engine/adapters/rgb`. Pulls only `kaleido-sdk`. The NWC
+ * `@kaleidoswap/wallet-engine/adapters/rgb`. Pulls only `kaleido-sdk`. The NWC
  * transport is injected via `setNwcRlnClientFactory`, keeping the nostr/relay
  * dependency out of the engine.
  */

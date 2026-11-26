@@ -1,5 +1,5 @@
 /**
- * Lean Liquid (WASM) entry — `@kaleidorg/wallet-engine/adapters/wdk/wasm-liquid`.
+ * Lean Liquid (WASM) entry — `@kaleidoswap/wallet-engine/adapters/wdk/wasm-liquid`.
  *
  * Exposes ONLY the Liquid adapter + the module-injection seam. The full
  * `./adapters/wdk` barrel re-exports every adapter, transitively dragging in heavy

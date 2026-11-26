@@ -1,5 +1,5 @@
 /**
- * @kaleidorg/wallet-engine
+ * @kaleidoswap/wallet-engine
  * Headless multi-protocol Bitcoin L2 wallet engine — one `IProtocolAdapter`
  * contract over Spark, RGB-LN, RGB-L1, Liquid and Arkade, with a cross-protocol
  * router, BIP321 unified receive and lite/advanced disclosure.
@@ -107,7 +107,7 @@ export { LIQUID_USDT_ASSET_ID, LIQUID_TESTNET_USDT_ASSET_ID } from './constants'
 
 // Adapters are deliberately NOT exported here — they pull heavy SDK/WDK weight an
 // extension host does not want. Import them from the opt-in sub-paths:
-//   @kaleidorg/wallet-engine/adapters/native | /adapters/wdk | /swap
+//   @kaleidoswap/wallet-engine/adapters/native | /adapters/wdk | /swap
 
 // Cross-protocol router (chooses BETWEEN protocols)
 export {

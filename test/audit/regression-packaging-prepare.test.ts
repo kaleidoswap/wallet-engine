@@ -12,9 +12,9 @@
  * Measured at parent df6…9a8e581 (see the commit message for the transcript):
  *   $ npm install "git+file:///…/wallet-engine#audit/security-2026-08-30"
  *   added 13 packages …
- *   $ ls node_modules/@kaleidorg/wallet-engine/
+ *   $ ls node_modules/@kaleidoswap/wallet-engine/
  *   LICENSE  README.md  package.json          <- no dist/
- *   $ node -e "import('@kaleidorg/wallet-engine')"
+ *   $ node -e "import('@kaleidoswap/wallet-engine')"
  *   ERR_MODULE_NOT_FOUND … /dist/index.js
  *
  * This test pins the invariant that makes that possible: every published entry

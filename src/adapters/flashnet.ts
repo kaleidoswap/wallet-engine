@@ -1,6 +1,6 @@
 /**
  * Flashnet adapter entry — AMM (Flashnet) + cross-chain bridge (Orchestra).
- * Sub-path export `@kaleidorg/wallet-engine/adapters/flashnet`. Pulls
+ * Sub-path export `@kaleidoswap/wallet-engine/adapters/flashnet`. Pulls
  * `@flashnet/sdk` only; the Orchestra REST client carries no SDK and takes its API
  * key via `setOrchestraApiKey()`. `flashnetClientManager.initialize()` needs a
  * `SparkWallet`, so this composes with `adapters/spark`.

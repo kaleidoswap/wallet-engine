@@ -1,6 +1,6 @@
 /**
  * Bark-only adapter entry — sub-path export
- * `@kaleidorg/wallet-engine/adapters/bark`. Pulls ONLY `@secondts/bark`, whose
+ * `@kaleidoswap/wallet-engine/adapters/bark`. Pulls ONLY `@secondts/bark`, whose
  * wasm the host instantiates before `connect()` (see `bark-client-manager`).
  */
 export { BarkAdapter } from './BarkAdapter'

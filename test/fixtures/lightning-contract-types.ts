@@ -3,15 +3,15 @@ import type {
   LightningPayment,
   LightningPaymentCapabilities,
   LightningPayments,
-} from '@kaleidorg/wallet-engine/lightning'
+} from '@kaleidoswap/wallet-engine/lightning'
 import type {
   NwcLightningPayments,
   NwcLightningPaymentsOptions,
-} from '@kaleidorg/wallet-engine/lightning/nwc'
+} from '@kaleidoswap/wallet-engine/lightning/nwc'
 import type {
   RlnLightningPayments,
   RlnLightningPaymentsOptions,
-} from '@kaleidorg/wallet-engine/lightning/rln'
+} from '@kaleidoswap/wallet-engine/lightning/rln'
 
 const capabilities: LightningPaymentCapabilities = {
   createInvoice: true,

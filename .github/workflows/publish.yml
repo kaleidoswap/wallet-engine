@@ -1,6 +1,6 @@
 name: Publish to npm
 
-# Publishes @kaleidorg/wallet-engine to npm.
+# Publishes @kaleidoswap/wallet-engine to npm.
 #   - Automatically on a pushed version tag (e.g. `git tag v1.0.0-beta.3 && git push --tags`).
 #   - Or manually via "Run workflow" (workflow_dispatch).
 # Requires repo secret NPM_TOKEN (an npm automation token with publish rights to @kaleidorg).
@@ -56,10 +56,10 @@ jobs:
           npm init -y >/dev/null
           npm install --no-audit --no-fund "./$TGZ"
           node --input-type=module -e "
-            const m = await import('@kaleidorg/wallet-engine');
+            const m = await import('@kaleidoswap/wallet-engine');
             if (typeof m.classifyDestination !== 'function') { throw new Error('root barrel missing expected export'); }
             if (typeof m.asSimplicityOperations !== 'function') { throw new Error('root barrel missing Simplicity exports'); }
-            const native = await import('@kaleidorg/wallet-engine/adapters/bark-react-native');
+            const native = await import('@kaleidoswap/wallet-engine/adapters/bark-react-native');
             if (typeof native.BarkReactNativeAdapter !== 'function') { throw new Error('native Bark entry missing'); }
             console.log('OK: root barrel imports in bare Node with', Object.keys(m).length, 'exports');
           "

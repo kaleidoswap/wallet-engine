@@ -1,6 +1,6 @@
 # Security Policy
 
-`@kaleidorg/wallet-engine` moves real funds across Bitcoin L2s. We take security
+`@kaleidoswap/wallet-engine` moves real funds across Bitcoin L2s. We take security
 seriously and welcome responsible disclosure.
 
 > **Alpha software.** This engine is experimental and unaudited. Do not use it

@@ -1,4 +1,4 @@
-# @kaleidorg/wallet-engine
+# @kaleidoswap/wallet-engine
 
 > Multi-protocol Bitcoin L2 wallet engine — **native or WDK-backed** adapters for
 > **Spark · RGB-LN · RGB-L1 · Liquid · Arkade** behind one `IProtocolAdapter` contract,
@@ -15,7 +15,7 @@ agent).
 ┌──────────────────────────────────────────────────────────────┐
 │  your app   (rate · extension · desktop)                      │
 ├──────────────────────────────────────────────────────────────┤
-│  @kaleidorg/wallet-engine                                     │
+│  @kaleidoswap/wallet-engine                                     │
 │    ProtocolManager · CrossProtocolRouter · UnifiedReceive     │
 │    Capability manifest · Disclosure (lite/advanced) · Swap    │
 │    IProtocolAdapter contract  ·  Platform ports (injected)    │
@@ -85,10 +85,10 @@ The router and UI read that manifest — they never special-case a protocol by n
 ## Install
 
 ```bash
-pnpm add @kaleidorg/wallet-engine
+pnpm add @kaleidoswap/wallet-engine
 ```
 
-> Published as [`@kaleidorg/wallet-engine`](https://www.npmjs.com/package/@kaleidorg/wallet-engine)
+> Published as [`@kaleidoswap/wallet-engine`](https://www.npmjs.com/package/@kaleidoswap/wallet-engine)
 > (renamed from the earlier `@kaleidorg/wallet-protocols`; versions ≤ 1.0.0-beta.11 were
 > published under the old name).
 
@@ -100,7 +100,7 @@ actually load that adapter's subpath.
 
 | You import… | Also install |
 |---|---|
-| `@kaleidorg/wallet-engine/adapters/wdk` (Spark) | `@tetherto/wdk-wallet-spark` |
+| `@kaleidoswap/wallet-engine/adapters/wdk` (Spark) | `@tetherto/wdk-wallet-spark` |
 | `…/adapters/wdk` (RGB/RLN) | `@kaleidorg/wdk-wallet-rln` |
 | `…/adapters/wdk/wasm-liquid` | `@kaleidorg/wdk-wallet-liquid` |
 | `…/adapters/wdk/wasm-rgb` | `@utexo/rgb-lib-wasm` |
@@ -112,7 +112,7 @@ actually load that adapter's subpath.
 
 ```bash
 # RGB/RLN + Liquid only, for example
-pnpm add @kaleidorg/wallet-engine @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-wallet-liquid
+pnpm add @kaleidoswap/wallet-engine @kaleidorg/wdk-wallet-rln @kaleidorg/wdk-wallet-liquid
 ```
 
 > **Migration (≤ beta.53 → beta.54):** protocol SDKs moved from `dependencies`/
@@ -128,9 +128,9 @@ import {
   CrossProtocolRouter,
   buildUnifiedReceiveURI,
   aggregateForLite,
-} from '@kaleidorg/wallet-engine'
+} from '@kaleidoswap/wallet-engine'
 // Adapters + registry live behind the SDK-bearing subpath, so the root stays SDK-free:
-import { createWdkRegistry } from '@kaleidorg/wallet-engine/adapters/wdk'
+import { createWdkRegistry } from '@kaleidoswap/wallet-engine/adapters/wdk'
 
 // 1. Build a registry of WDK-backed adapters (pick the protocols you want).
 const registry = createWdkRegistry({ enabled: ['RGB_LN', 'LIQUID', 'SPARK'] })
@@ -241,7 +241,7 @@ and Node unchanged.
 leak across the boundary.
 
 ```ts
-import { KaleidoswapSwap } from '@kaleidorg/wallet-engine'
+import { KaleidoswapSwap } from '@kaleidoswap/wallet-engine'
 
 const swap = new KaleidoswapSwap(rlnAccount, {
   baseUrl: 'https://api.kaleidoswap.com',
@@ -319,7 +319,7 @@ consumers of `wallet-engine` never import `kaleido-sdk` directly.
 ## Bark on React Native
 
 Import `BarkReactNativeAdapter` from
-`@kaleidorg/wallet-engine/adapters/bark-react-native` for an on-device Bark wallet.
+`@kaleidoswap/wallet-engine/adapters/bark-react-native` for an on-device Bark wallet.
 It implements the same `BARK` protocol as the browser `BarkAdapter`, using the
 native UniFFI SDK and SQLite instead of WASM and IndexedDB. Its entry point stays
 separate from the browser binding and loads native code only during `connect()`.
@@ -332,8 +332,8 @@ This integration targets the published `Wallet.open` API; the older
 `Wallet.create` quickstart is not compatible with this pinned version.
 
 ```ts
-import { ProtocolManager } from '@kaleidorg/wallet-engine'
-import { BarkReactNativeAdapter } from '@kaleidorg/wallet-engine/adapters/bark-react-native'
+import { ProtocolManager } from '@kaleidoswap/wallet-engine'
+import { BarkReactNativeAdapter } from '@kaleidoswap/wallet-engine/adapters/bark-react-native'
 
 // Alternatively, supply the runtime once through setPlatform().
 const bark = new BarkReactNativeAdapter({ runtime: { now: () => Date.now() } })
@@ -407,7 +407,7 @@ funds from displayed balances. Disconnect drains queued work before closing both
 native wallet handles. Retry failed disconnects before reopening.
 
 The lower-level `BarkReactNativeBackend` remains available from
-`@kaleidorg/wallet-engine/backends/bark-react-native`. Its `BarkReactNativeConfig`
+`@kaleidoswap/wallet-engine/backends/bark-react-native`. Its `BarkReactNativeConfig`
 uses `serverUrl` and an optional `onchain` flag; the protocol adapter uses the
 shared `BarkConfig` (`arkServerUrl`) and always attaches BDK.
 
@@ -425,7 +425,7 @@ readiness is not prose — it's the `maturity` field in the capability manifest,
 [Supported protocols](#supported-protocols) and readable at runtime:
 
 ```ts
-import { PROTOCOL_CAPABILITIES } from '@kaleidorg/wallet-engine'
+import { PROTOCOL_CAPABILITIES } from '@kaleidoswap/wallet-engine'
 PROTOCOL_CAPABILITIES.RGB_LN.maturity   // 'beta'
 ```
 

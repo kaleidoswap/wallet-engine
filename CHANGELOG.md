@@ -7,6 +7,10 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- The package moves to the `@kaleidoswap` npm scope: install `@kaleidoswap/wallet-engine`. `@kaleidorg/wallet-engine` stops receiving releases and will be deprecated.
+
 ## [1.0.0-beta.94] - 2026-11-24
 
 ### Added

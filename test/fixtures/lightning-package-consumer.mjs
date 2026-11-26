@@ -1,7 +1,7 @@
-import * as root from '@kaleidorg/wallet-engine'
-import * as lightning from '@kaleidorg/wallet-engine/lightning'
-import { NwcLightningPayments } from '@kaleidorg/wallet-engine/lightning/nwc'
-import { RlnLightningPayments } from '@kaleidorg/wallet-engine/lightning/rln'
+import * as root from '@kaleidoswap/wallet-engine'
+import * as lightning from '@kaleidoswap/wallet-engine/lightning'
+import { NwcLightningPayments } from '@kaleidoswap/wallet-engine/lightning/nwc'
+import { RlnLightningPayments } from '@kaleidoswap/wallet-engine/lightning/rln'
 
 if (typeof lightning.parseMsat !== 'function') throw new Error('./lightning is missing parseMsat')
 if (typeof lightning.validateBolt11Invoice !== 'function') {
