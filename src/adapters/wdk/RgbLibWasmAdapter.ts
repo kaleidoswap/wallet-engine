@@ -1056,9 +1056,10 @@ export class RgbLibWasmAdapter
   }
 
   async createRgbUtxos(params: CreateRgbUtxosParams): Promise<{ success: boolean }> {
-    const unsigned = await this.beginCreateUtxos(params, false)
-    const signed = await this.account.signPsbt(unsigned)
-    await this.account.createUtxosEnd(this.online, signed)
+    await this.endVanilla(
+      () => this.beginCreateUtxos(params, false),
+      (signed) => this.account.createUtxosEnd(this.online, signed),
+    )
     // Commit the new UTXO set before the caller relies on it (e.g. immediately
     // issuing/receiving against the freshly-created colorable UTXOs).
     await this.flushState()
@@ -1233,9 +1234,10 @@ export class RgbLibWasmAdapter
   }
 
   async sendBtcOnchain(params: SendBtcParams): Promise<any> {
-    const unsigned = await this.beginSendBtc(params, false)
-    const signed = await this.account.signPsbt(unsigned)
-    const txid: string = await this.account.sendBtcEnd(this.online, signed)
+    const txid: string = await this.endVanilla(
+      () => this.beginSendBtc(params, false),
+      (signed) => this.account.sendBtcEnd(this.online, signed),
+    )
     await this.flushState()
     // A successful send must be traceable and reconcilable.
     if (!txid) {
@@ -1388,6 +1390,58 @@ export class RgbLibWasmAdapter
    * Durably commit state to IndexedDB. Best-effort and version-guarded: `flush()`
    * postdates beta.2, and a failed flush leaves memory state intact.
    */
+  /**
+   * Begin, sign and end a vanilla operation. A non-dry begin reserves its
+   * inputs until the operation ends or is aborted, so a failure that provably
+   * left nothing on the network releases them: a signing failure, or a
+   * broadcast the network rejected. Any other end failure keeps the
+   * reservation, since the transaction may already be out.
+   */
+  private async endVanilla<T>(
+    begin: () => Promise<string>,
+    end: (signed: string) => Promise<T>,
+  ): Promise<T> {
+    const before = this.pendingVanillaTxids()
+    const unsigned = await begin()
+    let signed: string
+    try {
+      signed = await this.account.signPsbt(unsigned)
+    } catch (error) {
+      await this.abortVanillaSince(before)
+      throw error
+    }
+    try {
+      return await end(signed)
+    } catch (error) {
+      if (isRejectedBroadcast(error)) await this.abortVanillaSince(before)
+      throw error
+    }
+  }
+
+  private pendingVanillaTxids(): Set<string> {
+    if (typeof this.account?.listPendingVanillaTxs !== 'function') return new Set()
+    try {
+      return new Set(vanillaTxids(this.account.listPendingVanillaTxs()))
+    } catch {
+      return new Set()
+    }
+  }
+
+  private async abortVanillaSince(before: Set<string>): Promise<void> {
+    if (typeof this.account?.abortPendingVanillaTx !== 'function') return
+    let aborted = false
+    for (const txid of this.pendingVanillaTxids()) {
+      if (before.has(txid)) continue
+      try {
+        this.account.abortPendingVanillaTx(txid)
+        aborted = true
+      } catch {
+        // Left reserved; rgb-lib releases it when the operation expires.
+      }
+    }
+    if (aborted) await this.flushState().catch(() => {})
+  }
+
   private async flushState(): Promise<void> {
     const fn = (this.account as { flush?: unknown } | null)?.flush
     if (typeof fn !== 'function') return
@@ -1729,4 +1783,22 @@ function firstFiniteNumber(...values: unknown[]): number | null {
     if (Number.isFinite(n)) return n
   }
   return null
+}
+
+/** Txids of rgb-lib's pending vanilla operations, whatever the binding's row shape. */
+function vanillaTxids(raw: unknown): string[] {
+  const rows = Array.isArray(raw) ? raw : raw instanceof Map ? [...raw.values()] : []
+  return rows
+    .map((row) => (typeof row === 'string' ? row : (row as { txid?: unknown } | null)?.txid))
+    .filter((txid): txid is string => typeof txid === 'string' && txid !== '')
+}
+
+/**
+ * rgb-lib's FailedBroadcast, minus the rejections that mean the transaction
+ * (or a spend of its inputs) is already known to the network.
+ */
+export function isRejectedBroadcast(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error ?? '')
+  if (!/failed broadcast/i.test(message)) return false
+  return !/already|known|missingorspent|missing-inputs|duplicate|conflict/i.test(message)
 }

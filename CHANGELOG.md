@@ -7,6 +7,13 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Fixed
+
+- RGB-L1: `sendBtcOnchain` and `createRgbUtxos` release the inputs their begin
+  call reserved when signing fails or the network rejects the broadcast, so they
+  are spendable again right away. A failure that may have left the transaction
+  on the network keeps the reservation.
+
 ## [1.0.0-beta.94] - 2026-11-24
 
 ### Added
