@@ -360,6 +360,59 @@ describe('RgbLibWasmAdapter', () => {
     expect(order).toEqual(['begin', 'sign', 'end'])
   })
 
+  describe('releasing inputs of a failed vanilla operation', () => {
+    function vanilla(endError: Error | null, signError: Error | null = null) {
+      const pending = new Set(['older'])
+      const aborted: string[] = []
+      const adapter = connected({
+        listPendingVanillaTxs: () => [...pending].map((txid) => ({ txid })),
+        abortPendingVanillaTx: (txid: string) => {
+          aborted.push(txid)
+          pending.delete(txid)
+        },
+        sendBtcBegin: async () => {
+          pending.add('mine')
+          return 'unsigned'
+        },
+        signPsbt: (p: string) => {
+          if (signError) throw signError
+          return `signed:${p}`
+        },
+        sendBtcEnd: async () => {
+          if (endError) throw endError
+          return 'btctxid'
+        },
+      })
+      return { adapter, aborted }
+    }
+    const send = (adapter: RgbLibWasmAdapter) =>
+      adapter.sendBtcOnchain({ address: 'bcrt1qdest', amount: 1000, feeRate: 2 })
+
+    it('releases only its own operation when signing fails', async () => {
+      const { adapter, aborted } = vanilla(null, new Error('cannot sign'))
+      await expect(send(adapter)).rejects.toThrow('cannot sign')
+      expect(aborted).toEqual(['mine'])
+    })
+
+    it('releases it when the network rejected the broadcast', async () => {
+      const { adapter, aborted } = vanilla(new Error('Failed broadcast: min relay fee not met'))
+      await expect(send(adapter)).rejects.toThrow('Failed broadcast')
+      expect(aborted).toEqual(['mine'])
+    })
+
+    it('keeps it when the transaction may already be on the network', async () => {
+      for (const message of [
+        'Failed broadcast: txn-already-known',
+        'Failed broadcast: bad-txns-inputs-missingorspent',
+        'Indexer timeout',
+      ]) {
+        const { adapter, aborted } = vanilla(new Error(message))
+        await expect(send(adapter)).rejects.toThrow()
+        expect(aborted).toEqual([])
+      }
+    })
+  })
+
   it('returns a BTC address from getAddress when no assetId is given', async () => {
     const adapter = connected({ getAddress: () => 'bcrt1qbtc' })
     expect(await adapter.getReceiveAddress()).toMatchObject({ address: 'bcrt1qbtc', format: 'BTC_ADDRESS' })
