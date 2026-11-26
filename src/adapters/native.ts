@@ -1,6 +1,6 @@
 /**
  * Native adapters (SDK-backed) + their client managers — sub-path export
- * `@kaleidorg/wallet-engine/adapters/native`. These statically pull heavy SDKs, so
+ * `@kaleidoswap/wallet-engine/adapters/native`. These statically pull heavy SDKs, so
  * they are kept OUT of the main barrel.
  */
 export { SparkAdapter } from './SparkAdapter'

@@ -1,6 +1,6 @@
 /**
  * WDK-backed adapters + the registry factory + module loader seam. Sub-path export
- * `@kaleidorg/wallet-engine/adapters/wdk`. WDK modules are lazy-loaded, but these
+ * `@kaleidoswap/wallet-engine/adapters/wdk`. WDK modules are lazy-loaded, but these
  * adapters stay out of the main barrel so hosts supplying their own never reference
  * them.
  */

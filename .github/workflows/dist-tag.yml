@@ -1,6 +1,6 @@
 name: Set npm dist-tag
 
-# Moves an npm dist-tag for @kaleidorg/wallet-engine to an ALREADY-PUBLISHED
+# Moves an npm dist-tag for @kaleidoswap/wallet-engine to an ALREADY-PUBLISHED
 # version. Separate from publish.yml because it is not a publish: npm refuses to
 # republish an existing version, so `npm publish --tag` cannot move a tag after
 # the fact and the only route is `npm dist-tag add`.
@@ -50,11 +50,11 @@ jobs:
           VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          if ! npm view "@kaleidorg/wallet-engine@$VERSION" version >/dev/null 2>&1; then
-            echo "::error::@kaleidorg/wallet-engine@$VERSION is not published"
+          if ! npm view "@kaleidoswap/wallet-engine@$VERSION" version >/dev/null 2>&1; then
+            echo "::error::@kaleidoswap/wallet-engine@$VERSION is not published"
             exit 1
           fi
-          echo "Found @kaleidorg/wallet-engine@$VERSION"
+          echo "Found @kaleidoswap/wallet-engine@$VERSION"
 
       - name: Move the dist-tag
         env:
@@ -63,6 +63,6 @@ jobs:
           TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          echo "Before:"; npm view @kaleidorg/wallet-engine dist-tags --json
-          npm dist-tag add "@kaleidorg/wallet-engine@$VERSION" "$TAG"
-          echo "After:"; npm view @kaleidorg/wallet-engine dist-tags --json
+          echo "Before:"; npm view @kaleidoswap/wallet-engine dist-tags --json
+          npm dist-tag add "@kaleidoswap/wallet-engine@$VERSION" "$TAG"
+          echo "After:"; npm view @kaleidoswap/wallet-engine dist-tags --json

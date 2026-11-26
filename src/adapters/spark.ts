@@ -1,6 +1,6 @@
 /**
  * Spark-only native adapter entry — sub-path export
- * `@kaleidorg/wallet-engine/adapters/spark`. Pulls only `@buildonspark/spark-sdk`
+ * `@kaleidoswap/wallet-engine/adapters/spark`. Pulls only `@buildonspark/spark-sdk`
  * (+ `@scure/btc-signer` for PSBT signing). Flashnet/Orchestra is a separate slice.
  */
 export { SparkAdapter, isEmptyBalance, invalidateSparkBalanceCache } from "./SparkAdapter";

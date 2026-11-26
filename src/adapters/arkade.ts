@@ -1,6 +1,6 @@
 /**
  * Arkade-only native adapter entry — sub-path export
- * `@kaleidorg/wallet-engine/adapters/arkade`. Unlike `adapters/native` (which
+ * `@kaleidoswap/wallet-engine/adapters/arkade`. Unlike `adapters/native` (which
  * statically pulls Spark + RGB + kaleido SDKs), this pulls ONLY `@arkade-os/sdk`.
  * The platform-agnostic VTXO lifecycle helpers live in the SDK-free root barrel.
  */

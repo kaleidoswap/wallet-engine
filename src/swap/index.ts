@@ -1,5 +1,5 @@
 /**
- * Swap venues — sub-path export `@kaleidorg/wallet-engine/swap`. Both load their SDK
+ * Swap venues — sub-path export `@kaleidoswap/wallet-engine/swap`. Both load their SDK
  * through the WDK module loader, so they stay out of the adapter-free main barrel.
  *
  *  - `KaleidoswapSwap`  — RFQ rail (maker `/api/v1`, settled over RLN). Owns RGB.

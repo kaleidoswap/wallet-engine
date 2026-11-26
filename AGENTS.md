@@ -1,7 +1,7 @@
 # AGENTS.md
 
 Instructions for coding agents (Claude Code, Cursor, Codex, …) working in this
-repo or building on `@kaleidorg/wallet-engine`. Humans want
+repo or building on `@kaleidoswap/wallet-engine`. Humans want
 [CONTRIBUTING.md](CONTRIBUTING.md) and the [README](README.md).
 
 ## What this package is

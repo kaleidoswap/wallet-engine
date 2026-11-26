@@ -6,7 +6,7 @@ the smallest thing that satisfies the contract — copy it as the starting point
 for a new protocol.
 
 ```ts
-import { ProtocolManager } from '@kaleidorg/wallet-engine'
+import { ProtocolManager } from '@kaleidoswap/wallet-engine'
 import { MemoAdapter } from './MemoAdapter'
 
 const manager = new ProtocolManager({ defaultProtocol: 'BTC' })
