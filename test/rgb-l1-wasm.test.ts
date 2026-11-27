@@ -742,9 +742,9 @@ describe('RgbLibWasmAdapter', () => {
       return {
         calls,
         listAssets: () => ({ nia: [{ assetId: 'rgb:NIA', precision: 0 }], ifa: [] }),
-        listTransfers: (filter: { id: string } | 'noAsset') => {
-          calls.push(filter)
-          const assetId = filter === 'noAsset' ? null : filter.id
+        listTransfers: (filter: { Id: string } | 'None', scope: string) => {
+          calls.push(filter, scope)
+          const assetId = filter === 'None' ? null : filter.Id
           return db.filter((t) => t.assetId === assetId).map(({ assetId: _a, ...row }) => row)
         },
       }
@@ -762,14 +762,14 @@ describe('RgbLibWasmAdapter', () => {
       const rows: any = await connected(acc).listTransfers()
       expect(rows.map((t: any) => t.idx).sort()).toEqual([1, 2, 3])
       expect(rows.find((t: any) => t.idx === 1).assetId).toBe('rgb:NIA')
-      expect(acc.calls).toEqual([{ id: 'rgb:NIA' }, 'noAsset'])
+      expect(acc.calls).toEqual([{ Id: 'rgb:NIA' }, 'All', 'None', 'All'])
     })
 
     it('listTransfers({ asset_id }) stays a single filtered call', async () => {
       const acc = account()
       const rows: any = await connected(acc).listTransfers({ asset_id: 'rgb:NIA' })
       expect(rows.map((t: any) => t.idx)).toEqual([1, 2])
-      expect(acc.calls).toEqual([{ id: 'rgb:NIA' }])
+      expect(acc.calls).toEqual([{ Id: 'rgb:NIA' }, 'All'])
     })
   })
 

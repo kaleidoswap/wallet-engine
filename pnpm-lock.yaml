@@ -32,8 +32,8 @@ importers:
         specifier: ^2.2.0
         version: 2.4.1
       '@utexo/rgb-lib-wasm':
-        specifier: ^1.0.0-beta.4
-        version: 1.0.0-beta.4
+        specifier: ^1.0.0-beta.5
+        version: 1.0.0-beta.5
     devDependencies:
       '@arkade-os/sdk':
         specifier: 0.5.5
@@ -996,8 +996,8 @@ packages:
   '@ubjs/core@0.31.0-5':
     resolution: {integrity: sha512-oRBRtyYOhaodiOY3rLMZFgAHGFMmD44XefMpsAx4Ja0/rO+45kVdQB1VZsblQMLYxP965i3IHm56eymgo3I5eQ==}
 
-  '@utexo/rgb-lib-wasm@1.0.0-beta.4':
-    resolution: {integrity: sha512-5udvokpefyMHgyRVzpXXQD0wxQiU84LuF7Y+dhvR7GYS/Yyz+RiWoMuOQ4W+JduE6iv5oAfKFEA7OsdJrhI97A==}
+  '@utexo/rgb-lib-wasm@1.0.0-beta.5':
+    resolution: {integrity: sha512-nasKWHEpi/sfDKsl7StDw0Tatd7IjR6WRzcgRrdufbsX1uedAPm+8CiVk8Tjpw6mumlRXdWefpT6fekueQYSdg==}
 
   '@vitest/mocker@5.1.0':
     resolution: {integrity: sha512-5umB9/jlWcqVS6fsrFmv5Gdnpu6wAUio/lEOwAmvB7v+lFo/IW2B9FhAD0p19GCULTgMzLCdUmuCDCnAzWgppQ==}
@@ -3720,7 +3720,7 @@ snapshots:
 
   '@ubjs/core@0.31.0-5': {}
 
-  '@utexo/rgb-lib-wasm@1.0.0-beta.4': {}
+  '@utexo/rgb-lib-wasm@1.0.0-beta.5': {}
 
   '@vitest/mocker@5.1.0(vite@8.3.8(@types/node@26.4.0)(esbuild@0.28.2)(terser@5.51.2)(tsx@4.23.15)(yaml@2.9.1))':
     dependencies:

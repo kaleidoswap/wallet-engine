@@ -7,6 +7,34 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.94] - 2026-11-24
+
+### Added
+
+- RGB-L1: `IRgbPreviewOperations` (part of `IProtocolAdapter`). `previewSendAsset`,
+  `previewSendBtc` and `previewCreateRgbUtxos` run the begin call as a dry run and
+  return the exact fee, inputs and outputs; nothing is saved, reserved, signed or
+  broadcast. `inspectRgbPsbt` summarizes a PSBT with the wallet's own inputs and
+  outputs marked, and fails on a missing or invalid amount. `importRgbAsset`
+  imports an asset from a transfer consignment.
+- RGB-L1: `sendAsset`, `sendBtcOnchain`, `createRgbUtxos` and `refreshBalances`
+  accept an `AbortSignal` that stops the sync and the begin call. A broadcast
+  cannot be aborted.
+
+## [1.0.0-beta.93] - 2026-11-24
+
+### Changed
+
+- RGB-L1: the adapter targets `@utexo/rgb-lib-wasm` 1.0.0-beta.5 (peer range
+  `^1.0.0-beta.5`). Wallets and backups written by beta.4 do not open in
+  beta.5; the host resets the local store when `WasmWallet.create` fails with a
+  persistence error.
+
+### Fixed
+
+- Arkade: asset-carrying VTXOs are kept out of the BTC balance.
+- RGB-L1: the rgb-lib wallet is freed on disconnect.
+
 ## [1.0.0-beta.92] - 2026-11-20
 
 ### Security
