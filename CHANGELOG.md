@@ -7,6 +7,12 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- The optional `@utexo/rgb-lib-wasm` peer now requires `^1.0.0-beta.7`.
+  1.0.0-beta.6 is withdrawn upstream and no longer satisfies the range. The
+  adapter calls none of the APIs beta.7 removes.
+
 ## [1.0.0-beta.95] - 2026-11-27
 
 ### Added
