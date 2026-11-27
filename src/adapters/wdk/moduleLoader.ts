@@ -29,12 +29,16 @@ export function registerWdkModule(pkgName: string, loader: WdkModuleLoader): voi
 
 /**
  * Seal the registry so no later code can substitute a WDK module.
- * Call after the host's boot-time registrations; adapters refuse to
- * connect before it, so the load path a seed flows into is fixed
- * by the time any key material is passed to a module.
+ * Call after the host's boot-time registrations and before any wallet
+ * connects, so the load path a seed flows into is fixed by then.
  */
 export function sealWdkModuleRegistry(): void {
   sealed = true
+}
+
+/** True once `sealWdkModuleRegistry()` has run. */
+export function isWdkModuleRegistrySealed(): boolean {
+  return sealed
 }
 
 /** Testing only: unseal. Not exported through the package barrel. */

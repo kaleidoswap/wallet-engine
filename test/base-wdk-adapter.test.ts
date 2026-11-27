@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { registerWdkModule, sealWdkModuleRegistry, unsealWdkModuleRegistryForTests, loadWdkModule } from '../src/adapters/wdk/moduleLoader'
+import { registerWdkModule, sealWdkModuleRegistry, isWdkModuleRegistrySealed, unsealWdkModuleRegistryForTests, loadWdkModule } from '../src/adapters/wdk/moduleLoader'
 import { BaseWdkAdapter } from '../src/adapters/wdk/BaseWdkAdapter'
 import type { ProtocolType } from '../src/types/base'
 import { TOO_SHORT_MNEMONIC } from './fixtures/mnemonics'
@@ -85,9 +85,19 @@ describe('WDK module registry sealing', () => {
   it('refuses a registration after the registry is sealed', () => {
     unsealWdkModuleRegistryForTests()
     registerWdkModule('test-pkg', () => ({ version: '1' }))
+    expect(isWdkModuleRegistrySealed()).toBe(false)
     sealWdkModuleRegistry()
-    expect(() => registerWdkModule('malicious', () => ({}))).toThrow(/sealed/)
+    expect(isWdkModuleRegistrySealed()).toBe(true)
+    expect(() => registerWdkModule('late-pkg', () => ({}))).toThrow(/sealed/)
     unsealWdkModuleRegistryForTests()
+  })
+
+  it('is exported from every WDK subpath', async () => {
+    for (const path of ['../src/adapters/wdk/index', '../src/adapters/wdk/wasm-liquid', '../src/adapters/wdk/wasm-rgb']) {
+      const mod = await import(path)
+      expect(typeof mod.sealWdkModuleRegistry).toBe('function')
+      expect(typeof mod.isWdkModuleRegistrySealed).toBe('function')
+    }
   })
 
   it('a sealed registration still loads', async () => {

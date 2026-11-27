@@ -12,4 +12,10 @@ export {
   type LiquidSyncWarning,
   LIQUID_USDT_ASSET_ID,
 } from './LiquidWdkAdapter'
-export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './moduleLoader'
+export {
+  registerWdkModule,
+  hasWdkModule,
+  sealWdkModuleRegistry,
+  isWdkModuleRegistrySealed,
+  type WdkModuleLoader,
+} from './moduleLoader'

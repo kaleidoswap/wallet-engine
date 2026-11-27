@@ -6,4 +6,10 @@
  * resolving the heavy native deps the full `./adapters/wdk` barrel pulls in.
  */
 export { RgbLibWasmAdapter, type RgbLibWasmAdapterConfig } from './RgbLibWasmAdapter'
-export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './moduleLoader'
+export {
+  registerWdkModule,
+  hasWdkModule,
+  sealWdkModuleRegistry,
+  isWdkModuleRegistrySealed,
+  type WdkModuleLoader,
+} from './moduleLoader'
