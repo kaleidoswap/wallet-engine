@@ -570,7 +570,7 @@ describe('without a venue', () => {
 // --- adapters ---------------------------------------------------------------
 
 function wallet() {
-  return { getAddress: vi.fn(async () => 'tark1qreceiver'), sendBitcoin: vi.fn(async () => 'txid') }
+  return { getAddress: vi.fn(async () => 'tark1qreceiver'), send: vi.fn(async () => 'txid') }
 }
 
 function nativeAdapter(intents: ArkadeIntentsLightning) {

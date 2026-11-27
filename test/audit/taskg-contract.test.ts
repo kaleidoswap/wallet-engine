@@ -58,9 +58,9 @@ describe('G-F1: ArkadeWdkAdapter Ark-transfer send — confirmed with empty txid
   })
 
   it('contrast: the on-chain path in the SAME file does throw on empty hash', async () => {
-    // `sendBitcoin` resolving to an empty txid is the SDK-direct shape of the
+    // `send` resolving to an empty txid is the SDK-direct shape of the
     // same hazard: a send that reports success with nothing to reconcile.
-    const adapter = connected(new ArkadeWdkAdapter(), { sendBitcoin: async () => '' })
+    const adapter = connected(new ArkadeWdkAdapter(), { send: async () => '' })
     await expect(
       adapter.sendBtcOnchain({ address: 'bc1qexampleexampleexampleexampleexampleexample', amount: 9_000 }),
     ).rejects.toThrow(/did not return a transaction id/i)

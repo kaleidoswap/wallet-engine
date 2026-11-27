@@ -7,6 +7,21 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking:** `@arkade-os/sdk` moves to the 0.5 line (peer `^0.5.0`)
+  and `@kaleidorg/swap-sdk` to 0.15 (peer `^0.15.0`) — the two move
+  together because swap 0.0.x, which 0.14 pins, cannot run against
+  arkade 0.5. The adapter deltas: `sendBitcoin` is gone, so BTC sends
+  to an Arkade address go through `send` (`recipients`, with the
+  pre-selected BTC-only VTXOs as `selectedVtxos`), the coin filter is
+  `canSpendOffchain`, the wallet config takes the operator via
+  `service: { operatorUrl }` and the chain read via an explicit
+  `EsploraProvider`, and the delegator surface is renamed delegate
+  (`getDelegateManager`, `RestDelegateProvider`). The swap venue's
+  public surface is unchanged (swap-sdk#182), so the intents seam moves
+  on peer ranges alone.
+
 ## [1.0.0-beta.94] - 2026-11-24
 
 ### Added

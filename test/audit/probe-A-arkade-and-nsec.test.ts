@@ -36,7 +36,7 @@ vi.mock('@arkade-os/sdk', () => {
   class FakeRepo {
     constructor(_dbName: string) {}
   }
-  class FakeRestDelegatorProvider {
+  class FakeRestDelegateProvider {
     constructor(_url: string) {}
   }
   const Wallet = {
@@ -52,7 +52,8 @@ vi.mock('@arkade-os/sdk', () => {
     IndexedDBWalletRepository: FakeRepo,
     IndexedDBContractRepository: FakeRepo,
     VtxoManager: class {},
-    RestDelegatorProvider: FakeRestDelegatorProvider,
+    EsploraProvider: class {},
+    RestDelegateProvider: FakeRestDelegateProvider,
   }
 })
 

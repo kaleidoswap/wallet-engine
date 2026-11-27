@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { ArkadeWdkAdapter } from '../src/adapters/wdk/ArkadeWdkAdapter'
 
 /**
- * Connected adapter whose wallet.sendBitcoin returns the given txid.
+ * Connected adapter whose wallet.send returns the given txid.
  *
  * `txFeeRate: '1'` makes the estimate readable: the adapter charges the
  * operator's rate over an assumed 150 vB offchain and 165 vB onchain, the same
@@ -16,7 +16,7 @@ function adapterSending(txid: string) {
     connected: true,
     arkInfo: { fees: { txFeeRate: '1' } },
     wallet: {
-      sendBitcoin: async (args: any) => {
+      send: async (args: any) => {
         calls.push(args)
         return txid
       },

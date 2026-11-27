@@ -38,7 +38,8 @@ vi.mock('@arkade-os/sdk', () => {
     IndexedDBWalletRepository: class {},
     IndexedDBContractRepository: class {},
     VtxoManager: class {},
-    RestDelegatorProvider: class {},
+    EsploraProvider: class {},
+    RestDelegateProvider: class {},
   }
 })
 
@@ -207,7 +208,7 @@ function fakeArkWallet(marker: string) {
     marker,
     getVtxoManager: async () => ({ dispose: async () => {} }),
     getContractManager: async () => ({ refreshVtxos: async () => {} }),
-    sendBitcoin: vi.fn(async () => 'txid'),
+    send: vi.fn(async () => 'txid'),
   }
 }
 
@@ -235,7 +236,7 @@ describe('ArkadeAdapter is bound to the wallet its own connect() installed (find
     await expect(a.sendBtcOnchain({ address: 'tb1qfake', amount: 1 })).rejects.toMatchObject(SUPERSEDED)
     await expect(a.signMessage('hello')).rejects.toMatchObject(SUPERSEDED)
     await expect(a.getBtcBalance()).rejects.toMatchObject(SUPERSEDED)
-    expect(walletB.sendBitcoin).not.toHaveBeenCalled()
+    expect(walletB.send).not.toHaveBeenCalled()
 
     // Happy path for the owner, and a stale disconnect() leaves it alone.
     const sig = await b.signMessage('hello')

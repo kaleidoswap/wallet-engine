@@ -10,6 +10,7 @@
  */
 
 import type { VtxoManager, Wallet, ContractVtxo } from "@arkade-os/sdk";
+import { loadWdkModule } from "../adapters/wdk/moduleLoader";
 
 // ---------------------------------------------------------------------------
 // Settings — normalized shape + sanitizers + defaults
@@ -106,20 +107,32 @@ export interface ArkadeDelegateInfo {
   [key: string]: unknown;
 }
 
+const ARKADE_SDK = "@arkade-os/sdk";
+
+function loadArkadeSdk(): Promise<typeof import("@arkade-os/sdk")> {
+  return loadWdkModule(ARKADE_SDK, () => {
+    const specifier = ARKADE_SDK;
+    return import(/* @vite-ignore */ specifier);
+  });
+}
+
 /**
  * Delegate all currently-spendable (settled/preconfirmed) VTXOs to the configured
  * delegator. `{ delegated: 0, failed: 0 }` when unconfigured or nothing to do.
  */
 export async function delegateSpendableVtxos(wallet: Wallet): Promise<ArkadeDelegateResult> {
-  const delegatorManager = await wallet.getDelegatorManager();
+  const delegatorManager = await wallet.getDelegateManager();
   if (!delegatorManager) {
     return { delegated: 0, failed: 0 };
   }
 
   const vtxos = await wallet.getVtxos();
-  const spendable = vtxos.filter(
-    (v) => v.virtualStatus?.state === "settled" || v.virtualStatus?.state === "preconfirmed",
-  );
+  // 0.5 drops `virtualStatus.state`: canSpendOffchain is the sanctioned
+  // send/coin-selection test and excludes the spent/swept/exiting states.
+  // Loaded lazily so this module stays importable from the SDK-free root barrel.
+  const { canSpendOffchain } = await loadArkadeSdk();
+  const now = { timestamp: new Date() };
+  const spendable = vtxos.filter((v) => canSpendOffchain(v, now));
   if (spendable.length === 0) {
     return { delegated: 0, failed: 0 };
   }
@@ -137,7 +150,7 @@ export async function delegateSpendableVtxos(wallet: Wallet): Promise<ArkadeDele
  * `{ configured: false }` when delegation is not configured.
  */
 export async function getArkadeDelegateInfo(wallet: Wallet): Promise<ArkadeDelegateInfo> {
-  const delegatorManager = await wallet.getDelegatorManager();
+  const delegatorManager = await wallet.getDelegateManager();
   if (!delegatorManager) {
     return { configured: false };
   }
