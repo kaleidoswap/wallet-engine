@@ -19,4 +19,10 @@ export { RgbLibWdkAdapter, type RgbLibAdapterConfig } from './RgbLibWdkAdapter'
 export { RgbLibWasmAdapter, type RgbLibWasmAdapterConfig } from './RgbLibWasmAdapter'
 export { ArkadeWdkAdapter, type ArkadeAdapterConfig } from './ArkadeWdkAdapter'
 export { createWdkRegistry, type WdkRegistryOptions } from '../../registry/createWdkRegistry'
-export { registerWdkModule, hasWdkModule, type WdkModuleLoader } from './moduleLoader'
+export {
+  registerWdkModule,
+  hasWdkModule,
+  sealWdkModuleRegistry,
+  isWdkModuleRegistrySealed,
+  type WdkModuleLoader,
+} from './moduleLoader'

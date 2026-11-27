@@ -7,6 +7,15 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
 
 ## [Unreleased]
 
+## [1.0.0-beta.95] - 2026-11-27
+
+### Added
+
+- WDK: `sealWdkModuleRegistry()` and `isWdkModuleRegistrySealed()`, exported
+  from the WDK subpaths. After the host seals the registry,
+  `registerWdkModule` throws. Hosts should seal it once their boot-time
+  registrations are done and before any wallet connects.
+
 ### Changed
 
 - **Breaking:** `@arkade-os/sdk` moves to the 0.5 line (peer `^0.5.0`)
@@ -21,6 +30,16 @@ project adheres to [Semantic Versioning](https://semver.org/) (currently in a
   (`getDelegateManager`, `RestDelegateProvider`). The swap venue's
   public surface is unchanged (swap-sdk#182), so the intents seam moves
   on peer ranges alone.
+
+### Fixed
+
+- Spark: an on-chain withdrawal whose fee quote exceeds 10% of the amount
+  plus 5,000 sat is refused before the withdrawal is submitted.
+- Bark: `payLightning` checks the invoice's network and expiry, refuses
+  sub-satoshi amounts and a caller amount that differs from the invoice's
+  fixed amount, and reports the amount actually paid.
+- Arkade: the VTXO lifecycle helper loads `@arkade-os/sdk` lazily, so the
+  root barrel no longer imports it.
 
 ## [1.0.0-beta.94] - 2026-11-24
 
